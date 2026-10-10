@@ -1,0 +1,42 @@
+{
+	"version": 3,
+	"configurePresets": [
+		{
+			"name": "base",
+			"hidden": true,
+			"binaryDir": "${sourceDir}/build",
+			"cacheVariables": {
+				"CMAKE_TOOLCHAIN_FILE": {
+					"type": "STRING",
+					"value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+				},
+				"CMAKE_MSVC_RUNTIME_LIBRARY": {
+					"type": "STRING",
+					"value": "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+				},
+				"VCPKG_TARGET_TRIPLET": {
+					"type": "STRING",
+					"value": "x64-windows-static-md"
+				}
+			},
+			"errors": { "deprecated": true },
+			"warnings": { "deprecated": true, "dev": true }
+		},
+		{
+			"name": "skyrim",
+			"displayName": "Skyrim SE/AE",
+			"inherits": [ "base" ],
+			"binaryDir": "${sourceDir}/build/skyrim",
+			"generator": "Visual Studio 17 2022",
+			"toolset": "v143",
+			"architecture": { "strategy": "set", "value": "x64" },
+			"cacheVariables": {
+				"CMAKE_CXX_FLAGS": "/EHsc /MP"
+			}
+		}
+	],
+	"buildPresets": [
+		{ "name": "skyrim-release", "configurePreset": "skyrim", "configuration": "Release" },
+		{ "name": "skyrim-debug", "configurePreset": "skyrim", "configuration": "Debug" }
+	]
+}

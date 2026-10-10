@@ -1,0 +1,305 @@
+#pragma once
+
+#include <array>
+#include <cstdint>
+#include <string_view>
+
+// What the player asks of one follower. No game types here: the rules, the save
+// format and the tests all share these.
+
+namespace FWM
+{
+	enum class Role : std::uint8_t
+	{
+		kFighter,
+		kTank,
+		kHealer,
+		kBruiser,
+		kArcher,
+		kMage,
+		kCount
+	};
+
+	enum class Focus : std::uint8_t
+	{
+		kEngine,
+		kCasters,
+		kHealers,
+		kArchers,
+		kStrongest,
+		kWeakest,
+		kAttackingPlayer,
+		kAttackingParty,
+		kPlayerTarget,
+		kMarked,
+		kBackLine,  // casters, healers and archers: whoever fights from behind their line
+		kCount
+	};
+
+	enum class Position : std::uint8_t
+	{
+		kFormation,
+		kFree,
+		kGuard,
+		kHoldBack,
+		kFrontLine,
+		kWithMe,  // broken off: at your side, fighting only what reaches you
+		kCount
+	};
+
+	struct Orders
+	{
+		Role         role{ Role::kFighter };
+		Focus        focus{ Focus::kEngine };
+		Position     position{ Position::kFormation };
+		bool         autoAbility{ true };  // taunt or heal without being told
+		std::uint8_t healThreshold{ 55 };  // percent, for a healer
+
+		friend bool operator==(const Orders&, const Orders&) = default;
+	};
+
+	struct RoleInfo
+	{
+		std::string_view name;
+		std::string_view summary;
+		Focus            focus;
+		Position         position;
+		std::uint32_t    glyph;  // Font Awesome 6 solid
+	};
+
+	inline constexpr std::array<RoleInfo, static_cast<std::size_t>(Role::kCount)> roles{ {
+		{ "Fighter", "Balanced melee. Flanks and presses whoever the fight puts in front of them.", Focus::kEngine, Position::kFormation, 0xF6DE },
+		{ "Tank", "Holds the line. Blocks, bashes and taunts enemies off the rest of the party.", Focus::kAttackingParty, Position::kGuard, 0xF3ED },
+		{ "Healer", "Stays back and keeps everyone standing with healing magic.", Focus::kAttackingParty, Position::kHoldBack, 0xF4BE },
+		{ "Bruiser", "Heavy hitter. Power attacks and bashes to stagger the big ones.", Focus::kStrongest, Position::kFrontLine, 0xF0E3 },
+		{ "Archer", "Keeps range and picks off casters and other archers first.", Focus::kBackLine, Position::kHoldBack, 0xF05B },
+		{ "Mage", "Spell pressure from range. Finishes off whoever is weakest.", Focus::kWeakest, Position::kHoldBack, 0xE2CA },
+	} };
+
+	struct ChoiceInfo
+	{
+		std::string_view name;
+		std::string_view summary;
+		std::uint32_t    glyph;
+	};
+
+	inline constexpr std::array<ChoiceInfo, static_cast<std::size_t>(Focus::kCount)> focuses{ {
+		{ "Their choice", "Whoever the combat AI would pick anyway.", 0xF074 },
+		{ "Casters", "Enemies with offensive spells or a staff.", 0xE2CA },
+		{ "Healers", "Enemies who can heal their allies.", 0xF21E },
+		{ "Archers", "Enemies with a bow or crossbow out.", 0xF05B },
+		{ "Strongest", "The most dangerous enemy: level, health, armor and weapon.", 0xF521 },
+		{ "Weakest", "Whoever has the least health left. Finish them.", 0xF54C },
+		{ "Attacking you", "Whoever is fighting you.", 0xF007 },
+		{ "Attacking the party", "Whoever is fighting you or another companion.", 0xF0C0 },
+		{ "Your target", "The enemy you are fighting or aiming at.", 0xF140 },
+		{ "Marked enemy", "One enemy you mark on the battlefield.", 0xF024 },
+		{ "Casters and archers", "Enemies who fight from behind their line: spells, a staff, healing or a bow.", 0xF0D0 },
+	} };
+
+	inline constexpr std::array<ChoiceInfo, static_cast<std::size_t>(Position::kCount)> positions{ {
+		{ "Formation", "Take the position from Walk With Me's formation.", 0xF0C0 },
+		{ "Free", "Go wherever the fight takes them.", 0xF0B2 },
+		{ "Guard you", "Only fight enemies near you or attacking you.", 0xF505 },
+		{ "Hold back", "Stay behind and fight only what comes close.", 0xF2EA },
+		{ "Front line", "Meet the enemies furthest forward first.", 0xF124 },
+		{ "With me", "Stay at your side, weapons out, and fight there: whatever comes near you, and whoever is on them.", 0xF076 },
+	} };
+
+	[[nodiscard]] constexpr const RoleInfo& Info(Role a_role) { return roles[static_cast<std::size_t>(a_role)]; }
+	[[nodiscard]] constexpr const ChoiceInfo& Info(Focus a_focus) { return focuses[static_cast<std::size_t>(a_focus)]; }
+	[[nodiscard]] constexpr const ChoiceInfo& Info(Position a_position) { return positions[static_cast<std::size_t>(a_position)]; }
+
+	// Picking a role resets focus and position to what the role is for; the player
+	// can override either afterwards.
+	[[nodiscard]] constexpr Orders ForRole(Role a_role, Orders a_keep = {})
+	{
+		Orders orders = a_keep;
+		orders.role = a_role;
+		orders.focus = Info(a_role).focus;
+		orders.position = Info(a_role).position;
+		return orders;
+	}
+
+	// A new role brings its suggested focus and position, but never over a choice
+	// the player made: only values still at the old role's suggestion move.
+	[[nodiscard]] constexpr Orders Retask(Orders a_orders, Role a_role)
+	{
+		const auto& before = Info(a_orders.role);
+		const auto& after = Info(a_role);
+		if (a_orders.focus == before.focus) {
+			a_orders.focus = after.focus;
+		}
+		if (a_orders.position == before.position) {
+			a_orders.position = after.position;
+		}
+		a_orders.role = a_role;
+		return a_orders;
+	}
+
+	// Focus and position both where the role suggests.
+	[[nodiscard]] constexpr bool AsSuggested(const Orders& a_orders)
+	{
+		return a_orders.focus == Info(a_orders.role).focus && a_orders.position == Info(a_orders.role).position;
+	}
+
+	// Orders for the whole party. Each one replaces every companion's own orders, so they
+	// are for the moments that call for it; "As you were" puts everyone back to their role.
+	enum class Shout : std::uint8_t
+	{
+		kNone,  // as you were
+		kAttack,
+		kToMe,
+		kHoldBack,
+		kCount
+	};
+
+	struct ShoutInfo
+	{
+		std::string_view name;
+		std::string_view summary;
+	};
+
+	inline constexpr std::array<ShoutInfo, static_cast<std::size_t>(Shout::kCount)> shouts{ {
+		{ "As you were", "Everyone back to what their role suggests." },
+		{ "Attack!", "Everyone goes all out for your target." },
+		{ "To me!", "Everyone comes back to your side and fights there." },
+		{ "Hold back", "Everyone stays back and meets only what comes for the party." },
+	} };
+
+	[[nodiscard]] constexpr const ShoutInfo& Info(Shout a_shout) { return shouts[static_cast<std::size_t>(a_shout)]; }
+
+	[[nodiscard]] constexpr Orders Shouted(Orders a_orders, Shout a_shout)
+	{
+		switch (a_shout) {
+		case Shout::kAttack:
+			a_orders.position = Position::kFree;
+			a_orders.focus = Focus::kPlayerTarget;
+			break;
+		case Shout::kToMe:
+			a_orders.position = Position::kWithMe;
+			a_orders.focus = a_orders.role == Role::kHealer ? Focus::kAttackingParty : Focus::kAttackingPlayer;
+			break;
+		case Shout::kHoldBack:
+			a_orders.position = Position::kHoldBack;
+			a_orders.focus = Focus::kAttackingParty;
+			break;
+		default:
+			a_orders.focus = Info(a_orders.role).focus;
+			a_orders.position = Info(a_orders.role).position;
+			break;
+		}
+		return a_orders;
+	}
+
+	// What a companion can actually fight with: equipped or carried weapons, and the
+	// spells they know. A role needs the means to play it.
+	struct Arsenal
+	{
+		bool melee{ false };   // a sword, axe, mace, dagger or two-hander
+		bool ranged{ false };  // a bow or crossbow
+		bool casts{ false };   // offensive spells or a staff
+		bool heals{ false };   // a spell that heals someone else
+		bool ammo{ true };     // arrows or bolts for the bow or crossbow they carry
+
+		friend bool operator==(const Arsenal&, const Arsenal&) = default;
+	};
+
+	enum class Lack : std::uint8_t
+	{
+		kNothing,
+		kWeapon,
+		kBow,
+		kSpells,
+		kHeal
+	};
+
+	// What stops a companion taking a role, if anything. Someone with no weapon and no
+	// magic at all can still brawl as a Fighter. a_lendHeal: the borrowed heal is on.
+	[[nodiscard]] constexpr Lack LackFor(Role a_role, const Arsenal& a_arsenal, bool a_lendHeal)
+	{
+		const bool empty = !a_arsenal.melee && !a_arsenal.ranged && !a_arsenal.casts && !a_arsenal.heals;
+		switch (a_role) {
+		case Role::kFighter:
+			return a_arsenal.melee || empty ? Lack::kNothing : Lack::kWeapon;
+		case Role::kTank:
+		case Role::kBruiser:
+			return a_arsenal.melee ? Lack::kNothing : Lack::kWeapon;
+		case Role::kArcher:
+			return a_arsenal.ranged ? Lack::kNothing : Lack::kBow;
+		case Role::kMage:
+			return a_arsenal.casts ? Lack::kNothing : Lack::kSpells;
+		case Role::kHealer:
+			return a_arsenal.heals || a_lendHeal ? Lack::kNothing : Lack::kHeal;
+		default:
+			return Lack::kNothing;
+		}
+	}
+
+	[[nodiscard]] constexpr std::string_view Why(Lack a_lack)
+	{
+		switch (a_lack) {
+		case Lack::kWeapon:
+			return "Carries no melee weapon.";
+		case Lack::kBow:
+			return "Carries no bow or crossbow.";
+		case Lack::kSpells:
+			return "Knows no attack spell and carries no staff.";
+		case Lack::kHeal:
+			return "Knows no spell that heals others.";
+		default:
+			return "";
+		}
+	}
+
+	// The preferred role if it can be played, otherwise the closest one that can.
+	[[nodiscard]] constexpr Role Playable(Role a_preferred, const Arsenal& a_arsenal, bool a_lendHeal)
+	{
+		if (LackFor(a_preferred, a_arsenal, a_lendHeal) == Lack::kNothing) {
+			return a_preferred;
+		}
+		if (a_arsenal.melee) {
+			return Role::kFighter;
+		}
+		if (a_arsenal.ranged) {
+			return Role::kArcher;
+		}
+		if (a_arsenal.casts) {
+			return Role::kMage;
+		}
+		if (a_arsenal.heals || a_lendHeal) {
+			return Role::kHealer;
+		}
+		return Role::kFighter;
+	}
+
+	// Walk With Me formation modes, as WayfarerAPI numbers them.
+	enum class Formation : std::int32_t
+	{
+		kUnknown = -1,
+		kNatural = 0,
+		kLead = 1,
+		kCompanion = 2,
+		kRear = 3,
+		kRelax = 4,
+		kVanilla = 5,
+		kCustom = 6
+	};
+
+	[[nodiscard]] constexpr Position Resolve(Position a_position, Formation a_formation)
+	{
+		if (a_position != Position::kFormation) {
+			return a_position;
+		}
+		switch (a_formation) {
+		case Formation::kLead:
+			return Position::kFrontLine;
+		case Formation::kCompanion:
+			return Position::kGuard;
+		case Formation::kRear:
+			return Position::kHoldBack;
+		default:
+			return Position::kFree;
+		}
+	}
+}

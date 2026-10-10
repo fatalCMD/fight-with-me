@@ -1,0 +1,12 @@
+{
+    "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg/master/scripts/vcpkg.schema.json",
+    "name": "fightwithme",
+    "version-string": "0.1.0",
+    "description": "Fight With Me - battle orders for followers.",
+    "license": "GPL-3.0-or-later",
+    "dependencies": [
+        "directxtk",
+        "rapidcsv",
+        "spdlog"
+    ]
+}

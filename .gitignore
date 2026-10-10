@@ -1,0 +1,22 @@
+build/
+package/
+backups/
+out/
+.vs/
+*.user
+CMakeSettings.json
+CMakeUserPresets.json
+*.log
+
+# Notes, drafts and assistant context stay local. The README and the notices are the
+# only documents that belong to the source.
+*.md
+!README.md
+!THIRD-PARTY-NOTICES.md
+!LICENSE.md
+docs/
+.claude/
+
+# Personal tooling: deployment into a local mod manager, and the offline menu preview.
+tools/Deploy.ps1
+tools/preview/
