@@ -63,6 +63,7 @@ namespace FWM::Menu
 
 		constexpr std::uint32_t kPadUp = 0x1, kPadDown = 0x2, kPadLeft = 0x4, kPadRight = 0x8;
 		constexpr std::uint32_t kPadLB = 0x100, kPadRB = 0x200, kPadA = 0x1000, kPadB = 0x2000, kPadX = 0x4000, kPadY = 0x8000;
+		constexpr std::uint32_t kPadLT = 0x9, kPadRT = 0xA;
 		constexpr std::uint32_t kEscape = 0x01;
 
 		MF::Model::WindowInterface*            plan{ nullptr };
@@ -73,6 +74,10 @@ namespace FWM::Menu
 		std::atomic<bool> padA{ false }, padB{ false }, padX{ false }, padY{ false };
 		std::atomic<bool> padUsed{ false };
 		std::uint32_t     padHeld{ 0 };
+		std::atomic<float> stickX{ 0.0f }, stickY{ 0.0f };      // the right stick, as last reported
+		std::atomic<float> leftX{ 0.0f }, leftY{ 0.0f };        // the left stick: free move overhead
+		std::atomic<float> triggerL{ 0.0f }, triggerR{ 0.0f };
+		std::atomic<bool>  overheadToggle{ false };
 		std::atomic<bool> closeRequested{ false };
 		std::atomic<bool> justOpened{ false };
 
@@ -550,6 +555,21 @@ namespace FWM::Menu
 			float      enemyMenuT{ 0.0f };
 			float      enemyMenuOpenedAt{ 0.0f };
 			V          enemyMin, enemyMax;
+
+			bool  overhead{ false };   // the whole fight from above; kept between openings
+			float panDragged{ 0.0f };  // pixels the middle button has dragged since it went down
+
+			// Orders to go after an enemy, and companions taking them up, for the lock-on that
+			// answers each one.
+			struct Beat
+			{
+				RE::FormID enemy{ 0 };
+				RE::FormID member{ 0 };
+				float      at{ 0.0f };
+			};
+			std::vector<Beat>                          sent;
+			std::vector<Beat>                          engaged;
+			std::unordered_map<RE::FormID, RE::FormID> wasOn;  // companion -> the mark they were fighting last frame
 		};
 
 		State state;
@@ -629,6 +649,16 @@ namespace FWM::Menu
 			command.member = a_member;
 			command.enemy = a_enemy;
 			Battle::Queue(command);
+		}
+
+		// Sends a companion after an enemy (0 calls them off), and starts the lock-on that
+		// shows the order was heard.
+		void SendAfter(RE::FormID a_member, RE::FormID a_enemy)
+		{
+			Simple(Battle::Command::Type::kMark, a_member, a_enemy);
+			if (a_enemy) {
+				state.sent.push_back({ a_enemy, a_member, state.clock });
+			}
 		}
 
 		void Preset(Battle::Preset a_preset)
@@ -759,6 +789,15 @@ namespace FWM::Menu
 				} else {
 					Draw::AddLine(a_draw, a, b, Alpha(kTextDim, alpha * 0.28f), 1.2f * a_s);
 				}
+			}
+			// Sent after someone and not on them yet: a bright line from them to the mark.
+			for (const auto& member : a_view.party) {
+				const auto* mark = member.marked ? findEnemy(member.marked) : nullptr;
+				if (!mark || member.target == member.marked || !member.head.on || !mark->head.on) {
+					continue;
+				}
+				Marching(a_draw, ScreenOf(member.head, a_display), ScreenOf(mark->head, a_display), Alpha(kText, alpha * 0.85f), 1.6f * a_s, 5.0f * a_s,
+					6.0f * a_s, state.clock * 60.0f * a_s);
 			}
 			for (const auto& enemy : a_view.enemies) {
 				const auto* tank = enemy.heldBy ? findMember(enemy.heldBy) : nullptr;
@@ -989,6 +1028,29 @@ namespace FWM::Menu
 				return out;
 			}
 			return std::format("Key {}", a_key);
+		}
+
+		// Shift, Ctrl or Alt, either side.
+		const char* ModifierName(std::uint32_t a_modifier)
+		{
+			switch (ModifierOf(a_modifier)) {
+			case kShift:
+				return "Shift";
+			case kCtrl:
+				return "Ctrl";
+			case kAlt:
+				return "Alt";
+			default:
+				return "None";
+			}
+		}
+
+		std::string HotkeyName(const Hotkey& a_hotkey)
+		{
+			if (a_hotkey.key == 0 || a_hotkey.modifier == 0) {
+				return KeyName(a_hotkey.key);
+			}
+			return std::format("{} + {}", ModifierName(a_hotkey.modifier), KeyName(a_hotkey.key));
 		}
 
 		struct Input
@@ -1348,141 +1410,322 @@ namespace FWM::Menu
 				y = r.max.y + gap;
 			}
 
-			// --- The ability: one clear action and a switch ---
-			const bool tank = orders.role == Role::kTank;
-			const bool healer = orders.role == Role::kHealer;
-			if (tank || healer) {
+			// --- Abilities: round badges, each with its cooldown sweeping round inside ---
+			// Tanks and healers have their taunt or heal; every role its special; everyone potions.
+			const bool    tank = orders.role == Role::kTank;
+			const bool    healer = orders.role == Role::kHealer;
+			const bool    primary = tank || healer;
+			const Special special = SpecialOf(orders.role);
+			{
 				const float alpha = alphaOf(2);
 				const Rect  r = Panel(a_draw, origin(2), a_width, pad, enter(2), [&](V p, float inner) {
-                    float     yy = p.y;
-                    const int focusItem = nav && state.section == kAbilitySection ? state.item : -1;
-                    SectionLabel(a_draw, { p.x, yy }, a_s, alpha, tank ? "TAUNT" : "HEAL", focusItem >= 0);
-                    yy += 24.0f * a_s;
+					float     yy = p.y;
+					const int focusItem = nav && state.section == kAbilitySection ? state.item : -1;
+					int       next = 0;
+					const int primaryBadge = primary ? next++ : -1;
+					const int primaryAuto = primary ? next++ : -1;
+					const int specialBadge = special != Special::kNone ? next++ : -1;
+					const int specialAuto = special != Special::kNone ? next++ : -1;
+					const int potionBadge = next++;
+					const int slider = healer ? next++ : -1;
+					SectionLabel(a_draw, { p.x, yy }, a_s, alpha, "ABILITIES", focusItem >= 0);
+					yy += 30.0f * a_s;
 
-                    const float cooldown = tank ? a_member.tauntCooldown : a_view.tuning.healCooldown;
-                    const float ready = tank ? a_member.tauntReady : a_member.healReady;
-                    const float charge = cooldown > 0.0f && ready > 0.0f ? 1.0f - ready / cooldown : 1.0f;
-                    const bool  usable = a_member.inCombat && (tank || a_member.canHeal);
-                    const float h = 50.0f * a_s;
-                    const float bw = inner * 0.58f;
-                    const V     bmin{ p.x, yy }, bmax{ p.x + bw, yy + h };
-                    bool        hovered = false;
-                    const bool  clicked = Hit("abilityNow", bmin, { bw, h }, hovered) && live && usable;
-                    const float hover = state.tw.Toward("abilityHover", 0, hovered ? 1.0f : 0.0f, 16.0f);
-                    float&      press = state.tw.Raw("abilityPress", 0, 0.0f);
-                    if (hovered) {
-                        Hovering(0x400);
-                        std::string stats;
-                        if (tank) {
-                            stats = std::format("Holds level {} and below\n{:.0f} reach  ·  {:.0f} s  ·  {:.0f} stamina", a_member.tauntCertain, a_member.tauntRadius,
-                                a_member.tauntHold, a_member.tauntStamina);
-                        } else if (a_member.canHeal) {
-                            stats = std::format("{}{}\nAbout {:.0f} health for {:.0f} magicka", a_member.healSpell, a_member.healBorrowed ? " (borrowed)" : "",
-                                a_member.healAmount, a_member.healCost);
-                        } else {
-                            stats = "Knows no heal for others; they will fight instead.";
-                        }
-                        Tip(std::move(stats));
-                    }
-                    if (clicked || (focusItem == 0 && a_input.activate && usable) || (a_input.now && usable)) {
-                        press = 1.0f;
-                        Simple(tank ? Battle::Command::Type::kTauntNow : Battle::Command::Type::kHealNow, a_member.id);
-                        Sound("UIMenuOK");
-                    }
-                    press = Follow(press, 0.0f, state.tw.dt, 5.0f);
-                    const float shown = state.tw.Toward("abilityCharge", a_member.id, charge, 8.0f);
-                    Draw::AddRectFilled(a_draw, bmin, bmax, Alpha(Mix(kTile, kTileHover, hover), alpha), 0.0f, 0);
-                    if (shown < 0.999f) {
-                        Draw::AddRectFilledMultiColor(a_draw, bmin, { bmin.x + bw * shown, bmax.y }, Alpha(kAccent, alpha * 0.25f), Alpha(kAccent, alpha * 0.55f),
-                            Alpha(kAccent, alpha * 0.55f), Alpha(kAccent, alpha * 0.25f));
-                    } else if (usable) {
-                        const float glow = 0.5f + 0.5f * std::sin(state.clock * 3.0f);
-                        Highlight(a_draw, bmin, bmax, alpha * (0.55f + 0.2f * glow + 0.25f * press));
-                    }
-                    Draw::AddRect(a_draw, bmin, bmax, Alpha(usable && shown >= 0.999f ? kEdge : kGlassEdge, alpha), 0.0f, 0, 1.0f);
-                    if (focusItem == 0) {
-                        FocusOutline(a_draw, bmin, bmax, 0.0f, alpha);
-                    }
-                    std::string label;
-                    if (!a_member.inCombat) {
-                        label = tank ? "Taunt in battle" : "Heal in battle";
-                    } else if (!usable) {
-                        label = "No heal known";
-                    } else if (charge < 1.0f) {
-                        label = std::format("Ready in {:.0f} s", std::ceil(ready));
-                    } else {
-                        label = tank ? "Taunt now" : "Heal now";
-                    }
-                    label = Upper(label);
-                    const float ls = 16.0f * a_s;
-                    const float lw = TextSize(ls, label).x + 30.0f * a_s;
-                    const float lx = bmin.x + (bw - lw) * 0.5f;
-                    Glyph(a_draw, { lx + 10.0f * a_s, bmin.y + h * 0.5f }, (18.0f + 4.0f * press) * a_s, tank ? 0xF0A1 : 0xF4BE, Alpha(kText, alpha * (usable ? 1.0f : 0.4f)));
-                    Text(a_draw, { lx + 30.0f * a_s, bmin.y + (h - TextSize(ls, label).y) * 0.5f }, Alpha(kText, alpha * (usable ? 1.0f : 0.5f)), ls, label);
+					const int   count = (primary ? 1 : 0) + (special != Special::kNone ? 1 : 0) + 1;
+					const float slot = inner / static_cast<float>(count);
+					const float radius = std::min(30.0f * a_s, slot * 0.3f);
+					const V     top{ p.x, yy };
+					int         placed = 0;
 
-                    // The switch beside it: the knob slides.
-                    {
-                        const float       sw = 40.0f * a_s, sh = 22.0f * a_s;
-                        const std::string caption = "On their own";
-                        const V           smin{ bmax.x + 18.0f * a_s, yy + (h - sh) * 0.5f };
-                        bool              over = false;
-                        const bool        flipped = Hit("auto", smin, { p.x + inner - smin.x, sh }, over) && live;
-                        if (over) {
-                            Hovering(0x401);
-                            Tip(tank ? "On: they taunt by themselves when it is ready and worth it.\nOff: only when you press Taunt now."s :
-                                       "On: they heal by themselves when someone drops below the line.\nOff: only when you press Heal now."s);
-                        }
-                        if (flipped || (focusItem == 1 && a_input.activate) || a_input.flipAuto) {
-                            orders.autoAbility = !orders.autoAbility;
-                            changed = true;
-                            Sound("UIMenuOK");
-                        }
-                        const float k = state.tw.Toward("autoKnob", a_member.id, orders.autoAbility ? 1.0f : 0.0f, 14.0f);
-                        Draw::AddRectFilled(a_draw, smin, { smin.x + sw, smin.y + sh }, Alpha(Mix(IM_COL32(255, 255, 255, 16), kAccent, k), alpha), 0.0f, 0);
-                        Draw::AddRect(a_draw, smin, { smin.x + sw, smin.y + sh }, Alpha(Mix(kGlassEdge, kEdge, k), alpha), 0.0f, 0, 1.0f);
-                        const float knob = sh - 8.0f * a_s;
-                        const V     kmin{ smin.x + 4.0f * a_s + (sw - sh) * k, smin.y + 4.0f * a_s };
-                        Draw::AddRectFilled(a_draw, kmin, { kmin.x + knob, kmin.y + knob }, Alpha(Mix(kTextDim, kText, k), alpha), 0.0f, 0);
-                        if (focusItem == 1) {
-                            FocusOutline(a_draw, smin, { smin.x + sw, smin.y + sh }, 0.0f, alpha);
-                        }
-                        Text(a_draw, { smin.x + sw + 10.0f * a_s, smin.y + (sh - TextSize(15.0f * a_s, caption).y) * 0.5f },
-                            Alpha(Mix(kTextDim, kText, over ? 1.0f : 0.0f), alpha), 15.0f * a_s, caption);
-                    }
-                    yy += h;
+					// A badge: the icon in a ringed disc. Cooling down, a dark wedge covers what is
+					// left of the wait and shrinks clockwise from noon, with a bright hand at its edge,
+					// the ring filling behind it and the seconds in the middle. Ready, it lights and
+					// breathes. Under it, the name and its AUTO switch.
+					struct Badge
+					{
+						int           index{ 0 };
+						std::uint32_t glyph{ 0 };
+						std::string   name;
+						float         ready{ 0.0f };
+						float         cooldown{ 0.0f };
+						bool          usable{ false };    // lit and bright: it can be used now
+						bool          clickable{ true };  // pressing it does something (a switch always does)
+						bool          glow{ true };       // an action that breathes when ready; potions do not
+						bool*         autoOn{ nullptr };
+						int           badgeItem{ -1 };
+						int           autoItem{ -1 };
+						std::string   tip;
+						std::string   autoTip;
+						bool          padNow{ false };
+						bool          padFlip{ false };
+						std::function<void()> use;
+						int           bubble{ -1 };     // a count in the corner, or none
+						bool          spinning{ false };  // an arc going round: something under way
+					};
+					auto badge = [&](Badge a_badge) {
+						const V     c{ top.x + slot * (static_cast<float>(placed) + 0.5f), top.y + radius + 4.0f * a_s };
+						const float id = static_cast<float>(a_badge.index);
+						++placed;
+						const float charge = a_badge.cooldown > 0.0f && a_badge.ready > 0.0f ? Clamp01(1.0f - a_badge.ready / a_badge.cooldown) : 1.0f;
+						const bool  cooling = charge < 1.0f && a_member.inCombat;
+						const bool  lit = a_badge.glow && a_badge.usable && !cooling;
 
-                    // The healer's line: a slider in steps of five.
-                    if (healer) {
-                        yy += 22.0f * a_s;
-                        int         threshold = orders.healThreshold;
-                        const float labelW = 150.0f * a_s;
-                        Text(a_draw, { p.x, yy - 9.0f * a_s }, Alpha(orders.autoAbility ? kTextDim : kTextFaint, alpha), 15.0f * a_s, std::format("Heal below {}%", threshold));
-                        const float tw = inner - labelW, th = 4.0f * a_s;
-                        const V     tmin{ p.x + labelW, yy };
-                        Im::SetCursorScreenPos({ tmin.x - 8.0f * a_s, tmin.y - 12.0f * a_s });
-                        Im::InvisibleButton("threshold", { tw + 16.0f * a_s, 26.0f * a_s });
-                        const bool dragging = Im::IsItemActive() && live;
-                        if (dragging) {
-                            const float t = Clamp01((Im::GetIO()->MousePos.x - tmin.x) / tw);
-                            threshold = 20 + static_cast<int>(std::round(t * 70.0f / 5.0f)) * 5;
-                        }
-                        if (focusItem >= 2 && a_input.dx) {
-                            threshold = std::clamp(threshold + (a_input.dx > 0 ? 5 : -5), 20, 90);
-                        }
-                        const float t = state.tw.Toward("threshold", a_member.id, (static_cast<float>(threshold) - 20.0f) / 70.0f, 18.0f);
-                        Draw::AddRectFilled(a_draw, { tmin.x, tmin.y + th * 0.5f - 0.5f }, { tmin.x + tw, tmin.y + th * 0.5f + 0.5f }, Alpha(kGlassEdge, alpha * 1.4f), 0.0f, 0);
-                        Draw::AddRectFilled(a_draw, { tmin.x, tmin.y + th * 0.25f }, { tmin.x + tw * t, tmin.y + th * 0.75f }, Alpha(kEdge, alpha), 0.0f, 0);
-                        Diamond(a_draw, { tmin.x + tw * t, tmin.y + th * 0.5f }, (8.0f + (dragging ? 2.0f : 0.0f)) * a_s, Alpha(kText, alpha), Alpha(kShade, alpha * 0.5f), 1.0f);
-                        if (focusItem >= 2) {
-                            FocusOutline(a_draw, { tmin.x - 6, tmin.y - 8 }, { tmin.x + tw + 6, tmin.y + th + 8 }, 6.0f, alpha);
-                        }
-                        if (threshold != orders.healThreshold) {
-                            orders.healThreshold = static_cast<std::uint8_t>(threshold);
-                            changed = true;
-                        }
-                        yy += 12.0f * a_s;
-                    }
-                    return yy - p.y;
+						bool hovered = false;
+						Im::PushID(a_badge.index);
+						const bool clicked = Hit("badge", { c.x - radius, c.y - radius }, { radius * 2.0f, radius * 2.0f }, hovered) && live;
+						Im::PopID();
+						const float hover = state.tw.Toward("badgeHover", static_cast<std::uint64_t>(a_badge.index), hovered ? 1.0f : 0.0f, 16.0f);
+						float&      press = state.tw.Raw("badgePress", static_cast<std::uint64_t>(a_badge.index), 0.0f);
+						if (hovered) {
+							Hovering(0x400 + static_cast<std::uint64_t>(a_badge.index) * 2);
+							Tip(a_badge.tip);
+						}
+						if ((clicked || (focusItem == a_badge.badgeItem && a_input.activate) || a_badge.padNow) && a_badge.use) {
+							if (a_badge.clickable) {
+								press = 1.0f;
+								a_badge.use();
+								Sound("UIMenuOK");
+							} else {
+								Sound("UIMenuCancel");
+							}
+						}
+						press = Follow(press, 0.0f, state.tw.dt, 6.0f);
+						const float rr = radius * (1.0f + 0.06f * press + 0.03f * hover);
+
+						// The glow behind a ready badge.
+						const float breathe = 0.5f + 0.5f * std::sin(state.clock * 2.6f + id);
+						if (lit) {
+							Halo(a_draw, c, rr * 1.9f, kAccent, alpha * (0.45f + 0.25f * breathe + 0.4f * press));
+						}
+						// Disc and frame: a dark plate, an oxblood well when ready, a metal ring, a hairline outside.
+						Draw::AddCircleFilled(a_draw, c, rr, Alpha(IM_COL32(16, 16, 18, 245), alpha), 48);
+						if (lit) {
+							Draw::AddCircleFilled(a_draw, c, rr * 0.92f, Alpha(kAccent, alpha * (0.55f + 0.2f * breathe)), 48);
+						}
+						Draw::AddCircle(a_draw, c, rr, Alpha(Mix(kTextDim, kText, std::max(hover, lit ? 0.6f : 0.0f)), alpha * (a_badge.usable ? 0.9f : 0.4f)), 48,
+							2.0f * a_s);
+						Draw::AddCircle(a_draw, c, rr + 5.0f * a_s, Alpha(kGlassEdge, alpha), 48, 1.0f);
+						for (int k = 0; k < 4; ++k) {  // studs at the quarters, as on the panels
+							const float a = 1.5707963f * static_cast<float>(k) - 1.5707963f;
+							Stud(a_draw, { c.x + std::cos(a) * (rr + 5.0f * a_s), c.y + std::sin(a) * (rr + 5.0f * a_s) }, 2.4f * a_s, alpha);
+						}
+						Glyph(a_draw, c, (22.0f + 3.0f * press) * a_s, a_badge.glyph,
+							Alpha(a_badge.usable ? kText : kTextDim, alpha * (a_badge.usable ? (cooling ? 0.3f : 1.0f) : 0.45f)));
+
+						// The cooldown: the wait still to come, as a wedge from the hand round to noon.
+						if (cooling) {
+							constexpr float kNoon = -1.5707963f;
+							const float     from = kNoon + 6.2831853f * charge, to = kNoon + 6.2831853f;
+							const int       steps = std::max(2, static_cast<int>(64.0f * (1.0f - charge)));
+							V               last{ c.x + std::cos(from) * rr * 0.97f, c.y + std::sin(from) * rr * 0.97f };
+							for (int k = 1; k <= steps; ++k) {
+								const float a = from + (to - from) * static_cast<float>(k) / static_cast<float>(steps);
+								const V     pt{ c.x + std::cos(a) * rr * 0.97f, c.y + std::sin(a) * rr * 0.97f };
+								Draw::AddTriangleFilled(a_draw, c, last, pt, Alpha(kShade, alpha * 0.62f));
+								last = pt;
+							}
+							// The ring fills behind the hand.
+							Draw::PathClear(a_draw);
+							Draw::PathArcTo(a_draw, c, rr, kNoon, from, std::max(4, static_cast<int>(48.0f * charge)));
+							Draw::PathStroke(a_draw, Alpha(kEdge, alpha), 0, 3.0f * a_s);
+							Draw::AddLine(a_draw, c, { c.x + std::cos(from) * rr, c.y + std::sin(from) * rr }, Alpha(kEdge, alpha * 0.9f), 1.6f * a_s);
+							const auto seconds = std::format("{:.0f}", std::ceil(a_badge.ready));
+							TextCentered(a_draw, { c.x + 1.0f * a_s, c.y + 1.5f * a_s }, Alpha(kShade, alpha * 0.9f), 21.0f * a_s, seconds);
+							TextCentered(a_draw, c, Alpha(kText, alpha), 21.0f * a_s, seconds);
+						}
+						// Something under way (brewing): an arc going round.
+						if (a_badge.spinning) {
+							const float a = state.clock * 3.0f;
+							Draw::PathClear(a_draw);
+							Draw::PathArcTo(a_draw, c, rr + 9.0f * a_s, a, a + 1.6f, 16);
+							Draw::PathStroke(a_draw, Alpha(kText, alpha * 0.8f), 0, 2.0f * a_s);
+						}
+						// A count in the corner.
+						if (a_badge.bubble >= 0) {
+							const V b{ c.x + rr * 0.72f, c.y - rr * 0.72f };
+							Draw::AddCircleFilled(a_draw, b, 10.0f * a_s, Alpha(a_badge.bubble > 0 ? kAccent : IM_COL32(40, 40, 42, 255), alpha), 20);
+							Draw::AddCircle(a_draw, b, 10.0f * a_s, Alpha(kGlassEdge, alpha * 1.5f), 20, 1.0f);
+							TextCentered(a_draw, b, Alpha(kText, alpha), 12.5f * a_s, std::format("{}", a_badge.bubble));
+						}
+						if (focusItem == a_badge.badgeItem) {
+							Draw::AddCircle(a_draw, c, rr + 10.0f * a_s, Alpha(kFocusRing, alpha * (0.65f + 0.35f * std::sin(state.clock * 5.0f))), 48, 1.6f * a_s);
+						}
+
+						// The name, and the AUTO switch under it.
+						const float ny = c.y + radius + 14.0f * a_s;
+						TextCentered(a_draw, { c.x, ny }, Alpha(a_badge.usable ? kText : kTextDim, alpha), 13.5f * a_s, Upper(a_badge.name));
+						if (a_badge.autoOn) {
+							const float pw = 52.0f * a_s, ph = 18.0f * a_s;
+							const V     pmin{ c.x - pw * 0.5f, ny + 12.0f * a_s };
+							bool        over = false;
+							Im::PushID(a_badge.index);
+							const bool flipped = Hit("auto", pmin, { pw, ph }, over) && live;
+							Im::PopID();
+							if (over) {
+								Hovering(0x401 + static_cast<std::uint64_t>(a_badge.index) * 2);
+								Tip(a_badge.autoTip);
+							}
+							if (flipped || (focusItem == a_badge.autoItem && a_input.activate) || a_badge.padFlip) {
+								*a_badge.autoOn = !*a_badge.autoOn;
+								changed = true;
+								Sound("UIMenuOK");
+							}
+							const float k = state.tw.Toward("autoPill", static_cast<std::uint64_t>(a_member.id) * 8 + static_cast<std::uint64_t>(a_badge.index),
+								*a_badge.autoOn ? 1.0f : 0.0f, 14.0f);
+							Draw::AddRectFilled(a_draw, pmin, { pmin.x + pw, pmin.y + ph }, Alpha(Mix(IM_COL32(255, 255, 255, 10), kAccent, k), alpha), 0.0f, 0);
+							Draw::AddRect(a_draw, pmin, { pmin.x + pw, pmin.y + ph }, Alpha(Mix(kGlassEdge, kEdge, std::max(k, over ? 0.7f : 0.0f)), alpha), 0.0f, 0,
+								1.0f);
+							TextCentered(a_draw, { c.x, pmin.y + ph * 0.5f }, Alpha(Mix(kTextFaint, kText, k), alpha), 11.5f * a_s, "AUTO");
+							if (focusItem == a_badge.autoItem) {
+								FocusOutline(a_draw, pmin, { pmin.x + pw, pmin.y + ph }, 0.0f, alpha);
+							}
+						}
+					};
+
+					// Pad X: the first ability now; pad Y: its switch.
+					bool padNow = a_input.now, padFlip = a_input.flipAuto;
+					if (primary) {
+						Badge b;
+						b.index = 0;
+						b.glyph = tank ? 0xF0A1 : 0xF4BE;
+						b.name = tank ? "Taunt" : "Heal";
+						b.ready = tank ? a_member.tauntReady : a_member.healReady;
+						b.cooldown = tank ? a_member.tauntCooldown : a_view.tuning.healCooldown;
+						b.usable = a_member.inCombat && (tank || a_member.canHeal);
+						b.clickable = b.usable;
+						b.autoOn = &orders.autoAbility;
+						b.badgeItem = primaryBadge;
+						b.autoItem = primaryAuto;
+						if (tank) {
+							b.tip = std::format("Taunt now\nHolds level {} and below  ·  {:.0f} reach  ·  {:.0f} s  ·  {:.0f} stamina", a_member.tauntCertain,
+								a_member.tauntRadius, a_member.tauntHold, a_member.tauntStamina);
+						} else if (a_member.canHeal) {
+							b.tip = std::format("Heal now\n{}{}: about {:.0f} health for {:.0f} magicka", a_member.healSpell, a_member.healBorrowed ? " (borrowed)" : "",
+								a_member.healAmount, a_member.healCost);
+						} else {
+							b.tip = "Knows no heal for others; they will fight instead.";
+						}
+						if (!a_member.inCombat) {
+							b.tip += "\nIn a fight only.";
+						}
+						b.autoTip = tank ? "AUTO on: they taunt by themselves when it is ready and worth it.\nOff: only when you press Taunt."s :
+						                   "AUTO on: they heal by themselves when someone drops below the line.\nOff: only when you press Heal."s;
+						b.padNow = padNow;
+						b.padFlip = padFlip;
+						const auto command = tank ? Battle::Command::Type::kTauntNow : Battle::Command::Type::kHealNow;
+						b.use = [&, command] { Simple(command, a_member.id); };
+						badge(std::move(b));
+						padNow = padFlip = false;
+					}
+					if (special != Special::kNone) {
+						const auto& info = Info(special);
+						Badge       b;
+						b.index = 1;
+						b.glyph = info.glyph;
+						b.name = std::string(info.name);
+						b.ready = a_member.specialReady;
+						b.cooldown = a_member.specialCooldown;
+						b.usable = a_member.inCombat;
+						b.clickable = b.usable;
+						b.autoOn = &orders.autoSpecial;
+						b.badgeItem = specialBadge;
+						b.autoItem = specialAuto;
+						b.tip = std::format("{} now\n{}\nReady again {:.0f} s after use.{}", info.name, info.summary, SpecialCooldown(special),
+							a_member.inCombat ? "" : "\nIn a fight only.");
+						b.autoTip = std::format("AUTO on: {}\nOff: only when you press {}.", info.own, info.name);
+						b.padNow = padNow;
+						b.padFlip = padFlip;
+						b.use = [&] { Simple(Battle::Command::Type::kSpecialNow, a_member.id); };
+						badge(std::move(b));
+					}
+					{
+						Badge b;
+						b.index = 2;
+						b.glyph = 0xF0C3;
+						b.name = "Potions";
+						b.usable = orders.potions;
+						b.autoOn = nullptr;
+						b.badgeItem = potionBadge;
+						b.bubble = a_member.potionHealing + a_member.potionMagicka + a_member.potionStamina + a_member.potionOther;
+						b.spinning = a_member.brewing;
+						std::string stock;
+						auto        add = [&](int a_count, std::string_view a_what) {
+							if (a_count > 0) {
+								stock += std::format("{}{} {}", stock.empty() ? "" : "  ·  ", a_count, a_what);
+							}
+						};
+						add(a_member.potionHealing, "healing");
+						add(a_member.potionMagicka, "magicka");
+						add(a_member.potionStamina, "stamina");
+						add(a_member.potionOther, "other");
+						b.tip = std::format("Potions: {}{}\n{}\nClick to switch {}.", stock.empty() ? "none" : stock, a_member.brewing ? "  ·  brewing" : "",
+							"They drink their own in a fight when hurt or drained (a fortify against a boss, a resist against a caster), and at rest brew "
+							"what they are short of, better grades and rarer kinds as they rise in level.",
+							orders.potions ? "off" : "on");
+						b.use = [&] {
+							orders.potions = !orders.potions;
+							changed = true;
+						};
+						b.glow = false;
+						badge(std::move(b));
+						if (!orders.potions) {
+							const V c{ top.x + slot * (static_cast<float>(placed) - 0.5f), top.y + radius + 4.0f * a_s };
+							Draw::AddLine(a_draw, { c.x - radius * 0.7f, c.y + radius * 0.7f }, { c.x + radius * 0.7f, c.y - radius * 0.7f }, Alpha(kRed, alpha * 0.85f),
+								2.4f * a_s);
+							TextCentered(a_draw, { c.x, c.y + radius + 38.0f * a_s }, Alpha(kTextFaint, alpha), 11.5f * a_s, "OFF");
+						}
+					}
+					yy = top.y + radius * 2.0f + 4.0f * a_s + 64.0f * a_s;
+
+					// The healer's line: a slider in steps of five.
+					if (healer) {
+						yy += 10.0f * a_s;
+						int         threshold = orders.healThreshold;
+						const float labelW = 150.0f * a_s;
+						Text(a_draw, { p.x, yy - 9.0f * a_s }, Alpha(orders.autoAbility ? kTextDim : kTextFaint, alpha), 15.0f * a_s, std::format("Heal below {}%", threshold));
+						const float tw = inner - labelW, th = 4.0f * a_s;
+						const V     tmin{ p.x + labelW, yy };
+						Im::SetCursorScreenPos({ tmin.x - 8.0f * a_s, tmin.y - 12.0f * a_s });
+						Im::InvisibleButton("threshold", { tw + 16.0f * a_s, 26.0f * a_s });
+						const bool dragging = Im::IsItemActive() && live;
+						if (dragging) {
+							const float t = Clamp01((Im::GetIO()->MousePos.x - tmin.x) / tw);
+							threshold = 20 + static_cast<int>(std::round(t * 70.0f / 5.0f)) * 5;
+						}
+						if (focusItem == slider && a_input.dx) {
+							threshold = std::clamp(threshold + (a_input.dx > 0 ? 5 : -5), 20, 90);
+						}
+						const float t = state.tw.Toward("threshold", a_member.id, (static_cast<float>(threshold) - 20.0f) / 70.0f, 18.0f);
+						Draw::AddRectFilled(a_draw, { tmin.x, tmin.y + th * 0.5f - 0.5f }, { tmin.x + tw, tmin.y + th * 0.5f + 0.5f }, Alpha(kGlassEdge, alpha * 1.4f), 0.0f, 0);
+						Draw::AddRectFilled(a_draw, { tmin.x, tmin.y + th * 0.25f }, { tmin.x + tw * t, tmin.y + th * 0.75f }, Alpha(kEdge, alpha), 0.0f, 0);
+						Diamond(a_draw, { tmin.x + tw * t, tmin.y + th * 0.5f }, (8.0f + (dragging ? 2.0f : 0.0f)) * a_s, Alpha(kText, alpha), Alpha(kShade, alpha * 0.5f), 1.0f);
+						if (focusItem == slider) {
+							FocusOutline(a_draw, { tmin.x - 6, tmin.y - 8 }, { tmin.x + tw + 6, tmin.y + th + 8 }, 6.0f, alpha);
+						}
+						if (threshold != orders.healThreshold) {
+							orders.healThreshold = static_cast<std::uint8_t>(threshold);
+							changed = true;
+						}
+						yy += 18.0f * a_s;
+					}
+
+					// The answer to the last press: what they did, or why not.
+					{
+						const bool  waiting = a_member.asked;
+						const bool  fresh = !a_member.answer.empty() && a_member.answerAge < 6.0f;
+						const float show = waiting ? 1.0f : (fresh ? 1.0f - Clamp01((a_member.answerAge - 4.5f) / 1.5f) : 0.0f);
+						const float in = state.tw.Toward("answerIn", a_member.id, show, 10.0f);
+						if (in > 0.01f) {
+							yy += 8.0f * a_s;
+							const std::string line = waiting ? std::format("{} heard you...", a_member.name) : a_member.answer;
+							const bool        good = !waiting && a_member.answerDone;
+							const U32         color = waiting ? kTextDim : (good ? kText : kAmber);
+							Glyph(a_draw, { p.x + 7.0f * a_s, yy + 9.0f * a_s }, 12.0f * a_s, waiting ? 0xF141 : (good ? 0xF00C : 0xF071), Alpha(color, alpha * in));
+							Text(a_draw, { p.x + 22.0f * a_s, yy }, Alpha(color, alpha * in), 15.0f * a_s, line);
+							yy += 18.0f * a_s * in;
+						}
+					}
+					return yy - p.y;
 				});
 				y = r.max.y + gap;
 			}
@@ -1703,7 +1946,7 @@ namespace FWM::Menu
 				const bool clicked = Hit("order", smin, { segW, h }, pointed) && live;
 				Im::PopID();
 				const bool  focused = rowFocused && state.item == static_cast<int>(i);
-				const auto  key = settings.orderKeys[i] ? std::format("  ({})", KeyName(settings.orderKeys[i])) : ""s;
+				const auto  key = settings.orderKeys[i].key ? std::format("  ({})", HotkeyName(settings.orderKeys[i])) : ""s;
 				const auto  tip = std::format("{}{}\nReplaces every companion's own orders.", info.summary, key);
 				if (pointed) {
 					Hovering(0x200 + i);
@@ -1741,7 +1984,286 @@ namespace FWM::Menu
 			return { { min.x - 70.0f * a_s, min.y - 10.0f * a_s }, { max.x + 70.0f * a_s, max.y + 10.0f * a_s } };
 		}
 
-				// --- Sending someone at an enemy -----------------------------------------------------------
+		// --- Overhead ------------------------------------------------------------------------
+
+		constexpr U32 kAlly = IM_COL32(118, 172, 228, 255);
+		constexpr U32 kFoe = IM_COL32(222, 62, 52, 255);
+
+		// A ring on the ground: a faint fill, a soft glow under a bright edge.
+		void GroundMark(Im::ImDrawList* a_draw, std::span<const View::Point> a_ring, V a_display, U32 a_color, float a_alpha, float a_fill, float a_thickness)
+		{
+			if (a_ring.size() < 4 || a_alpha <= 0.01f) {
+				return;
+			}
+			std::vector<V> points;
+			points.reserve(a_ring.size());
+			bool whole = true;
+			for (std::size_t i = 0; i + 1 < a_ring.size(); ++i) {  // the last point closes the ring
+				if (!a_ring[i].on) {
+					whole = false;
+					continue;
+				}
+				points.push_back(ScreenOf(a_ring[i], a_display));
+			}
+			if (whole && a_fill > 0.0f && points.size() >= 3) {
+				Draw::AddConvexPolyFilled(a_draw, points.data(), static_cast<int>(points.size()), Alpha(a_color, a_alpha * a_fill));
+			}
+			for (std::size_t i = 1; i < a_ring.size(); ++i) {
+				if (!a_ring[i - 1].on || !a_ring[i].on) {
+					continue;
+				}
+				const V a = ScreenOf(a_ring[i - 1], a_display), b = ScreenOf(a_ring[i], a_display);
+				Draw::AddLine(a_draw, a, b, Alpha(a_color, a_alpha * 0.2f), a_thickness * 3.2f);
+				Draw::AddLine(a_draw, a, b, Alpha(a_color, a_alpha), a_thickness);
+			}
+		}
+
+		// Seen from above, everyone stands in a ring: blue for the party, red for whoever they
+		// fight, white for you, under a veil that pushes the world back.
+		void DrawOverhead(Im::ImDrawList* a_draw, const View::Snapshot& a_view, const View::Member* a_selected, V a_display, float a_s, float a_appear)
+		{
+			const float alpha = Stage(a_appear, 0.1f, 0.6f) * state.tw.Toward("overheadIn", 0, a_view.overhead ? 1.0f : 0.0f, 6.0f);
+			if (alpha <= 0.01f) {
+				return;
+			}
+			Draw::AddRectFilled(a_draw, { 0.0f, 0.0f }, a_display, Alpha(kShade, alpha * 0.3f), 0.0f, 0);
+			const float pulse = 0.5f + 0.5f * std::sin(state.clock * 3.2f);
+			for (const auto& enemy : a_view.enemies) {
+				const bool marked = a_selected && a_selected->marked == enemy.id;
+				GroundMark(a_draw, enemy.footRing, a_display, marked ? kText : kFoe, alpha, 0.24f, (enemy.boss ? 3.0f : 2.2f) * a_s + (marked ? 1.2f * pulse * a_s : 0.0f));
+			}
+			for (const auto& member : a_view.party) {
+				const bool chosen = a_selected && member.id == a_selected->id;
+				GroundMark(a_draw, member.footRing, a_display, kAlly, alpha * (member.summon ? 0.7f : 1.0f), chosen ? 0.36f : 0.2f,
+					(chosen ? 2.6f + 0.9f * pulse : 2.0f) * a_s);
+				if (member.down && member.foot.on) {
+					Draw::AddCircle(a_draw, ScreenOf(member.foot, a_display), (16.0f + 10.0f * pulse) * a_s, Alpha(kAmber, alpha), 32, 2.0f * a_s);
+				}
+			}
+			GroundMark(a_draw, a_view.playerRing, a_display, kText, alpha, 0.26f, 2.4f * a_s);
+			if (a_view.playerHead.on) {
+				TextOnWorld(a_draw, ScreenOf(a_view.playerHead, a_display), kText, 14.0f * a_s, "YOU", alpha);
+			}
+		}
+
+		std::string PadButtonName(std::uint32_t a_button)
+		{
+			switch (a_button) {
+			case 0x80:
+				return "R3";
+			case 0x40:
+				return "L3";
+			case 0x20:
+				return "Back";
+			default:
+				return {};
+			}
+		}
+
+		// Top left: the companion, or the whole fight from above. Two segments, the one shown lit.
+		Rect DrawViewSwitch(Im::ImDrawList* a_draw, const View::Snapshot& a_view, float a_s, float a_appear, bool& a_clicked)
+		{
+			a_clicked = false;
+			const float in = Stage(a_appear, 0.15f, 0.5f) * (a_view.driving ? 1.0f : 0.45f);
+			const bool  overhead = state.overhead && a_view.driving;
+			const float h = 38.0f * a_s, size = 13.5f * a_s, tracking = 2.0f * a_s, pad = 14.0f * a_s, icon = 15.0f * a_s;
+			static constexpr std::array<std::pair<std::string_view, std::uint32_t>, 2> items{ { { "COMPANION", 0xF007 }, { "OVERHEAD", 0xF279 } } };
+			std::array<float, 2> widths{};
+			float                total = 0.0f;
+			for (std::size_t i = 0; i < items.size(); ++i) {
+				widths[i] = pad + icon + 9.0f * a_s + LabelWidth(size, items[i].first, tracking) + pad;
+				total += widths[i];
+			}
+			const V at{ 40.0f * a_s, 30.0f * a_s - (1.0f - Stage(a_appear, 0.15f, 0.5f)) * 8.0f * a_s };
+			Glass(a_draw, at, { at.x + total, at.y + h }, in, 0.0f);
+			float x = at.x;
+			for (std::size_t i = 0; i < items.size(); ++i) {
+				const V    min{ x, at.y }, max{ x + widths[i], at.y + h };
+				const bool shown = (i == 1) == overhead;
+				bool       hovered = false;
+				Im::PushID(static_cast<int>(i));
+				if (Hit("view", min, { widths[i], h }, hovered) && a_view.driving && !state.closing && !shown) {
+					a_clicked = true;
+				}
+				Im::PopID();
+				const float lit = state.tw.Toward("viewSeg", i, shown ? 1.0f : 0.0f, 12.0f);
+				Lit(a_draw, min, max, in * lit);
+				if (hovered && !shown) {
+					Draw::AddRectFilled(a_draw, min, max, Alpha(kTileHover, in), 0.0f, 0);
+				}
+				const U32 color = Alpha(Mix(kTextDim, kText, std::max(lit, hovered ? 0.6f : 0.0f)), in);
+				Glyph(a_draw, { x + pad + icon * 0.5f, at.y + h * 0.5f }, icon, items[i].second, color);
+				Label(a_draw, { x + pad + icon + 9.0f * a_s, at.y + (h - size) * 0.5f }, color, size, items[i].first, tracking);
+				if (i == 1) {
+					Draw::AddLine(a_draw, { x, at.y + 7.0f * a_s }, { x, at.y + h - 7.0f * a_s }, Alpha(kGlassEdge, in), 1.0f);
+				}
+				if (hovered) {
+					Hovering(0x700 + i);
+					if (!a_view.driving) {
+						Tip("The overhead view moves the camera, so it needs Glide to the companion on (Battle plan settings, Camera).");
+					} else if (i == 1) {
+						Tip("The whole fight from above: blue rings for the party, red for enemies, white for you. Indoors the ceiling is cut away "
+							"above everyone's heads. Click an enemy to send someone after them.");
+					} else {
+						Tip("The camera on the companion you are commanding.");
+					}
+				}
+				x += widths[i];
+			}
+			// The key that switches, under the switch.
+			const auto& settings = Settings::Get();
+			const auto  key = padUsed.load() ? PadButtonName(settings.overheadGamepadKey) : (settings.overheadKey.key ? HotkeyName(settings.overheadKey) : ""s);
+			float       bottom = at.y + h;
+			if (!key.empty() && a_view.driving) {
+				const float capH = 22.0f * a_s;
+				const float w = Keycap(a_draw, { at.x, at.y + h + 8.0f * a_s }, capH, 12.5f * a_s, key, in);
+				Text(a_draw, { at.x + w + 8.0f * a_s, at.y + h + 8.0f * a_s + (capH - TextSize(13.5f * a_s, "switches").y) * 0.5f }, Alpha(kTextDim, in), 13.5f * a_s,
+					"switches");
+				bottom += 8.0f * a_s + capH;
+			}
+			return { at, { at.x + total, bottom } };
+		}
+
+		// --- Orders answered -------------------------------------------------------------------
+
+		// Corner brackets around a point: a target lock.
+		void Brackets(Im::ImDrawList* a_draw, V a_c, float a_r, U32 a_color, float a_thickness)
+		{
+			const float l = a_r * 0.5f;
+			for (const float sx : { -1.0f, 1.0f }) {
+				for (const float sy : { -1.0f, 1.0f }) {
+					const V corner{ a_c.x + sx * a_r, a_c.y + sy * a_r };
+					Draw::AddLine(a_draw, corner, { corner.x - sx * l, corner.y }, a_color, a_thickness);
+					Draw::AddLine(a_draw, corner, { corner.x, corner.y - sy * l }, a_color, a_thickness);
+				}
+			}
+		}
+
+		// The answer to sending someone: a spark runs from the companion to the enemy, brackets
+		// lock on with a shockwave, and a line under the enemy says who was sent. When a companion
+		// actually turns on their mark the brackets go red with a flash. A marked enemy keeps its
+		// brackets, white while the companion is on the way.
+		void DrawSends(Im::ImDrawList* a_draw, const View::Snapshot& a_view, V a_display, float a_s, float a_appear)
+		{
+			const float alpha = Stage(a_appear, 0.1f, 0.6f);
+			auto        findEnemy = [&](RE::FormID a_id) -> const View::Enemy* {
+				for (const auto& e : a_view.enemies) {
+					if (e.id == a_id) {
+						return &e;
+					}
+				}
+				return nullptr;
+			};
+			auto findMember = [&](RE::FormID a_id) -> const View::Member* {
+				for (const auto& m : a_view.party) {
+					if (m.id == a_id) {
+						return &m;
+					}
+				}
+				return nullptr;
+			};
+
+			// Who took up their mark since the last frame.
+			for (const auto& m : a_view.party) {
+				const bool on = m.marked && m.target == m.marked;
+				auto&      was = state.wasOn[m.id];
+				if (on && was != m.marked) {
+					state.engaged.push_back({ m.marked, m.id, state.clock });
+				}
+				was = on ? m.marked : 0;
+			}
+
+			// Every marked enemy: brackets, red once someone is fighting them.
+			for (const auto& e : a_view.enemies) {
+				bool marked = false, fought = false;
+				for (const auto& m : a_view.party) {
+					if (m.marked == e.id) {
+						marked = true;
+						fought = fought || m.target == e.id;
+					}
+				}
+				if (!marked || !e.head.on) {
+					continue;
+				}
+				const float red = state.tw.Toward("lockRed", e.id, fought ? 1.0f : 0.0f, 8.0f);
+				const float breathe = 0.85f + 0.15f * std::sin(state.clock * 4.0f);
+				Brackets(a_draw, ScreenOf(e.head, a_display), 25.0f * a_s, Alpha(Mix(kText, kRed, red), alpha * breathe), 2.0f * a_s);
+			}
+
+			// Fresh orders.
+			std::erase_if(state.sent, [](const State::Beat& a_beat) { return state.clock - a_beat.at > 1.9f; });
+			std::unordered_set<RE::FormID> labelled;
+			for (const auto& beat : state.sent) {
+				const auto* enemy = findEnemy(beat.enemy);
+				if (!enemy || !enemy->head.on) {
+					continue;
+				}
+				const float t = state.clock - beat.at;
+				const V     p = ScreenOf(enemy->head, a_display);
+				// The companion hears it, and a spark runs to the enemy.
+				if (const auto* m = findMember(beat.member); m && m->head.on && t < 0.5f) {
+					const V     from = ScreenOf(m->head, a_display);
+					const float heard = Clamp01(t / 0.45f);
+					Draw::AddCircle(a_draw, from, (12.0f + 26.0f * EaseOut(heard)) * a_s, Alpha(kText, alpha * (1.0f - heard)), 32, 2.0f * a_s);
+					const float run = EaseOut(t / 0.36f);
+					const float gone = 1.0f - Clamp01((t - 0.36f) / 0.1f);
+					for (int i = 0; i < 7; ++i) {
+						const float k = std::max(run - 0.045f * static_cast<float>(i), 0.0f);
+						const V     at{ from.x + (p.x - from.x) * k, from.y + (p.y - from.y) * k };
+						Draw::AddCircleFilled(a_draw, at, (5.5f - 0.65f * static_cast<float>(i)) * a_s, Alpha(kText, alpha * gone * (1.0f - static_cast<float>(i) / 7.0f)), 16);
+					}
+				}
+				// Lock on as the spark lands: brackets snap in, two rings run out.
+				const float lt = t - 0.3f;
+				if (lt < 0.0f) {
+					continue;
+				}
+				const float snap = EaseOutBack(Clamp01(lt / 0.3f));
+				const float fade = 1.0f - Clamp01((lt - 1.0f) / 0.5f);
+				Brackets(a_draw, p, (25.0f + 46.0f * (1.0f - snap)) * a_s, Alpha(kText, alpha * fade), 2.8f * a_s);
+				for (int ring = 0; ring < 2; ++ring) {
+					const float w = Clamp01((lt - 0.1f * static_cast<float>(ring)) / 0.6f);
+					if (w > 0.0f && w < 1.0f) {
+						Draw::AddCircle(a_draw, p, (18.0f + 84.0f * EaseOut(w)) * a_s, Alpha(ring == 0 ? kText : kEdge, alpha * (1.0f - w)), 48, (3.0f - 2.0f * w) * a_s);
+					}
+				}
+				// Who was sent, once per enemy: everyone sent at once reads as one order.
+				if (!labelled.insert(beat.enemy).second) {
+					continue;
+				}
+				int         count = 0;
+				std::string who;
+				for (const auto& other : state.sent) {
+					if (other.enemy == beat.enemy && std::fabs(other.at - beat.at) < 0.05f) {
+						++count;
+						if (const auto* m = findMember(other.member)) {
+							who = m->name;
+						}
+					}
+				}
+				const auto  line = count > 1 ? "EVERYONE SENT"s : Upper(who) + " SENT";
+				const float show = Clamp01(lt / 0.15f) * fade;
+				TextOnWorld(a_draw, { p.x, p.y + 54.0f * a_s - (1.0f - Clamp01(lt / 0.25f)) * 6.0f * a_s }, kText, 15.0f * a_s, line, alpha * show);
+			}
+
+			// Companions turning on their mark.
+			std::erase_if(state.engaged, [](const State::Beat& a_beat) { return state.clock - a_beat.at > 1.4f; });
+			for (const auto& beat : state.engaged) {
+				const auto* enemy = findEnemy(beat.enemy);
+				const auto* m = findMember(beat.member);
+				if (!enemy || !enemy->head.on || !m) {
+					continue;
+				}
+				const V     p = ScreenOf(enemy->head, a_display);
+				const float t = state.clock - beat.at;
+				const float w = Clamp01(t / 0.55f);
+				Draw::AddCircle(a_draw, p, (20.0f + 60.0f * EaseOut(w)) * a_s, Alpha(kRed, alpha * (1.0f - w)), 48, 3.0f * a_s);
+				const float show = Clamp01(t / 0.15f) * (1.0f - Clamp01((t - 0.9f) / 0.5f));
+				TextOnWorld(a_draw, { p.x, p.y + 74.0f * a_s }, kRed, 15.0f * a_s, Upper(m->name) + " ENGAGES", alpha * show);
+			}
+		}
+
+		// --- Sending someone at an enemy ----------------------------------------------------------
 
 		// Clicking an enemy offers who to send, in a small glass list beside them.
 		void DrawEnemyMenu(Im::ImDrawList* a_draw, const View::Snapshot& a_view, const View::Member* a_selected, V a_display, float a_s)
@@ -1797,8 +2319,11 @@ namespace FWM::Menu
 			Band(a_draw, { min.x + 1.0f, min.y + 1.0f }, { max.x - 1.0f, min.y + 30.0f * a_s }, a);
 			Text(a_draw, { min.x + inset, min.y + 8.0f * a_s }, Alpha(kText, a), 13.5f * a_s, Upper(std::format("{}  /  level {}", enemy->name, enemy->level)));
 
+			// Asked through the function, never io.MouseClicked: that field sits past the key table,
+			// whose size differs between the header and Menu Framework's ImGui, so in game it read
+			// as never pressed and the list could neither send nor close.
 			const V    mouse = Im::GetIO()->MousePos;
-			const bool press = Im::GetIO()->MouseClicked[0];
+			const bool press = Im::IsMouseClicked(0);
 			for (std::size_t i = 0; i < items.size(); ++i) {
 				const V     rmin{ min.x + 5.0f * a_s, min.y + 34.0f * a_s + rowH * static_cast<float>(i) };
 				const V     rmax{ max.x - 5.0f * a_s, rmin.y + rowH };
@@ -1812,19 +2337,22 @@ namespace FWM::Menu
 					items[i].label);
 				if (pointed && press) {
 					const auto& item = items[i];
+					bool        sending = false;
 					for (const auto& m : a_view.party) {
 						if (m.summon) {
 							continue;
 						}
 						if (item.action == 0 && a_selected && m.id == a_selected->id) {
-							Simple(Battle::Command::Type::kMark, m.id, m.marked == enemy->id ? 0 : enemy->id);
+							sending = m.marked != enemy->id;
+							SendAfter(m.id, sending ? enemy->id : 0);
 						} else if (item.action == 1) {
-							Simple(Battle::Command::Type::kMark, m.id, enemy->id);
+							sending = true;
+							SendAfter(m.id, enemy->id);
 						} else if (item.action == 2 && m.marked == enemy->id) {
-							Simple(Battle::Command::Type::kMark, m.id, 0);
+							SendAfter(m.id, 0);
 						}
 					}
-					Sound("UIMenuOK");
+					Sound(sending ? "UIItemMeleeUp" : "UIMenuCancel");
 					state.enemyMenu = 0;
 				}
 			}
@@ -1841,13 +2369,19 @@ namespace FWM::Menu
 			std::string_view what;
 		};
 
-		constexpr std::array<Hint, 5> padHints{ { { "LB / RB", "Companion" }, { "D-pad", "Move" }, { "A", "Choose" }, { "X", "Ability now" }, { "B", "Close" } } };
-		constexpr std::array<Hint, 5> keyHints{ { { "Click", "Send at an enemy" }, { "Tab", "Companion" }, { "Arrows", "Move" }, { "Enter", "Choose" }, { "Esc", "Close" } } };
+		constexpr std::array<Hint, 7> padHints{ { { "LB / RB", "Companion" }, { "D-pad", "Move" }, { "A", "Choose" }, { "X", "Ability now" }, { "RS", "Turn view" },
+			{ "LT / RT", "Zoom" }, { "B", "Close" } } };
+		constexpr std::array<Hint, 7> keyHints{ { { "Click", "Send at an enemy" }, { "Tab", "Companion" }, { "Arrows", "Move" }, { "Enter", "Choose" },
+			{ "Right-drag", "Turn view" }, { "Wheel", "Zoom" }, { "Esc", "Close" } } };
 
 		// Each key in its own small cap, what it does beside it.
 		void DrawHints(Im::ImDrawList* a_draw, V a_display, float a_s, float a_alpha)
 		{
-			const auto& hints = padUsed.load() ? padHints : keyHints;
+			// Overhead adds how to move about, before Close.
+			std::vector<Hint> hints(padUsed.load() ? padHints.begin() : keyHints.begin(), padUsed.load() ? padHints.end() : keyHints.end());
+			if (state.overhead) {
+				hints.insert(hints.end() - 1, padUsed.load() ? Hint{ "LS", "Move" } : Hint{ "Mid-drag / WASD", "Move" });
+			}
 			const float keySize = 14.0f * a_s, textSize = 15.0f * a_s;
 			const float capH = 24.0f * a_s, between = 26.0f * a_s;
 			float       total = 0.0f;
@@ -1879,7 +2413,11 @@ namespace FWM::Menu
 				if (!a_member) {
 					return 0;
 				}
-				return a_member->orders.role == Role::kHealer ? 3 : (a_member->orders.role == Role::kTank ? 2 : 0);
+				{
+					const auto role = a_member->orders.role;
+					const bool primary = role == Role::kTank || role == Role::kHealer;
+					return (primary ? 2 : 0) + (role == Role::kHealer ? 1 : 0) + (SpecialOf(role) != Special::kNone ? 2 : 0) + 1;  // + the potions switch
+				}
 			case kFieldSection:
 				return static_cast<int>(a_enemies);
 			case kOrdersSection:
@@ -1935,6 +2473,9 @@ namespace FWM::Menu
 				state.item = 0;
 				padDx = padDy = padShoulder = 0;
 				padA = padB = padX = padY = false;
+				stickX = stickY = triggerL = triggerR = leftX = leftY = 0.0f;
+				overheadToggle = false;
+				Camera::SetOverhead(state.overhead);
 			}
 			if (closeRequested.exchange(false) && !state.closing) {
 				state.closing = true;
@@ -2008,6 +2549,58 @@ namespace FWM::Menu
 					if (shoulder) {
 						StepMember(*view, shoulder);
 					}
+
+					// Turning the view: the right stick, or dragging with the right mouse button. The
+					// wheel and the triggers zoom.
+					if (view->driving && !state.closing) {
+						const float speed = Settings::Get().orbitSpeed;
+						auto        live = [](float a_value) {
+							const float rest = 0.15f;
+							return std::fabs(a_value) < rest ? 0.0f : (a_value - std::copysign(rest, a_value)) / (1.0f - rest);
+						};
+						float yaw = live(stickX.load()) * 2.4f * speed * dt;
+						float pitch = live(stickY.load()) * 1.5f * speed * dt;
+						if (Im::IsMouseDown(1)) {
+							yaw += io->MouseDelta.x * 0.0055f * speed;
+							pitch -= io->MouseDelta.y * 0.0055f * speed;
+						}
+						float zoomSteps = (triggerR.load() - triggerL.load()) * 5.0f * dt;
+						if (!state.enemyMenu) {
+							zoomSteps += io->MouseWheel;
+						}
+						if (yaw != 0.0f || pitch != 0.0f) {
+							Camera::Turn(yaw, pitch);
+						}
+						if (zoomSteps != 0.0f) {
+							Camera::Zoom(zoomSteps);
+						}
+
+						// Overhead, free move: drag with the middle button (the ground follows the
+						// pointer), or the left stick or WASD. A middle click without a drag brings the
+						// view back over the fight.
+						if (state.overhead) {
+							float right = live(leftX.load()) * 0.9f * dt, forward = live(leftY.load()) * 0.9f * dt;
+							right += (static_cast<float>(Im::IsKeyDown(Im::ImGuiKey_D)) - static_cast<float>(Im::IsKeyDown(Im::ImGuiKey_A))) * 0.9f * dt;
+							forward += (static_cast<float>(Im::IsKeyDown(Im::ImGuiKey_W)) - static_cast<float>(Im::IsKeyDown(Im::ImGuiKey_S))) * 0.9f * dt;
+							if (Im::IsMouseClicked(2)) {
+								state.panDragged = 0.0f;
+							}
+							if (Im::IsMouseDown(2)) {
+								right -= io->MouseDelta.x / std::max(display.y, 1.0f);
+								forward += io->MouseDelta.y / std::max(display.y, 1.0f);
+								state.panDragged += std::fabs(io->MouseDelta.x) + std::fabs(io->MouseDelta.y);
+							}
+							if (Im::IsMouseReleased(2) && state.panDragged < 6.0f) {
+								Camera::Recentre();
+								Sound("UIMenuFocus");
+							}
+							if (right != 0.0f || forward != 0.0f) {
+								Camera::Pan(right, forward);
+							}
+						}
+					}
+					bool switchView = overheadToggle.exchange(false) && !state.closing;
+
 					const auto* member = Selected(*view);
 					// No enemies about: the party view, the camera face to face with the companion.
 					const bool partyView = view->enemies.empty() && !view->inCombat;
@@ -2049,7 +2642,7 @@ namespace FWM::Menu
 					const int count = ItemCount(state.section, member, view->enemies.size());
 					// Left and right walk the items of a row; on the focus, the position and the
 					// healer's slider they change the value instead.
-					const bool cycles = state.section == kFieldSection || state.section == kOrdersSection || (state.section == kAbilitySection && state.item < 2);
+					const bool cycles = state.section == kFieldSection || state.section == kOrdersSection || (state.section == kAbilitySection && !(member && member->orders.role == Role::kHealer && state.item == count - 1));
 					bool       moved = cycles && input.dx != 0 && count > 0;
 					if (moved) {
 						state.item = (state.item + input.dx + count) % count;
@@ -2075,7 +2668,9 @@ namespace FWM::Menu
 					std::sort(field.begin(), field.end(), [](const View::Enemy* a, const View::Enemy* b) { return a->head.x < b->head.x; });
 					state.fieldEnemy = state.section == kFieldSection && state.item < static_cast<int>(field.size()) ? field[static_cast<std::size_t>(state.item)]->id : 0;
 					if (state.section == kFieldSection && input.activate && member && state.fieldEnemy) {
-						Simple(Battle::Command::Type::kMark, member->id, member->marked == state.fieldEnemy ? 0 : state.fieldEnemy);
+						const bool sending = member->marked != state.fieldEnemy;
+						SendAfter(member->id, sending ? state.fieldEnemy : 0);
+						Sound(sending ? "UIItemMeleeUp" : "UIMenuCancel");
 					}
 
 					// Title in the game's own capitals, with a rule that draws outward from the centre.
@@ -2133,14 +2728,28 @@ namespace FWM::Menu
 							panels.push_back(DrawSheet(draw, *member, { 40.0f * s, 112.0f * s }, 380.0f * s, s, appear * sheetIn));
 						}
 					}
+					bool clickedView = false;
+					panels.push_back(DrawViewSwitch(draw, *view, s, appear, clickedView));
+					switchView = switchView || clickedView;
+					if (switchView) {
+						if (view->driving) {
+							state.overhead = !state.overhead;
+							Camera::SetOverhead(state.overhead);
+							Sound("UIMenuOK");
+						} else {
+							Notices::Push("The overhead view needs Glide to the companion (Battle plan settings).", Notices::Kind::kWarning);
+						}
+					}
 					DrawHints(draw, display, s, Stage(appear, 0.35f, 0.5f));
 					if (state.keyboardNav) {
 						Hovering(0x1000 + static_cast<std::uint64_t>(state.section) * 64 + static_cast<std::uint64_t>(state.item));
 					}
 
+					DrawOverhead(back, *view, member, display, s, appear);
 					// Face to face, the markers over heads would only be in the way.
 					if (!partyView) {
 						DrawWorld(back, *view, member, display, s, appear, panels);
+						DrawSends(back, *view, display, s, appear);
 						DrawEnemyMenu(draw, *view, member, display, s);
 					}
 				}
@@ -2364,8 +2973,9 @@ namespace FWM::Menu
 		std::string    feedback;
 
 		std::atomic<bool>          capturing{ false };
-		std::atomic<int>           captured{ -1 };  // -1 nothing yet, -2 cancelled, else the scan code (0 clears)
-		int                        captureSlot{ 0 };  // 0 the battle plan, 1 to 4 the party orders
+		std::atomic<int>           captured{ -1 };  // -1 nothing yet, -2 cancelled, else key | modifier << 16 (0 clears)
+		std::atomic<std::uint32_t> captureModifier{ 0 };  // Shift, Ctrl or Alt held while binding, for the button
+		int                        captureSlot{ 0 };  // 0 the battle plan, 1 to 4 the party orders, 5 the overhead view
 		std::atomic<bool>          restoreMenuHotkey{ false }, previousMenuHotkey{ false };
 		std::atomic<std::uint64_t> captureStarted{ 0 };
 
@@ -2457,6 +3067,7 @@ namespace FWM::Menu
 			}
 			MF::SetHotkeyEnabled(false);
 			captured = -1;
+			captureModifier = 0;
 			captureStarted = ::GetTickCount64();
 			capturing = true;
 		}
@@ -2475,8 +3086,11 @@ namespace FWM::Menu
 			const int key = captured.exchange(-1);
 			if (capturing.load() && key != -1) {
 				if (key >= 0) {
-					auto& target = captureSlot == 0 ? draft.planKey : draft.orderKeys[static_cast<std::size_t>(captureSlot - 1)];
-					target = static_cast<std::uint32_t>(key);
+					auto& target = captureSlot == 0 ? draft.planKey :
+					               captureSlot == 5 ? draft.overheadKey :
+					                                  draft.orderKeys[static_cast<std::size_t>(captureSlot - 1)];
+					const auto code = static_cast<std::uint32_t>(key);
+					target = Normalized({ code & 0xFFFF, code >> 16 });
 					dirty = true;
 				}
 				CancelCapture();
@@ -2892,6 +3506,13 @@ namespace FWM::Menu
 					Im::EndTable();
 				}
 			}
+			if (Group("Sending someone after an enemy", 0xF024)) {
+				if (Checks("marks")) {
+					Check("Outline marked enemies", draft.markGlow,
+						"While the battle plan is open, an enemy you send someone after is outlined, through walls. The outline goes when the plan closes.");
+					Im::EndTable();
+				}
+			}
 			if (ResetButton("Every targeting setting on this page back to its default.")) {
 				const auto d = Settings::Defaults();
 				t.engageRange = d.tuning.engageRange;
@@ -2905,6 +3526,7 @@ namespace FWM::Menu
 				draft.planInterval = d.planInterval;
 				draft.guardLeash = d.guardLeash;
 				draft.holdBackLeash = d.holdBackLeash;
+				draft.markGlow = d.markGlow;
 				dirty = true;
 			}
 			Footer();
@@ -2941,7 +3563,43 @@ namespace FWM::Menu
 					Im::BeginDisabled(!draft.cameraGlide);
 					Slider("Distance", draft.cameraDistance, 120.0f, 700.0f, "%.0f units", "How far behind the companion the camera settles.");
 					Slider("Height", draft.cameraHeight, 0.0f, 300.0f, "%.0f units", "How far above their eyes.");
+					Slider("Turning speed", draft.orbitSpeed, 0.2f, 3.0f, "%.1fx",
+						"How fast the right stick, or dragging with the right mouse button, turns the view around the companion or the fight.");
+					Slider("Overhead tilt", draft.overheadPitch, 35.0f, 88.0f, "%.0f deg",
+						"How steeply the overhead view looks down when it first opens. 88 is straight down; lower shows more of the room's shape. Tilt it in the plan with the right stick.");
 					Im::EndDisabled();
+					Im::EndTable();
+				}
+				if (Checks("cutaway")) {
+					Im::BeginDisabled(!draft.cameraGlide);
+					Check("Cut the ceiling away overhead", draft.cutaway,
+						"When something blocks the view from above (a cave roof, a ceiling, an overhang), the overhead view leaves out everything above the tallest fighter's head, so nobody is hidden. In the open nothing is cut. Off: the camera comes down under the cover instead.");
+					Im::EndDisabled();
+					Im::EndTable();
+				}
+				if (draft.cutaway && draft.cameraGlide && Rows("cutawayRows")) {
+					Slider("Cut above heads", draft.cutawayMargin, 0.0f, 400.0f, "%.0f units",
+						"How far above the tallest head the cut goes. Raise it to keep more of the walls; lower it if a low ceiling still shows.");
+					Im::EndTable();
+				}
+			}
+			if (Group("Abilities and potions", 0xF0C3)) {
+				if (Checks("abilities")) {
+					Check("Role specials", draft.specials,
+						"Bodyguard (tank), Volley (archer), War cry (bruiser), Ward (mage, healer) and Disarm (fighter): a button in the plan, and on their own where each companion's switch allows.");
+					Check("Drink potions in a fight", draft.drinkPotions,
+						"Companions drink their own potions when hurt or drained, a fortify against a boss and a resist against a caster. Each companion's Potions switch can still turn it off.");
+					Check("Brew potions at rest", draft.brewPotions,
+						"Standing about out of a fight, a companion short of potions now and then brews some: better grades and rarer kinds as they rise in level.");
+					Im::BeginDisabled(!draft.brewPotions);
+					Check("Mix them by hand", draft.brewAnimation, "Play the alchemy animation while they brew, when no alchemy table is to hand.");
+					Im::EndDisabled();
+					Im::EndTable();
+				}
+				if (draft.drinkPotions && Rows("drinkRows")) {
+					float percent = draft.drinkBelow * 100.0f;
+					Slider("Drink a healing potion below", percent, 10.0f, 90.0f, "%.0f%%", "Their health when they reach for a healing potion.");
+					draft.drinkBelow = percent / 100.0f;
 					Im::EndTable();
 				}
 			}
@@ -2977,6 +3635,10 @@ namespace FWM::Menu
 				draft.cameraGlide = d.cameraGlide;
 				draft.cameraDistance = d.cameraDistance;
 				draft.cameraHeight = d.cameraHeight;
+				draft.orbitSpeed = d.orbitSpeed;
+				draft.overheadPitch = d.overheadPitch;
+				draft.cutaway = d.cutaway;
+				draft.cutawayMargin = d.cutawayMargin;
 				draft.uiScale = d.uiScale;
 				draft.notices = d.notices;
 				draft.sounds = d.sounds;
@@ -3003,28 +3665,51 @@ namespace FWM::Menu
 			{ 0x80, "LB + Right-stick click" },
 		} };
 
+		constexpr std::array<PadChoice, 4> overheadPadChoices{ {
+			{ 0, "Unbound" },
+			{ 0x80, "Right-stick click" },
+			{ 0x40, "Left-stick click" },
+			{ 0x20, "Back / View" },
+		} };
+
 		void __stdcall RenderControls()
 		{
 			Prepare();
 			SettingsPage page("FightWithMeControls");
 			Header("CONTROLS");
 			Heading("KEY BINDINGS", 0xF11C);
-			Note("Select the binding, then press a key. Esc cancels; Delete clears.");
+			Note("Select the binding, then press a key, holding Shift, Ctrl or Alt with it for a combination. Esc cancels; Delete clears.");
 			Space();
-			if (Im::BeginTable("bindings", 3, Im::ImGuiTableFlags_SizingStretchProp)) {
+			if (Im::BeginTable("bindings", 4, Im::ImGuiTableFlags_SizingStretchProp)) {
 				Im::TableSetupColumn("Action", Im::ImGuiTableColumnFlags_WidthStretch, 1.4f);
+				Im::TableSetupColumn("Modifier", Im::ImGuiTableColumnFlags_WidthStretch, 0.6f);
 				Im::TableSetupColumn("Key", Im::ImGuiTableColumnFlags_WidthStretch, 1.0f);
 				Im::TableSetupColumn("", Im::ImGuiTableColumnFlags_WidthFixed, E(3.5f));
-				// One row per binding: the battle plan, then the four party orders.
-				auto binding = [&](int a_slot, const char* a_label, std::uint32_t& a_key) {
+				// One row per binding: the battle plan, the four party orders, the overhead view.
+				auto binding = [&](int a_slot, const char* a_label, Hotkey& a_hotkey) {
 					Im::PushID(a_slot);
 					Im::TableNextRow();
 					Im::TableNextColumn();
 					Im::AlignTextToFramePadding();
 					Im::TextUnformatted(a_label);
 					Im::TableNextColumn();
+					Im::BeginDisabled(a_hotkey.key == 0);
+					Im::SetNextItemWidth(-1);
+					if (Im::BeginCombo("##modifier", ModifierName(a_hotkey.modifier))) {
+						for (const std::uint32_t modifier : { 0u, kShift, kCtrl, kAlt }) {
+							if (Im::Selectable(ModifierName(modifier), modifier == a_hotkey.modifier) && modifier != a_hotkey.modifier) {
+								a_hotkey.modifier = modifier;
+								dirty = true;
+							}
+						}
+						Im::EndCombo();
+					}
+					Im::EndDisabled();
+					Help("Held with the key. A key with no modifier works whatever else is held, so sprinting does not get in the way.");
+					Im::TableNextColumn();
 					const bool waiting = capturing.load() && captureSlot == a_slot;
-					const auto name = waiting ? std::string("Press a key...") : KeyName(a_key);
+					const auto held = captureModifier.load();
+					const auto name = !waiting ? KeyName(a_hotkey.key) : (held ? std::format("{} + ...", ModifierName(held)) : std::string("Press a key..."));
 					if (Im::Button(name.c_str(), { -1, 0 })) {
 						if (waiting) {
 							CancelCapture();
@@ -3034,7 +3719,7 @@ namespace FWM::Menu
 					}
 					Im::TableNextColumn();
 					if (Im::Button("Clear", { -1, 0 })) {
-						a_key = 0;
+						a_hotkey = {};
 						dirty = true;
 						CancelCapture();
 					}
@@ -3045,7 +3730,28 @@ namespace FWM::Menu
 				binding(2, "To me! (everyone guards you)", draft.orderKeys[1]);
 				binding(3, "Hold back (everyone stays back)", draft.orderKeys[2]);
 				binding(4, "As you were", draft.orderKeys[3]);
+				binding(5, "Overhead view (in the plan)", draft.overheadKey);
 				Im::EndTable();
+			}
+			// Two actions on one binding: only the first of them would ever happen.
+			const std::array<std::pair<const char*, const Hotkey*>, 6> bound{ {
+				{ "Attack!", &draft.orderKeys[0] },
+				{ "To me!", &draft.orderKeys[1] },
+				{ "Hold back", &draft.orderKeys[2] },
+				{ "As you were", &draft.orderKeys[3] },
+				{ "Open the battle plan", &draft.planKey },
+				{ "Overhead view", &draft.overheadKey },
+			} };
+			std::string clash;
+			for (std::size_t i = 0; i < bound.size() && clash.empty(); ++i) {
+				for (std::size_t j = i + 1; j < bound.size() && clash.empty(); ++j) {
+					if (bound[i].second->key && *bound[i].second == *bound[j].second) {
+						clash = std::format("{} and {} are both on {}; only {} will happen.", bound[i].first, bound[j].first, HotkeyName(*bound[i].second), bound[i].first);
+					}
+				}
+			}
+			if (!clash.empty()) {
+				Note(clash.c_str());
 			}
 			if (Group("Gamepad", 0xF11B)) {
 				if (Rows("gamepad")) {
@@ -3071,6 +3777,28 @@ namespace FWM::Menu
 						Im::EndCombo();
 					}
 					Help("Hold LB and press the chosen button. Walk With Me's wheel uses LB with the right stick, Y or D-pad up; pick something it does not.");
+					Im::TableNextRow();
+					Im::TableNextColumn();
+					Im::AlignTextToFramePadding();
+					Im::TextUnformatted("Overhead view (in the plan)");
+					Im::TableNextColumn();
+					int overhead = 0;
+					for (int i = 0; i < static_cast<int>(overheadPadChoices.size()); ++i) {
+						if (overheadPadChoices[static_cast<std::size_t>(i)].button == draft.overheadGamepadKey) {
+							overhead = i;
+						}
+					}
+					Im::SetNextItemWidth(-1);
+					if (Im::BeginCombo("##overheadPad", overheadPadChoices[static_cast<std::size_t>(overhead)].name)) {
+						for (int i = 0; i < static_cast<int>(overheadPadChoices.size()); ++i) {
+							if (Im::Selectable(overheadPadChoices[static_cast<std::size_t>(i)].name, i == overhead)) {
+								draft.overheadGamepadKey = overheadPadChoices[static_cast<std::size_t>(i)].button;
+								dirty = true;
+							}
+						}
+						Im::EndCombo();
+					}
+					Help("Switches between the companion and the whole fight seen from above while the plan is open. The right stick turns the view either way.");
 					Im::EndTable();
 				}
 			}
@@ -3080,13 +3808,16 @@ namespace FWM::Menu
 					Im::TableSetupColumn("Keyboard and mouse", Im::ImGuiTableColumnFlags_WidthStretch, 1.0f);
 					Im::TableSetupColumn("Gamepad", Im::ImGuiTableColumnFlags_WidthStretch, 1.0f);
 					Im::TableHeadersRow();
-					static constexpr std::array<std::array<const char*, 3>, 7> rows{ {
+					static constexpr std::array<std::array<const char*, 3>, 10> rows{ {
 						{ "Choose a companion", "Click a crest, Tab", "LB / RB" },
 						{ "Move between rows", "Up / Down", "D-pad up / down" },
 						{ "Pick or step a value", "Click, Left / Right", "D-pad left / right" },
 						{ "Give a party order", "Click it, or its key", "Party orders row, A" },
 						{ "Send someone after an enemy", "Click the enemy", "Battlefield row, A" },
 						{ "Ability now / switch", "Click", "X / Y" },
+						{ "Turn the view", "Drag with the right button", "Right stick" },
+						{ "Zoom", "Mouse wheel", "LT / RT" },
+						{ "Overhead view", "Its key, or the button top left", "The button set above" },
 						{ "Close", "Esc or the hotkey", "B" },
 					} };
 					for (const auto& row : rows) {
@@ -3109,6 +3840,8 @@ namespace FWM::Menu
 				draft.planKey = d.planKey;
 				draft.planGamepadKey = d.planGamepadKey;
 				draft.orderKeys = d.orderKeys;
+				draft.overheadKey = d.overheadKey;
+				draft.overheadGamepadKey = d.overheadGamepadKey;
 				CancelCapture();
 				dirty = true;
 			}
@@ -3136,6 +3869,35 @@ namespace FWM::Menu
 			return !MF::IsAnyBlockingWindowOpened();
 		}
 
+		// Whether Shift, Ctrl or Alt (either side) is held, from the game's own keyboard state.
+		bool ModifierDown(std::uint32_t a_modifier)
+		{
+			auto* devices = RE::BSInputDeviceManager::GetSingleton();
+			auto* keyboard = devices ? devices->GetKeyboard() : nullptr;
+			if (!keyboard || a_modifier == 0) {
+				return false;
+			}
+			// curState rather than IsPressed(), which would link CommonLib's whole device class.
+			const auto& keys = keyboard->GetRuntimeData().curState;
+			for (const std::uint32_t code : { 0x2Au, 0x36u, 0x1Du, 0x9Du, 0x38u, 0xB8u }) {
+				if (ModifierOf(code) == a_modifier && (keys[code] & 0x80) != 0) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		// The modifier held right now, Ctrl first; 0 for none.
+		std::uint32_t HeldModifier()
+		{
+			for (const std::uint32_t modifier : { kCtrl, kShift, kAlt }) {
+				if (ModifierDown(modifier)) {
+					return modifier;
+				}
+			}
+			return 0;
+		}
+
 		bool __stdcall OnInput(RE::InputEvent* a_event)
 		{
 			if (!a_event) {
@@ -3147,17 +3909,47 @@ namespace FWM::Menu
 					return false;
 				}
 				auto* button = a_event->AsButtonEvent();
-				if (!button || !button->IsDown()) {
-					return true;
+				if (!button || captured.load() != -1) {
+					return true;  // the answer is in, waiting for the page to take it
 				}
 				const auto key = button->GetIDCode();
-				captured = key == kEscape ? -2 : (key == 0xD3 ? 0 : static_cast<int>(key));  // 0xD3 is Delete
+				// Shift, Ctrl and Alt only ever go with another key: held, they are shown on the button.
+				if (const auto modifier = ModifierOf(key)) {
+					if (button->IsDown()) {
+						captureModifier = modifier;
+					} else if (button->IsUp() && captureModifier.load() == modifier) {
+						captureModifier = 0;
+					}
+					return true;
+				}
+				if (!button->IsDown()) {
+					return true;
+				}
+				if (key == kEscape) {
+					captured = -2;
+				} else if (key == 0xD3) {
+					captured = 0;  // Delete
+				} else {
+					captured = static_cast<int>(key | HeldModifier() << 16);
+				}
 				return true;
 			}
 			const bool open = plan && plan->IsOpen;
 			const auto& settings = Settings::Get();
 
 			if (a_event->GetDevice() == RE::INPUT_DEVICE::kGamepad) {
+				// The right stick turns the view. Events come when the stick moves, so the last
+				// one says where it is held.
+				if (a_event->GetEventType() == RE::INPUT_EVENT_TYPE::kThumbstick) {
+					if (auto* stick = a_event->AsThumbstickEvent(); stick && stick->IsRight()) {
+						stickX = open ? stick->xValue : 0.0f;
+						stickY = open ? stick->yValue : 0.0f;
+					} else if (stick && stick->IsLeft()) {
+						leftX = open ? stick->xValue : 0.0f;
+						leftY = open ? stick->yValue : 0.0f;
+					}
+					return open;
+				}
 				if (a_event->GetEventType() != RE::INPUT_EVENT_TYPE::kButton) {
 					return open;
 				}
@@ -3166,6 +3958,11 @@ namespace FWM::Menu
 					return open;
 				}
 				const auto key = button->GetIDCode();
+				// The triggers zoom, by how far they are pulled.
+				if (key == kPadLT || key == kPadRT) {
+					(key == kPadLT ? triggerL : triggerR) = open ? button->Value() : 0.0f;
+					return open;
+				}
 				const bool fresh = button->IsDown() && (padHeld & key) == 0;
 				if (button->IsPressed()) {
 					padHeld |= key;
@@ -3174,6 +3971,10 @@ namespace FWM::Menu
 				}
 				if (open) {
 					padUsed = true;
+					if (fresh && settings.overheadGamepadKey && key == settings.overheadGamepadKey) {
+						overheadToggle = true;
+						return true;
+					}
 					if (fresh) {
 						switch (key) {
 						case kPadA:
@@ -3228,26 +4029,46 @@ namespace FWM::Menu
 				return false;
 			}
 			const auto key = button->GetIDCode();
-			for (std::size_t i = 0; i < settings.orderKeys.size(); ++i) {
-				if (settings.orderKeys[i] && key == settings.orderKeys[i] && (open || GameplayAllowsPlan())) {
-					Battle::Command command;
-					command.type = Battle::Command::Type::kShout;
-					command.shout = orderShouts[i];
-					Battle::Queue(command);
-					if (open) {
-						Sound("UIMenuOK");
-					}
-					return true;
+			// The binding this press means: one whose modifier is held beats one that needs
+			// none, and on a tie the party orders come first.
+			constexpr int kPlanAction = 4, kOverheadAction = 5;
+			int           action = -1, best = 0;
+			const auto    consider = [&](int a_action, const Hotkey& a_hotkey) {
+				const int fit = Fit(a_hotkey, key, ModifierDown(a_hotkey.modifier));
+				if (fit > best) {
+					action = a_action;
+					best = fit;
 				}
+			};
+			for (std::size_t i = 0; i < settings.orderKeys.size(); ++i) {
+				consider(static_cast<int>(i), settings.orderKeys[i]);
+			}
+			consider(kPlanAction, settings.planKey);
+			if (open) {
+				consider(kOverheadAction, settings.overheadKey);
+			}
+			if (action >= 0 && action < kPlanAction && (open || GameplayAllowsPlan())) {
+				Battle::Command command;
+				command.type = Battle::Command::Type::kShout;
+				command.shout = orderShouts[static_cast<std::size_t>(action)];
+				Battle::Queue(command);
+				if (open) {
+					Sound("UIMenuOK");
+				}
+				return true;
 			}
 			if (open) {
-				if (key == kEscape || key == settings.planKey) {
+				if (key == kEscape || action == kPlanAction) {
 					Close();
+					return true;
+				}
+				if (action == kOverheadAction) {
+					overheadToggle = true;
 					return true;
 				}
 				return false;
 			}
-			if (settings.planKey && key == settings.planKey && GameplayAllowsPlan()) {
+			if (action == kPlanAction && GameplayAllowsPlan()) {
 				Open();
 				return true;
 			}

@@ -163,6 +163,11 @@ namespace FWM::Overrides
 		return entry ? entry->engine.load(std::memory_order_relaxed) : 0;
 	}
 
+	bool Takes(RE::CombatController* a_controller, RE::ActorHandle a_target)
+	{
+		return a_controller && a_target && Valid(a_controller, a_target.native_handle());
+	}
+
 	void Install()
 	{
 		REL::Relocation<std::uintptr_t> vtable{ RE::VTABLE_CombatTargetSelectorStandard[0] };

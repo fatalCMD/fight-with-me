@@ -15,6 +15,59 @@
 
 namespace FWM::Abilities
 {
+	bool Busy(RE::Actor* a_actor)
+	{
+		auto* state = a_actor->AsActorState();
+		return a_actor->IsAttacking() || a_actor->IsInKillMove() || a_actor->IsInRagdollState() || state->IsStaggered() ||
+		       state->IsBleedingOut() || a_actor->IsStaggering();
+	}
+
+	// Busy (mid-swing, staggered) is waited out for a moment of real time, then answered.
+	bool WaitedTooLong(const Party::Member& a_member)
+	{
+		return ::GetTickCount64() - a_member.askedAt > 1500;
+	}
+
+	void Play(RE::BGSSoundDescriptorForm* a_sound, RE::Actor* a_at)
+	{
+		auto* audio = RE::BSAudioManager::GetSingleton();
+		if (!audio || !a_sound || !a_at) {
+			return;
+		}
+		RE::BSSoundHandle handle;
+		if (!audio->GetSoundHandle(handle, a_sound)) {
+			return;
+		}
+		handle.SetPosition(a_at->GetPosition());
+		handle.SetObjectToFollow(a_at->Get3D());
+		handle.Play();
+	}
+
+	// The game refuses an idle mid-swing or when its conditions fail; the graph event the
+	// idle names often still plays.
+	bool PlayIdle(RE::Actor* a_actor, RE::TESIdleForm* a_idle)
+	{
+		if (!a_actor || !a_idle) {
+			return false;
+		}
+		if (auto* process = a_actor->GetActorRuntimeData().currentProcess; process && process->PlayIdle(a_actor, a_idle, nullptr)) {
+			return true;
+		}
+		return !a_idle->animEventName.empty() && a_actor->NotifyAnimationGraph(a_idle->animEventName);
+	}
+
+	void HandGlow(RE::Actor* a_caster, RE::SpellItem* a_spell, float a_seconds)
+	{
+		if (!a_caster || !a_spell || a_spell->effects.empty() || !a_spell->effects[0] || !a_spell->effects[0]->baseEffect) {
+			return;
+		}
+		if (auto* art = a_spell->effects[0]->baseEffect->data.castingArt) {
+			auto* model = a_caster->Get3D();
+			auto* hand = model ? model->GetObjectByName("NPC L MagicNode [LMag]") : nullptr;
+			a_caster->ApplyArtObject(art, a_seconds, nullptr, false, false, hand);
+		}
+	}
+
 	namespace
 	{
 		std::vector<Hold> holds;
@@ -22,31 +75,11 @@ namespace FWM::Abilities
 
 		constexpr float kUnitsPerFoot = 21.33f;  // effect areas are authored in feet
 
-		bool Busy(RE::Actor* a_actor)
-		{
-			auto* state = a_actor->AsActorState();
-			return a_actor->IsAttacking() || a_actor->IsInKillMove() || a_actor->IsInRagdollState() ||
-			       state->IsStaggered() || state->IsBleedingOut() || a_actor->IsStaggering();
-		}
+		using Party::Answer;
 
 		bool Hidden(RE::Actor* a_actor)
 		{
 			return Game::Current(a_actor, RE::ActorValue::kInvisibility) > 0.0f;
-		}
-
-		void Play(RE::BGSSoundDescriptorForm* a_sound, RE::Actor* a_at)
-		{
-			auto* audio = RE::BSAudioManager::GetSingleton();
-			if (!audio || !a_sound || !a_at) {
-				return;
-			}
-			RE::BSSoundHandle handle;
-			if (!audio->GetSoundHandle(handle, a_sound)) {
-				return;
-			}
-			handle.SetPosition(a_at->GetPosition());
-			handle.SetObjectToFollow(a_at->Get3D());
-			handle.Play();
 		}
 
 		RE::TESIdleForm* TauntIdle(RE::Actor* a_tank)
@@ -122,6 +155,11 @@ namespace FWM::Abilities
 				LowerShield(a_member, a_tank, a_member.shielding ? "they cannot hold it"sv : ""sv);
 				return;
 			}
+			// Sent after someone: a raised shield slows the walk there and turns them away from it.
+			if (a_member.marked) {
+				LowerShield(a_member, a_tank, a_member.shielding ? "sent after a marked enemy"sv : ""sv);
+				return;
+			}
 
 			const auto               tankHandle = a_tank->GetHandle();
 			RE::NiPointer<RE::Actor> nearest;
@@ -134,9 +172,13 @@ namespace FWM::Abilities
 					continue;
 				}
 				const float d = Game::Distance(a_tank, enemy.get());
+				// A shooter the tank cannot get to (on a ledge, across a gap) is no reason to stand
+				// behind the shield facing them: that is all the tank would ever do.
+				const bool outOfReach = std::any_of(a_member.outOfReach.begin(), a_member.outOfReach.end(),
+					[&](const auto& a_entry) { return a_entry.first == profile.handle; });
 				if (d <= kShieldReach) {
 					inReach = true;
-				} else if ((profile.archer || profile.caster) && profile.target == tankHandle) {
+				} else if ((profile.archer || profile.caster) && profile.target == tankHandle && !outOfReach) {
 					++shooters;
 					if (d < nearestAt) {
 						nearestAt = d;
@@ -191,10 +233,28 @@ namespace FWM::Abilities
 			const auto& settings = Settings::Get();
 			const auto& tuning = settings.tuning;
 			a_member.inCombatFor += a_dt;
-			if (!settings.taunt || a_member.tauntReady > 0.0f || Busy(a_tank)) {
+			auto refuse = [&](std::string a_why) {
+				if (a_member.tauntRequested) {
+					a_member.tauntRequested = false;
+					Answer(a_member, std::move(a_why));
+				}
+			};
+			if (!settings.taunt) {
+				refuse("Taunts are switched off (Tanks settings).");
+				return;
+			}
+			if (a_member.tauntReady > 0.0f) {
+				refuse(std::format("Not yet: ready in {:.0f} s.", std::ceil(a_member.tauntReady)));
+				return;
+			}
+			if (Busy(a_tank)) {
+				if (a_member.tauntRequested && WaitedTooLong(a_member)) {
+					refuse("Could not break off to taunt.");
+				}
 				return;
 			}
 			if (Game::Current(a_tank, RE::ActorValue::kStamina) < tuning.tauntStamina) {
+				refuse(std::format("Too tired: a taunt takes {:.0f} stamina.", tuning.tauntStamina));
 				return;
 			}
 
@@ -244,6 +304,7 @@ namespace FWM::Abilities
 			}
 			if (candidates.empty()) {
 				a_member.tauntPending = false;
+				refuse(std::format("No enemy in sight within {:.0f}.", preview.radius));
 				return;
 			}
 
@@ -310,6 +371,11 @@ namespace FWM::Abilities
 			}
 
 			const bool ordered = a_member.tauntRequested;
+			if (ordered) {
+				Answer(a_member, heldCount > 0 ? std::format("Taunted: {} turned on them.", Count(heldCount)) :
+				                                 std::format("Taunted, but {} shrugged it off.", shrugged.empty() ? "everyone"s : shrugged),
+					heldCount > 0);
+			}
 			a_member.tauntCooldown = Rules::TauntCooldown(tankLevel, tuning);
 			a_member.tauntReady = a_member.tauntCooldown;
 			a_member.opened = true;
@@ -632,20 +698,39 @@ namespace FWM::Abilities
 			}
 			const auto& settings = Settings::Get();
 			const auto& tuning = settings.tuning;
+			auto        refuse = [&](std::string a_why) {
+				if (a_member.healRequested) {
+					a_member.healRequested = false;
+					Answer(a_member, std::move(a_why));
+				}
+			};
 			if (!settings.heal) {
 				StopReviving(a_member, "healing is switched off");
+				refuse("Healing is switched off (Healers settings).");
 				return;
 			}
 			if (a_healer->AsActorState()->IsBleedingOut()) {
 				StopReviving(a_member, "they went down on the way");
+				refuse("Down themselves.");
 				return;
 			}
 			if (!a_member.reviving) {
-				if (a_member.healReady > 0.0f || Busy(a_healer)) {
+				if (a_member.healReady > 0.0f) {
+					refuse(std::format("Not yet: ready in {:.0f} s.", std::ceil(a_member.healReady)));
+					return;
+				}
+				if (Busy(a_healer)) {
+					if (a_member.healRequested && WaitedTooLong(a_member)) {
+						refuse("Could not break off to heal.");
+					}
 					return;
 				}
 				if (!a_orders.autoAbility && !a_member.healRequested) {
 					return;
+				}
+			} else if (a_member.healRequested) {
+				if (auto patient = a_member.reviving.get()) {
+					refuse(std::format("Already on the way to {}.", Game::Name(patient.get())));
 				}
 			}
 
@@ -730,10 +815,12 @@ namespace FWM::Abilities
 					}
 				}
 			}
-			a_member.healRequested = false;
+			const bool asked = a_member.healRequested;
 			if (pick < 0) {
+				refuse(std::format("Nobody within {:.0f} needs healing.", tuning.healRange));
 				return;
 			}
+			a_member.healRequested = false;
 
 			auto*       target = allies[static_cast<std::size_t>(pick)].get();
 			const auto& chosen = candidates[static_cast<std::size_t>(pick)];
@@ -744,19 +831,37 @@ namespace FWM::Abilities
 				if (Leash::Available() && Game::Fraction(a_healer, RE::ActorValue::kHealth) >= kReviveFit) {
 					const auto cast = ChooseHeal(a_healer, target, tuning.reviveDistance);
 					if (!cast || Game::Current(a_healer, RE::ActorValue::kMagicka) < cast->cost) {
+						if (asked) {
+							Answer(a_member, cast ? std::format("Not enough magicka: {} takes {:.0f}.", cast->spell->GetName(), cast->cost) : "Knows no heal for them."s);
+						}
 						return;
 					}
 					a_member.reviving = target->GetHandle();
 					a_member.revivingFor = 0.0f;
 					Log::Info("[Heal] {} goes to {} (down, {:.0f} away)."sv, a_member.name, Game::Name(target), chosen.distance);
 					Notices::Push(std::format("{} runs to {}.", a_member.name, Game::Name(target)), Notices::Kind::kHeal);
+					if (asked) {
+						Answer(a_member, std::format("Running to {}, who is down.", Game::Name(target)), true);
+					}
 					return;
 				}
 				if (chosen.distance > tuning.healRange) {
+					if (asked) {
+						Answer(a_member, std::format("{} is too far to heal ({:.0f} away).", Game::Name(target), chosen.distance));
+					}
 					return;  // no way to walk them over, and too far to heal from here
 				}
 			}
-			Treat(a_member, a_healer, target, chosen.distance, chosen.health);
+			const bool treated = Treat(a_member, a_healer, target, chosen.distance, chosen.health);
+			if (asked) {
+				if (treated) {
+					Answer(a_member, std::format("Healing {}.", PatientName(a_healer, target)), true);
+				} else if (const auto cast = ChooseHeal(a_healer, target, chosen.distance)) {
+					Answer(a_member, std::format("Not enough magicka: {} takes {:.0f}.", cast->spell->GetName(), cast->cost));
+				} else {
+					Answer(a_member, std::format("Knows no heal for {}.", PatientName(a_healer, target)));
+				}
+			}
 		}
 	}
 
@@ -804,6 +909,111 @@ namespace FWM::Abilities
 				Heal(member, actor.get(), *orders, a_dt);
 			} else {
 				member.inCombatFor += a_dt;
+			}
+		}
+	}
+
+	void BlockIncoming(float a_dt)
+	{
+		// Every enemy arrow and spell in flight, once a frame.
+		struct Flying
+		{
+			RE::NiPoint3 at;
+			RE::NiPoint3 velocity;
+			RE::Actor*   target{ nullptr };
+			RE::Actor*   shooter{ nullptr };
+		};
+		std::vector<Flying> flying;
+		auto*               manager = RE::Projectile::Manager::GetSingleton();
+		if (!Settings::Get().shieldWall || !manager) {
+			return;
+		}
+		// Most parties have no tank: then the projectiles are never walked at all.
+		bool watching = false;
+		for (const auto& member : Party::Members()) {
+			const auto* orders = Party::FindOrders(member.id);
+			watching = watching || member.blockRaised || (orders && orders->role == Role::kTank && !member.summon);
+		}
+		if (!watching) {
+			return;
+		}
+		auto collect = [&](const RE::BSTArray<RE::ProjectileHandle>& a_list) {
+			for (const auto& handle : a_list) {
+				auto projectile = handle.get();
+				if (!projectile) {
+					continue;
+				}
+				auto&      data = projectile->GetProjectileRuntimeData();
+				const auto velocity = data.linearVelocity;
+				if (velocity.SqrLength() < 300.0f * 300.0f) {
+					continue;  // landed, or stuck in something
+				}
+				auto  from = data.shooter.get();
+				auto* shooter = from ? from->As<RE::Actor>() : nullptr;
+				if (!shooter || !Enemies::Find(shooter->GetFormID())) {
+					continue;  // not an enemy's
+				}
+				auto aimed = data.desiredTarget.get();
+				flying.push_back({ projectile->GetPosition(), velocity, aimed ? aimed->As<RE::Actor>() : nullptr, shooter });
+			}
+		};
+		collect(manager->limited);
+		collect(manager->unlimited);
+
+		for (auto& member : Party::Members()) {
+			member.blockHold = std::max(member.blockHold - a_dt, 0.0f);
+			auto tank = member.handle.get();
+			const auto* orders = Party::FindOrders(member.id);
+			if (!tank || !orders || orders->role != Role::kTank || member.summon || !Game::Usable(tank.get()) || !HasShield(tank.get())) {
+				continue;
+			}
+			// Will one reach them in the next second? Aimed at them, it only has to come close;
+			// aimed at someone else, it has to be about to hit them anyway.
+			const RE::NiPoint3 chest = tank->GetPosition() + RE::NiPoint3{ 0.0f, 0.0f, 90.0f };
+			const Flying*      incoming = nullptr;
+			for (const auto& f : flying) {
+				const float speed2 = f.velocity.SqrLength();
+				const auto  r = chest - f.at;
+				const float t = r.Dot(f.velocity) / speed2;
+				if (t < 0.0f || t > 1.0f) {
+					continue;
+				}
+				const float miss = (r - f.velocity * t).Length();
+				if (miss < (f.target == tank.get() ? 300.0f : 120.0f)) {
+					incoming = &f;
+					break;
+				}
+			}
+			auto* state = tank->AsActorState();
+			const bool able = !tank->IsAttacking() && !state->IsStaggered() && !state->IsBleedingOut() && !tank->IsInKillMove();
+			if (incoming && able) {
+				member.blockHold = 0.8f;
+				if (!tank->IsBlocking() && member.blockTries < 3) {
+					// Turned to meet it: a shield only covers the front.
+					const auto  source = incoming->shooter->GetPosition();
+					const auto  at = tank->GetPosition();
+					const float dx = source.x - at.x, dy = source.y - at.y;
+					if (dx * dx + dy * dy > 1.0f) {
+						tank->SetHeading(std::atan2(dx, dy));
+					}
+					tank->NotifyAnimationGraph("blockStart");
+					++member.blockTries;
+					member.blockRaised = true;
+					if (const auto now = ::GetTickCount64(); now - member.blockSaidAt > 5000) {
+						member.blockSaidAt = now;
+						Log::Info("[Taunt] {} raises the shield against {}'s {} ({:.0f} away)."sv, member.name, Game::Name(incoming->shooter),
+							incoming->target == tank.get() ? "shot at them"sv : "stray shot"sv, Game::Distance(tank.get(), incoming->shooter));
+					}
+				}
+			} else if (member.blockRaised && (member.blockHold <= 0.0f || !able)) {
+				// Down again unless the shield wall is holding it up on purpose.
+				if (!member.shielding) {
+					tank->NotifyAnimationGraph("blockStop");
+				}
+				member.blockRaised = false;
+			}
+			if (tank->IsBlocking() || !member.blockRaised) {
+				member.blockTries = 0;
 			}
 		}
 	}

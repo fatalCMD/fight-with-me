@@ -42,16 +42,42 @@ namespace FWM::Game
 		return a_a && a_b ? a_a->GetPosition().GetDistance(a_b->GetPosition()) : std::numeric_limits<float>::max();
 	}
 
+	namespace
+	{
+		// The head bone, found once per body rather than by a name search through the skeleton
+		// every frame for every marker. Kept with the body it came from (a new body is searched
+		// again), held only for a fight or a plan, and dropped wholesale after.
+		struct HeadBone
+		{
+			RE::NiPointer<RE::NiAVObject> body;
+			RE::NiPointer<RE::NiAVObject> head;
+		};
+		std::unordered_map<RE::FormID, HeadBone> headBones;
+	}
+
 	RE::NiPoint3 HeadPosition(RE::Actor* a_actor)
 	{
 		auto point = a_actor->GetPosition();
 		if (auto* model = a_actor->Get3D()) {
-			if (auto* head = model->GetObjectByName("NPC Head [Head]")) {
-				return head->world.translate;
+			if (headBones.size() > 128) {
+				headBones.clear();
+			}
+			auto& bone = headBones[a_actor->GetFormID()];
+			if (bone.body.get() != model) {
+				bone.body.reset(model);
+				bone.head.reset(model->GetObjectByName("NPC Head [Head]"));
+			}
+			if (bone.head) {
+				return bone.head->world.translate;
 			}
 		}
 		point.z += a_actor->GetHeight() * 0.9f;
 		return point;
+	}
+
+	void ForgetHeads()
+	{
+		headBones.clear();
 	}
 
 	bool IsBoss(RE::Actor* a_actor)

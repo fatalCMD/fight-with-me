@@ -3,12 +3,15 @@
 #include "FWM/Abilities.h"
 #include "FWM/Enemies.h"
 #include "FWM/Camera.h"
+#include "FWM/Forms.h"
 #include "FWM/Game.h"
 #include "FWM/Hud.h"
 #include "FWM/Leash.h"
 #include "FWM/Log.h"
 #include "FWM/Notices.h"
 #include "FWM/Overrides.h"
+#include "FWM/Potions.h"
+#include "FWM/Specials.h"
 #include "FWM/Party.h"
 #include "FWM/Rules.h"
 #include "FWM/Settings.h"
@@ -102,16 +105,127 @@ namespace FWM::Battle
 
 		int standDowns{ 0 };  // tries this fight at letting companions out of an empty fight
 
+		bool SetOrders(RE::FormID a_id, const Orders& a_orders);
+
+		// A mark ends when the enemy falls, the fight ends, a party order replaces it or the
+		// player calls the companion off. The focus it replaced comes back with it.
+		void EndMark(Party::Member& a_member, std::string_view a_why = {})
+		{
+			const bool had = static_cast<bool>(a_member.marked);
+			a_member.marked = {};
+			a_member.markFor = 0.0f;
+			a_member.markEngageIn = 0.0f;
+			a_member.markAsks = 0;
+			a_member.markTaken = false;
+			a_member.markWarned = false;
+			a_member.markStuck = false;
+			a_member.markRanged = Role::kCount;
+			if (const auto* own = Party::FindOrders(a_member.id); own && own->focus == Focus::kMarked) {
+				auto orders = *own;
+				orders.focus = a_member.focusBeforeMark.value_or(Info(orders.role).focus);
+				if (orders.focus == Focus::kMarked) {
+					orders.focus = Info(orders.role).focus;
+				}
+				if (had && !a_why.empty()) {
+					Log::Info("[Target] {}: the mark is over ({}); back to {}."sv, a_member.name, a_why, Info(orders.focus).name);
+				}
+				SetOrders(a_member.id, orders);
+			}
+			a_member.focusBeforeMark.reset();
+		}
+
+		// Marks with nothing behind them: a focus still on Marked after a load, or a mark left
+		// over after the player picked another focus.
+		void ForgetStaleMarks()
+		{
+			for (auto& member : Party::Members()) {
+				if (member.summon) {
+					continue;
+				}
+				const auto* own = Party::FindOrders(member.id);
+				if (!own) {
+					continue;
+				}
+				if (own->focus == Focus::kMarked && !member.marked) {
+					EndMark(member);
+				} else if (own->focus != Focus::kMarked && member.marked) {
+					member.marked = {};
+					member.focusBeforeMark.reset();
+				}
+			}
+		}
+
+		// While the plan is open, an enemy someone is sent after is outlined, through walls, so
+		// it can be picked out of the fight. Short outlines renewed while the mark lasts and the
+		// plan is up, and taken off the moment it closes: never one without an end.
+		std::unordered_map<RE::FormID, float> markGlows;  // enemy -> seconds left on their outline
+		constexpr float                       kMarkGlowSeconds = 2.5f;
+
+		void StopMarkGlows()
+		{
+			markGlows.clear();
+			auto* shader = Forms::Get().markGlow;
+			auto* lists = RE::ProcessLists::GetSingleton();
+			if (!shader || !lists) {
+				return;
+			}
+			lists->ForEachShaderEffect([&](RE::ShaderReferenceEffect* a_effect) {
+				if (a_effect && a_effect->effectData == shader) {
+					a_effect->finished = true;
+				}
+				return RE::BSContainer::ForEachResult::kContinue;
+			});
+		}
+
+		void GlowMarks(float a_dt)
+		{
+			std::vector<RE::NiPointer<RE::Actor>> marked;
+			for (auto& member : Party::Members()) {
+				if (auto enemy = member.marked.get(); enemy && !enemy->IsDead()) {
+					marked.push_back(std::move(enemy));
+				}
+			}
+			for (auto it = markGlows.begin(); it != markGlows.end();) {
+				const auto id = it->first;
+				if (std::none_of(marked.begin(), marked.end(), [&](const auto& a_enemy) { return a_enemy->GetFormID() == id; })) {
+					it = markGlows.erase(it);
+				} else {
+					it->second -= a_dt;
+					++it;
+				}
+			}
+			auto* shader = Forms::Get().markGlow;
+			if (!Settings::Get().markGlow || !shader || !planOpen.load()) {
+				return;
+			}
+			for (const auto& enemy : marked) {
+				auto& left = markGlows[enemy->GetFormID()];  // a new mark starts at nothing: lit at once
+				if (left > 0.5f) {
+					continue;
+				}
+				enemy->ApplyEffectShader(shader, kMarkGlowSeconds);
+				left = kMarkGlowSeconds;
+			}
+		}
+
 		void StandDown()
 		{
 			Overrides::Publish({});
+			Styles::Press({});
+			StopMarkGlows();
+			Specials::Clear();
+			Game::ForgetHeads();
 			emptyFor = 0.0f;
 			standDowns = 0;
 			Abilities::Clear();
 			Enemies::Clear();
 			for (auto& member : Party::Members()) {
 				member.desired = {};
-				member.marked = {};
+				member.outOfReach.clear();
+				member.reachRole = Role::kCount;
+				member.guardFor = 0.0f;
+				member.burstLeft = 0;
+				EndMark(member, "the fight is over"sv);
 				member.inCombatFor = 0.0f;
 				member.opened = false;
 				member.armed = false;
@@ -280,9 +394,101 @@ namespace FWM::Battle
 			emptyFor = 0.0f;
 		}
 
+		// When the combat AI finds no path to its target it notes where the target stood
+		// (CombatState::unreachableLocations), and while the target is near such a spot it
+		// circles and backs off instead of closing. Read on the main thread like the rest of
+		// the controller; the list is short and only positions are read.
+		// The layout is CommonLib's and checked here only by size, so the list is read under a
+		// structured exception guard: a wrong guess reads as "reachable", never as a crash.
+		bool NearUnreachableSpot(const RE::CombatState* a_state, float a_x, float a_y, float a_z)
+		{
+			__try {
+				const auto& spots = a_state->unreachableLocations;
+				const auto  count = spots.size();
+				if (count == 0 || count > 64 || spots.capacity() < count) {
+					return false;
+				}
+				const RE::UnreachableLocation* data = spots.data();
+				for (std::uint32_t i = 0; i < count; ++i) {
+					const float dx = data[i].loc.pos.x - a_x, dy = data[i].loc.pos.y - a_y, dz = data[i].loc.pos.z - a_z;
+					if (dx * dx + dy * dy + dz * dz < 320.0f * 320.0f) {
+						return true;
+					}
+				}
+				return false;
+			} __except (EXCEPTION_EXECUTE_HANDLER) {
+				return false;
+			}
+		}
+
+		bool Unreachable(RE::CombatController* a_controller, RE::Actor* a_target)
+		{
+			auto* state = a_controller ? a_controller->state : nullptr;
+			if (!state || !a_target) {
+				return false;
+			}
+			const auto at = a_target->GetPosition();
+			return NearUnreachableSpot(state, at.x, at.y, at.z);
+		}
+
+		// A mark that cannot be reached on foot: shoot or cast at it if they can, otherwise
+		// say so and let them go back to their own focus rather than circle it for ever.
+		void MarkOutOfReach(Party::Member& a_member, RE::Actor* a_target, std::string_view a_why)
+		{
+			a_member.markStuck = true;
+			const auto target = Game::Name(a_target);
+			if (a_member.arsenal.ranged && a_member.arsenal.ammo) {
+				a_member.markRanged = Role::kArcher;
+			} else if (a_member.arsenal.casts) {
+				a_member.markRanged = Role::kMage;
+			}
+			if (a_member.markRanged != Role::kCount) {
+				const bool bow = a_member.markRanged == Role::kArcher;
+				Log::Info("[Target] {} cannot reach {} ({}); {} instead."sv, a_member.name, target, a_why, bow ? "shoots"sv : "casts"sv);
+				Notices::Push(std::format("{} can't reach {}: {} instead.", a_member.name, target, bow ? "shooting" : "casting"), Notices::Kind::kWarning);
+				return;
+			}
+			Log::Info("[Target] {} cannot reach {} ({}) and has no bow or spells; the order is dropped."sv, a_member.name, target, a_why);
+			Notices::Push(std::format("{} can't reach {}.", a_member.name, target), Notices::Kind::kWarning);
+			EndMark(a_member, "cannot reach them"sv);
+		}
+
 		// A melee companion who never closes on their target: usually the path (a ledge,
 		// water, a locked gate), not the orders. One line per target, after eight seconds.
-		void Chase(Party::Member& a_member, RE::Actor* a_actor, const RE::ActorHandle& a_target, float a_dt)
+		bool OutOfReach(const Party::Member& a_member, const RE::ActorHandle& a_enemy)
+		{
+			return std::any_of(a_member.outOfReach.begin(), a_member.outOfReach.end(), [&](const auto& a_entry) { return a_entry.first == a_enemy; });
+		}
+
+		// An enemy a melee companion cannot get to on foot: an archer on a ledge, someone across
+		// water or a gap. They are left alone for a while (the targeting rules skip them), then
+		// tried again; coming within reach of them ends it at once.
+		constexpr float kOutOfReachSeconds = 25.0f;
+
+		void NoteOutOfReach(Party::Member& a_member, RE::Actor* a_actor, RE::Actor* a_enemy, std::string_view a_how)
+		{
+			const auto handle = a_enemy->GetHandle();
+			if (OutOfReach(a_member, handle)) {
+				return;
+			}
+			a_member.outOfReach.emplace_back(handle, kOutOfReachSeconds);
+			Log::Info("[Target] {} cannot reach {} on foot ({:.0f} away; {}); fights someone else for {:.0f} s."sv, a_member.name, Game::Name(a_enemy),
+				Game::Distance(a_actor, a_enemy), a_how, kOutOfReachSeconds);
+		}
+
+		void AgeReach(Party::Member& a_member, RE::Actor* a_actor, float a_dt)
+		{
+			std::erase_if(a_member.outOfReach, [&](auto& a_entry) {
+				a_entry.second -= a_dt;
+				auto enemy = a_entry.first.get();
+				return a_entry.second <= 0.0f || !enemy || enemy->IsDead() || Game::Distance(a_actor, enemy.get()) < 400.0f;
+			});
+		}
+
+		// A melee companion who never closes on their target: usually the path (a ledge,
+		// water, a locked gate), not the orders. After eight seconds without getting closer,
+		// the target counts as out of reach for them.
+		void Chase(Party::Member& a_member, RE::Actor* a_actor, RE::CombatController* a_controller, const RE::ActorHandle& a_target, float a_dt)
 		{
 			auto target = a_target.get();
 			if (!target) {
@@ -292,19 +498,100 @@ namespace FWM::Battle
 			const float d = Game::Distance(a_actor, target.get());
 			const bool same = a_member.chasing == a_target;
 			if (!same || d < a_member.chasingFrom - 150.0f || d < 400.0f) {
-				// Progress, or a new target: start the clock again. Once said for a target, it
-				// is not said again until they reach it.
+				// Progress, or a new target: start the clock again.
 				a_member.chasingLogged = same && a_member.chasingLogged && d >= 400.0f;
 				a_member.chasing = a_target;
 				a_member.chasingFrom = d;
 				a_member.chasingFor = 0.0f;
+				a_member.chasingAt = a_actor->GetPosition();
 				return;
 			}
 			a_member.chasingFor += a_dt;
 			if (a_member.chasingFor > 8.0f && !a_member.chasingLogged) {
+				// No closer, but running all the while: an archer backing off as fast as they come,
+				// not a ledge. Keep after them. Out of reach is someone circling in one spot below.
+				const bool engineSays = Unreachable(a_controller, target.get());
+				if (!engineSays && a_actor->GetPosition().GetDistance(a_member.chasingAt) > 350.0f) {
+					a_member.chasingFrom = d;
+					a_member.chasingFor = 0.0f;
+					a_member.chasingAt = a_actor->GetPosition();
+					return;
+				}
 				a_member.chasingLogged = true;
-				Log::Info("[Target] {} has not closed on {} in {:.0f} s ({:.0f} away); the way there may be blocked."sv, a_member.name,
-					Game::Name(target.get()), a_member.chasingFor, d);
+				NoteOutOfReach(a_member, a_actor, target.get(), engineSays ? "the combat AI found no path either"sv : "no closer in 8 s, circling in place"sv);
+			}
+		}
+
+		// An enemy a taunt holds that keeps its distance from the tank, for the log: whether
+		// pressing works, and on what kind of fighter it does not.
+		struct HoldWatch
+		{
+			float closest{ std::numeric_limits<float>::max() };
+			float stuckFor{ 0.0f };
+			bool  logged{ false };
+		};
+		std::unordered_map<RE::FormID, HoldWatch> holdWatch;
+
+		void WatchHold(RE::Actor* a_enemy, RE::Actor* a_tank, float a_dt)
+		{
+			auto&       watch = holdWatch[a_enemy->GetFormID()];
+			const float d = Game::Distance(a_enemy, a_tank);
+			if (d < watch.closest - 100.0f || d < 350.0f) {
+				watch.closest = std::min(watch.closest, d);
+				watch.stuckFor = 0.0f;
+				return;
+			}
+			watch.stuckFor += a_dt;
+			if (watch.stuckFor > 6.0f && !watch.logged) {
+				watch.logged = true;
+				const auto* profile = Enemies::Find(a_enemy->GetFormID());
+				const auto  kind = profile && profile->archer ? "archer"sv : (profile && profile->caster ? "caster"sv : "melee"sv);
+				auto*       controller = Game::Controller(a_enemy);
+				Log::Info("[Taunt] {} ({}) is held by {} but stays {:.0f} away after {:.0f} s{}."sv, Game::Name(a_enemy), kind, Game::Name(a_tank), d,
+					watch.stuckFor, Unreachable(controller, a_tank) ? "; the combat AI found no path to them" : "");
+			}
+		}
+
+		// The combat AI only takes a target its combat group already knows, so an enemy that
+		// has not fought this companion yet (or a companion not fighting at all) would be
+		// refused over and over. StartCombat adds the enemy to their fight, as a script's
+		// StartCombat does; asked again every two seconds until it holds.
+		void Engage(Party::Member& a_member, RE::Actor* a_actor, RE::CombatController* a_controller, float a_dt)
+		{
+			auto marked = a_member.marked.get();
+			if (!marked) {
+				return;
+			}
+			a_member.markFor += a_dt;
+			a_member.markEngageIn -= a_dt;
+			const bool inFight = a_actor->IsInCombat() && a_controller;
+			if (inFight && Overrides::Takes(a_controller, a_member.marked)) {
+				if (a_controller->targetHandle == a_member.marked) {
+					if (!a_member.markTaken) {
+						a_member.markTaken = true;
+						Log::Info("[Target] {} is on {} ({:.0f} away, {:.1f} s after the order)."sv, a_member.name, Game::Name(marked.get()),
+							Game::Distance(a_actor, marked.get()), a_member.markFor);
+					}
+				} else if (!a_member.markWarned && a_member.markFor > 4.0f) {
+					a_member.markWarned = true;
+					auto other = a_controller->targetHandle.get();
+					Log::Info("[Target] {} was sent after {} {:.0f} s ago but fights {}{}."sv, a_member.name, Game::Name(marked.get()), a_member.markFor,
+						other ? Game::Name(other.get()) : "nobody"s, a_member.reviving ? " (on the way to heal someone)" : "");
+				}
+				return;
+			}
+			if (a_member.markEngageIn > 0.0f) {
+				return;
+			}
+			a_member.markEngageIn = 2.0f;
+			const bool taken = a_actor->StartCombat(marked.get());
+			if (++a_member.markAsks == 1 || a_member.markAsks == 5) {
+				const auto refused = taken ? ""s : std::format("; refused (try {})", a_member.markAsks);
+				if (inFight) {
+					Log::Info("[Target] {}'s fight did not include {}; asked the combat AI to add them{}."sv, a_member.name, Game::Name(marked.get()), refused);
+				} else {
+					Log::Info("[Target] {} was out of combat; asked the combat AI to start a fight with {}{}."sv, a_member.name, Game::Name(marked.get()), refused);
+				}
 			}
 		}
 
@@ -336,6 +623,15 @@ namespace FWM::Battle
 				}
 				auto actor = member.handle.get();
 				auto* controller = actor ? Game::Controller(actor.get()) : nullptr;
+				if (member.marked) {
+					auto marked = member.marked.get();
+					if (!marked || marked->IsDead() || marked->IsDisabled()) {
+						EndMark(member, marked && marked->IsDead() ? "they are dead"sv : "they are gone"sv);
+					} else if (actor && Game::Usable(actor.get()) && !actor->AsActorState()->IsBleedingOut()) {
+						Engage(member, actor.get(), controller, a_dt);
+						controller = Game::Controller(actor.get());  // StartCombat may have made one
+					}
+				}
 				if (!actor || !Game::Usable(actor.get()) || !actor->IsInCombat() || !controller) {
 					member.desired = {};
 					member.armed = false;
@@ -361,15 +657,68 @@ namespace FWM::Battle
 				if (orders.role == Role::kArcher && member.arsenalKnown && !member.arsenal.ammo) {
 					fightAs.role = Role::kFighter;
 				}
-				Styles::Apply(actor.get(), fightAs, resolved);
+				// Who they cannot get to on foot: forget those they reached after all, and note the
+				// one they are on if the combat AI has already found there is no way.
+				AgeReach(member, actor.get(), a_dt);
+				if (!Rules::IsRanged(fightAs.role)) {
+					if (auto on = controller->targetHandle.get(); on && Unreachable(controller, on.get())) {
+						NoteOutOfReach(member, actor.get(), on.get(), "the combat AI found no path"sv);
+					}
+				}
+				// Sent after a marked enemy: no leash holds them, and they go straight at it and
+				// stay on it. Guard, Hold back and With me make melee slow to commit, a tank's
+				// dueling and shield keep them circling at arm's length, and the combat AI circles
+				// while it waits a turn: all of it reads as ignoring the order.
+				bool markLive = member.marked && orders.focus == Focus::kMarked;
+				if (markLive && !member.markStuck && !Rules::IsRanged(fightAs.role) && OutOfReach(member, member.marked)) {
+					if (auto mark = member.marked.get()) {
+						MarkOutOfReach(member, mark.get(), "no way there on foot"sv);
+					}
+					markLive = member.marked && Party::FindOrders(member.id) && Party::FindOrders(member.id)->focus == Focus::kMarked;
+				}
+				if (markLive && member.markRanged != Role::kCount) {
+					fightAs.role = member.markRanged;
+				} else if (!Rules::IsRanged(fightAs.role)) {
+					// Nobody left that they can get to: a bow or spells, if they have them, beat
+					// standing under a ledge.
+					const bool nobody = !member.outOfReach.empty() && std::all_of(profiles.begin(), profiles.end(), [&](const auto& a_profile) {
+						auto enemy = a_profile.handle.get();
+						return !enemy || enemy->IsDead() || OutOfReach(member, a_profile.handle);
+					});
+					Role instead = Role::kCount;
+					if (nobody && member.arsenal.ranged && member.arsenal.ammo) {
+						instead = Role::kArcher;
+					} else if (nobody && member.arsenal.casts) {
+						instead = Role::kMage;
+					}
+					if (instead != member.reachRole) {
+						if (instead != Role::kCount) {
+							Log::Info("[Target] {} can reach nobody on foot; {} instead."sv, member.name, instead == Role::kArcher ? "shoots"sv : "casts"sv);
+						} else if (member.reachRole != Role::kCount) {
+							Log::Info("[Target] {} has someone in reach again."sv, member.name);
+						}
+						member.reachRole = instead;
+					}
+					if (instead != Role::kCount) {
+						fightAs.role = instead;
+					}
+				}
+				const bool charge = markLive && !Rules::IsRanged(fightAs.role);
+				Styles::Apply(actor.get(), fightAs, charge ? Position::kFrontLine : resolved, charge);
 				if (auto patient = member.reviving.get()) {
 					// A little inside arm's reach, so they arrive close enough to heal.
 					Leash::Apply(actor.get(), std::max(settings.tuning.reviveDistance - 60.0f, 100.0f), patient.get());
 					member.leashOnPatient = true;
+				} else if (member.guardFor > 0.0f) {
+					// Bodyguard: at your side, whatever their position.
+					Leash::Apply(actor.get(), 220.0f, a_player);
+					member.leashOnPatient = true;
 				} else if (settings.guardLeash || member.leashOnPatient) {
 					member.leashOnPatient = false;
 					float leash = 0.0f;
-					if (resolved == Position::kGuard) {
+					if (markLive) {
+						leash = 0.0f;
+					} else if (resolved == Position::kGuard) {
 						leash = settings.tuning.guardRadius;
 					} else if (resolved == Position::kHoldBack) {
 						leash = settings.holdBackLeash;
@@ -377,12 +726,6 @@ namespace FWM::Battle
 						leash = settings.tuning.withMeRadius + 150.0f;  // room to fight what reaches you
 					}
 					Leash::Apply(actor.get(), settings.guardLeash ? leash : 0.0f);
-				}
-
-				if (member.marked) {
-					if (auto marked = member.marked.get(); !marked || marked->IsDead()) {
-						member.marked = {};
-					}
 				}
 
 				const auto engine = Overrides::EngineChoice(reinterpret_cast<std::uintptr_t>(controller));
@@ -412,6 +755,7 @@ namespace FWM::Battle
 					v.marked = member.marked && profile.handle == member.marked;
 					v.current = controller->targetHandle == profile.handle;
 					v.engineChoice = engine != 0 && engine == Game::Native(profile.handle);
+					v.outOfReach = OutOfReach(member, profile.handle);
 					for (const auto& [id, on] : engaged) {
 						if (id != member.id && on == profile.handle) {
 							++v.alliesOn;
@@ -434,12 +778,12 @@ namespace FWM::Battle
 					desired = {};
 				}
 				// Shield up against archers: turned to the nearest of them, closing under it.
-				if (member.shielding && member.shieldFacing) {
+				if (member.shielding && member.shieldFacing && !markLive && !OutOfReach(member, member.shieldFacing)) {
 					desired = member.shieldFacing;
 				}
-				// Closing on someone in melee: say so if it never happens.
-				if (!Rules::IsRanged(fightAs.role) && (resolved == Position::kFree || resolved == Position::kFrontLine) && !member.shielding) {
-					Chase(member, actor.get(), desired ? desired : controller->targetHandle, a_dt);
+				// Closing on someone in melee, shield up or not: if it never happens, they are out of reach.
+				if (!Rules::IsRanged(fightAs.role) && (resolved == Position::kFree || resolved == Position::kFrontLine || markLive || member.shielding)) {
+					Chase(member, actor.get(), controller, desired ? desired : controller->targetHandle, a_dt);
 				} else {
 					member.chasing = {};
 				}
@@ -453,18 +797,51 @@ namespace FWM::Battle
 					Log::Info("[Target] {}: {} ({} / {})."sv, member.name, chosen ? chosen->name : "their own choice"s,
 						Info(focus).name, Info(resolved).name);
 				}
+				// Bodyguard: whoever is on you, the nearest first.
+				if (member.guardFor > 0.0f) {
+					float closest = std::numeric_limits<float>::max();
+					for (const auto& profile : profiles) {
+						auto enemy = profile.handle.get();
+						if (enemy && Game::Usable(enemy.get()) && profile.target == playerHandle) {
+							if (const float d = Game::Distance(a_player, enemy.get()); d < closest) {
+								closest = d;
+								desired = profile.handle;
+							}
+						}
+					}
+				}
+				// A volley: every archer and mage on the one enemy.
+				if (const auto volley = Specials::VolleyTarget();
+					volley && (fightAs.role == Role::kArcher || fightAs.role == Role::kMage) && Overrides::Takes(controller, volley)) {
+					desired = volley;
+				}
 				member.desired = desired;
 				entries.emplace_back(reinterpret_cast<std::uintptr_t>(controller), Game::Native(member.handle), Game::Native(desired),
 					Rules::IsRanged(orders.role));
 			}
 
-			// Enemies held by a taunt want the tank, whatever their own AI thinks.
+			// Enemies held by a taunt want the tank, whatever their own AI thinks, and press them
+			// instead of circling at a distance waiting a turn.
+			std::vector<RE::NiPointer<RE::Actor>> held;
 			for (const auto& hold : Abilities::Holds()) {
 				auto enemy = hold.enemy.get();
 				if (auto* controller = enemy ? Game::Controller(enemy.get()) : nullptr) {
 					entries.emplace_back(reinterpret_cast<std::uintptr_t>(controller), Game::Native(hold.enemy), Game::Native(hold.tank));
+					if (auto tank = hold.tank.get()) {
+						WatchHold(enemy.get(), tank.get(), a_dt);
+					}
+					held.push_back(std::move(enemy));
 				}
 			}
+			std::erase_if(holdWatch, [&](const auto& a_watch) {
+				return std::none_of(held.begin(), held.end(), [&](const auto& a_enemy) { return a_enemy->GetFormID() == a_watch.first; });
+			});
+			std::vector<RE::Actor*> raw;
+			raw.reserve(held.size());
+			for (const auto& enemy : held) {
+				raw.push_back(enemy.get());
+			}
+			Styles::Press(raw);
 			Overrides::Publish(std::move(entries));
 		}
 
@@ -522,6 +899,8 @@ namespace FWM::Battle
 		{
 			bool changed = false;
 			for (auto& member : Party::Members()) {
+				member.outOfReach.clear();  // a fresh order: try everyone again
+				member.reachRole = Role::kCount;
 				if (const auto* own = member.summon ? nullptr : Party::FindOrders(member.id)) {
 					changed = SetOrders(member.id, Shouted(*own, a_shout)) || changed;
 				}
@@ -547,6 +926,10 @@ namespace FWM::Battle
 				auto* member = Party::Find(command.member);
 				switch (command.type) {
 				case Command::Type::kSetOrders:
+					if (member) {
+						member->outOfReach.clear();
+						member->reachRole = Role::kCount;
+					}
 					if (const auto lack = Party::LackFor(command.member, command.orders.role); lack != Lack::kNothing) {
 						Log::Info("[Party] {} refused for {:08X}: {}"sv, Info(command.orders.role).name, command.member, Why(lack));
 						break;
@@ -556,24 +939,51 @@ namespace FWM::Battle
 					break;
 				case Command::Type::kMark:
 					if (member) {
-						auto* profile = Enemies::Find(command.enemy);
-						member->marked = profile ? profile->handle : RE::ActorHandle{};
-						if (profile) {
-							auto orders = Party::FindOrders(command.member) ? *Party::FindOrders(command.member) : Orders{};
-							orders.focus = Focus::kMarked;
-							SetOrders(command.member, orders);
-							shout = Shout::kNone;
+						auto* profile = command.enemy ? Enemies::Find(command.enemy) : nullptr;
+						if (!profile) {
+							EndMark(*member, "called off"sv);
+							break;
 						}
+						auto orders = Party::FindOrders(command.member) ? *Party::FindOrders(command.member) : Orders{};
+						if (orders.focus != Focus::kMarked) {
+							member->focusBeforeMark = orders.focus;
+						}
+						member->marked = profile->handle;
+						member->markFor = 0.0f;
+						member->markEngageIn = 0.0f;
+						member->markAsks = 0;
+						member->markTaken = false;
+						member->markWarned = false;
+						member->markStuck = false;
+						member->markRanged = Role::kCount;
+						// Sent after them on purpose: an old "no way there" note gets one more try.
+						std::erase_if(member->outOfReach, [&](const auto& a_note) { return a_note.first == profile->handle; });
+						orders.focus = Focus::kMarked;
+						SetOrders(command.member, orders);
+						shout = Shout::kNone;
+						auto actor = member->handle.get();
+						auto enemy = profile->handle.get();
+						Log::Info("[Orders] {} is sent after {} ({:.0f} away)."sv, member->name, profile->name,
+							actor && enemy ? Game::Distance(actor.get(), enemy.get()) : 0.0f);
+						GlowMarks(0.0f);
 					}
 					break;
 				case Command::Type::kTauntNow:
 					if (member) {
 						member->tauntRequested = true;
+						member->askedAt = ::GetTickCount64();
+					}
+					break;
+				case Command::Type::kSpecialNow:
+					if (member) {
+						member->specialRequested = true;
+						member->askedAt = ::GetTickCount64();
 					}
 					break;
 				case Command::Type::kHealNow:
 					if (member) {
 						member->healRequested = true;
+						member->askedAt = ::GetTickCount64();
 					}
 					break;
 				case Command::Type::kShout:
@@ -581,6 +991,8 @@ namespace FWM::Battle
 					break;
 				case Command::Type::kPreset:
 					for (auto& each : Party::Members()) {
+						each.outOfReach.clear();
+						each.reachRole = Role::kCount;
 						if (const auto* orders = each.summon ? nullptr : Party::FindOrders(each.id)) {
 							SetOrders(each.id, ApplyPreset(*orders, command.preset));
 						}
@@ -604,6 +1016,28 @@ namespace FWM::Battle
 				p.on = p.x >= 0.0f && p.x <= 1.0f && p.y >= 0.0f && p.y <= 1.0f;
 			}
 			return p;
+		}
+
+		// A circle on the ground, a little above it so it is not lost in the floor.
+		std::vector<View::Point> GroundRing(const RE::NiPoint3& a_centre, float a_radius, int a_segments)
+		{
+			std::vector<View::Point> ring;
+			ring.reserve(static_cast<std::size_t>(a_segments) + 1);
+			for (int i = 0; i <= a_segments; ++i) {
+				const float a = 6.2831853f * static_cast<float>(i) / static_cast<float>(a_segments);
+				ring.push_back(Screen({ a_centre.x + std::cos(a) * a_radius, a_centre.y + std::sin(a) * a_radius, a_centre.z + 8.0f }));
+			}
+			return ring;
+		}
+
+		// Seen from above: where someone stands and a ring a little wider than they are.
+		void Footprint(RE::Actor* a_actor, View::Point& a_foot, std::vector<View::Point>& a_ring)
+		{
+			const auto  at = a_actor->GetPosition();
+			const auto  min = a_actor->GetBoundMin(), max = a_actor->GetBoundMax();
+			const float width = std::max(max.x - min.x, max.y - min.y) * 0.5f * a_actor->GetScale();
+			a_foot = Screen({ at.x, at.y, at.z + 8.0f });
+			a_ring = GroundRing(at, std::clamp(width + 22.0f, 40.0f, 220.0f), 24);
 		}
 
 		// What the party view shows of a companion: who they are, what they can take and deal,
@@ -665,6 +1099,11 @@ namespace FWM::Battle
 			if (cached.at == 0 || a_now - cached.at >= kSlowMs) {
 				View::Member fresh;
 				Sheet(fresh, a_actor);
+				const auto stock = Potions::StockOf(a_actor);
+				fresh.potionHealing = stock.healing;
+				fresh.potionMagicka = stock.magicka;
+				fresh.potionStamina = stock.stamina;
+				fresh.potionOther = stock.other;
 				if (!a_member.summon) {
 					if (const auto heal = Abilities::PreviewHeal(a_actor)) {
 						fresh.canHeal = true;
@@ -700,6 +1139,10 @@ namespace FWM::Battle
 			a_member.healBorrowed = s.healBorrowed;
 			a_member.healAmount = s.healAmount;
 			a_member.healCost = s.healCost;
+			a_member.potionHealing = s.potionHealing;
+			a_member.potionMagicka = s.potionMagicka;
+			a_member.potionStamina = s.potionStamina;
+			a_member.potionOther = s.potionOther;
 		}
 
 		void BuildView()
@@ -728,6 +1171,12 @@ namespace FWM::Battle
 			}
 			snapshot->playerLevel = player->GetLevel();
 			snapshot->inCombat = AnyoneFighting(player);
+			snapshot->driving = Camera::Driving();
+			snapshot->overhead = Camera::Overhead();
+			if (snapshot->overhead) {
+				snapshot->playerHead = Screen(Game::HeadPosition(player) + RE::NiPoint3{ 0.0f, 0.0f, 22.0f });
+				Footprint(player, snapshot->playerFoot, snapshot->playerRing);
+			}
 
 			for (auto& member : Party::Members()) {
 				auto actor = member.handle.get();
@@ -760,6 +1209,13 @@ namespace FWM::Battle
 				}
 				m.tauntReady = member.tauntReady;
 				m.tauntCooldown = member.tauntCooldown;
+				m.asked = member.tauntRequested || member.healRequested || member.specialRequested;
+				m.brewing = member.brewing >= 0.0f;
+				if (member.answerAt && now - member.answerAt < 6000) {
+					m.answer = member.answer;
+					m.answerDone = member.answerDone;
+					m.answerAge = static_cast<float>(now - member.answerAt) / 1000.0f;
+				}
 				m.held = member.held;
 				if (!member.summon) {
 					const auto taunt = Abilities::PreviewTaunt(actor.get());
@@ -769,17 +1225,18 @@ namespace FWM::Battle
 					m.tauntHold = taunt.hold;
 					m.tauntStamina = taunt.stamina;
 					m.healReady = member.healReady;
+					m.special = SpecialOf(m.orders.role);
+					m.specialReady = member.specialReady;
+					m.specialCooldown = member.specialCooldown;
+					m.guarding = member.guardFor > 0.0f;
 					if (m.orders.role == Role::kTank) {
-						const auto centre = actor->GetPosition();
-						constexpr int segments = 40;
-						m.ring.reserve(segments + 1);
-						for (int i = 0; i <= segments; ++i) {
-							const float a = 6.2831853f * static_cast<float>(i) / segments;
-							m.ring.push_back(Screen({ centre.x + std::cos(a) * taunt.radius, centre.y + std::sin(a) * taunt.radius, centre.z + 8.0f }));
-						}
+						m.ring = GroundRing(actor->GetPosition(), taunt.radius, 40);
 					}
 				}
 				m.head = Screen(Game::HeadPosition(actor.get()) + RE::NiPoint3{ 0.0f, 0.0f, 22.0f });
+				if (snapshot->overhead) {
+					Footprint(actor.get(), m.foot, m.footRing);
+				}
 				FillSlowParts(m, actor.get(), now);
 				snapshot->party.push_back(std::move(m));
 			}
@@ -807,6 +1264,9 @@ namespace FWM::Battle
 					e.heldBy = tank->GetFormID();
 				}
 				e.head = Screen(Game::HeadPosition(actor.get()) + RE::NiPoint3{ 0.0f, 0.0f, 26.0f });
+				if (snapshot->overhead) {
+					Footprint(actor.get(), e.foot, e.footRing);
+				}
 				snapshot->enemies.push_back(std::move(e));
 			}
 
@@ -837,9 +1297,11 @@ namespace FWM::Battle
 		rosterIn -= a_dt;
 		if (rosterIn <= 0.0f) {
 			Party::Refresh(0.5f - rosterIn);
+			ForgetStaleMarks();
 			rosterIn = 0.5f;
 		}
 
+		Potions::Rest(a_dt);
 		if (!AnyoneFighting(player)) {
 			if (fighting) {
 				StandDown();
@@ -855,12 +1317,19 @@ namespace FWM::Battle
 			Log::Info("[Battle] Combat with {} companion(s)."sv, Party::Members().size());
 		}
 
+		// Arrows cross a room in under a second: the shield is checked every frame, not on the planner's tick.
+		Abilities::BlockIncoming(a_dt);
+		Specials::Tick(a_dt);
+
 		pendingDt += a_dt;
 		decideIn -= a_dt;
 		if (decideIn <= 0.0f) {
 			Enemies::Update(pendingDt);
 			Abilities::Update(pendingDt);
+			Specials::Update(pendingDt);
+			Potions::Fight(pendingDt);
 			Decide(player, pendingDt);
+			GlowMarks(pendingDt);
 			LeaveIfEmpty(pendingDt);
 			pendingDt = 0.0f;
 			decideIn = Settings::Get().planInterval;
@@ -908,6 +1377,7 @@ namespace FWM::Battle
 				TimeBend::Begin();
 				Hud::Hide();
 				Camera::Begin();
+				GlowMarks(0.0f);
 				for (auto& member : Party::Members()) {
 					member.arsenalIn = 0.0f;  // gear may have changed since the last look
 				}
@@ -929,6 +1399,10 @@ namespace FWM::Battle
 				TimeBend::End();
 				Hud::Restore();
 				Camera::End();
+				StopMarkGlows();
+				if (!fighting) {
+					Game::ForgetHeads();
+				}
 			});
 		}
 	}

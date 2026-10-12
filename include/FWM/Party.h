@@ -21,6 +21,18 @@ namespace FWM::Party
 		// This fight
 		RE::ActorHandle desired;  // the planner's pick, or none
 		RE::ActorHandle marked;   // an enemy the player marked for them
+		std::optional<Focus> focusBeforeMark;  // what the mark replaced, given back when it ends
+		float           markFor{ 0.0f };       // seconds since the mark was given
+		float           markEngageIn{ 0.0f };  // before asking the engine again to add the mark to their fight
+		int             markAsks{ 0 };         // times it was asked
+		bool            markTaken{ false };    // the combat AI has them on the mark
+		bool            markWarned{ false };   // the log has said they are not
+		bool            markStuck{ false };    // the mark cannot be reached on foot
+		Role            markRanged{ Role::kCount };  // what they fight it as instead: Archer or Mage
+
+		// Enemies they found no way to on foot lately, and for how many more seconds that holds.
+		std::vector<std::pair<RE::ActorHandle, float>> outOfReach;
+		Role                                           reachRole{ Role::kCount };  // nobody in reach: what they fight as instead
 		float           tauntReady{ 0.0f };  // seconds until the next taunt is allowed
 		float           tauntCooldown{ 0.0f };  // length of the last cooldown, for the menu
 		float           healReady{ 0.0f };
@@ -28,6 +40,10 @@ namespace FWM::Party
 		bool            opened{ false };     // the opening taunt is spent
 		bool            tauntRequested{ false };
 		bool            healRequested{ false };
+		std::uint64_t   askedAt{ 0 };    // tick of the last ability the player asked for
+		std::string     answer;          // what came of it, for the plan: done, or why not
+		std::uint64_t   answerAt{ 0 };
+		bool            answerDone{ false };  // done, rather than refused
 		int             held{ 0 };           // enemies this tank currently holds
 		bool            down{ false };       // bleeding out at the last decision
 
@@ -61,17 +77,50 @@ namespace FWM::Party
 		int             shieldMisses{ 0 };   // checks in a row where the game was not showing the block
 		RE::ActorHandle shieldFacing;
 
+		// Arrows and spells flying at them: the shield up for a moment to meet them.
+		float         blockHold{ 0.0f };   // seconds the shield stays up after the last one
+		int           blockTries{ 0 };     // blockStart sent without the game showing the block
+		bool          blockRaised{ false };
+		std::uint64_t blockSaidAt{ 0 };    // the log line, at most every few seconds
+
 		// The target they are closing on, for noticing one they never reach.
 		RE::ActorHandle chasing;
 		float           chasingFrom{ 0.0f };
 		float           chasingFor{ 0.0f };
 		bool            chasingLogged{ false };
+		RE::NiPoint3    chasingAt{};  // where they stood when the clock started
 
 		// A healer on their way to a downed companion, to heal them up close.
 		RE::ActorHandle reviving;
 		float           revivingFor{ 0.0f };
 		bool            leashOnPatient{ false };  // the leash is centred on them, not the player
+
+		// The role's special: bodyguard, volley, war cry, ward or disarm.
+		bool  specialRequested{ false };
+		float specialReady{ 0.0f };     // seconds until it can be used again
+		float specialCooldown{ 0.0f };  // length of the last cooldown, for the menu
+		float guardFor{ 0.0f };         // bodyguard: seconds left at your side
+		RE::ActorHandle burstTarget;    // volley: arrows still to loose at one enemy, in quick succession
+		int             burstLeft{ 0 };
+		float           burstIn{ 0.0f };
+		bool  guardTaunted{ false };    // bodyguard: the taunt on arrival is spent
+
+		// Potions: drunk in a fight, brewed at rest.
+		float        drinkReady{ 0.0f };
+		bool         fortified{ false };  // drank a fortify potion this fight
+		bool         resisted{ false };   // drank a resist potion this fight
+		float        brewIn{ -1.0f };     // until they think about brewing again; below zero, not yet rolled
+		float        stillFor{ 0.0f };    // seconds standing about, out of any fight
+		RE::NiPoint3 lastSeen{};
+		float        brewing{ -1.0f };    // seconds into a brew, or below zero
+		float        brewTakes{ 8.0f };
+		bool         brewAnimated{ false };
+		float        brewExit{ -1.0f };   // seconds until the hands are made sure to be back at rest
 	};
+
+	// What came of something the player asked a companion for: done, or why not. Shown under
+	// the button in the plan and written to the log, so no button ever seems to do nothing.
+	void Answer(Member& a_member, std::string a_text, bool a_done = false);
 
 	// a_dt ages the arsenal timers.
 	void Refresh(float a_dt = 0.0f);

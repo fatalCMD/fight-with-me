@@ -51,8 +51,23 @@ namespace FWM::View
 		float       healCost{ 0.0f };
 		float       healReady{ 0.0f };
 
+		Special     special{ Special::kNone };  // the role's special, and how soon it is ready
+		float       specialReady{ 0.0f };
+		float       specialCooldown{ 0.0f };
+		bool        guarding{ false };          // a bodyguard at your side
+
+		int  potionHealing{ 0 }, potionMagicka{ 0 }, potionStamina{ 0 }, potionOther{ 0 };
+		bool brewing{ false };
+
+		bool        asked{ false };      // a taunt or heal the player asked for, not yet answered
+		std::string answer;              // what came of the last one
+		bool        answerDone{ false };  // done, rather than refused
+		float       answerAge{ 99.0f };  // seconds since
+
 		Point              head;
 		std::vector<Point> ring;  // the taunt radius on the ground, for tanks
+		Point              foot;  // overhead: where they stand, and a ring around it
+		std::vector<Point> footRing;
 
 		// The character sheet, for the party view.
 		std::string                               race;
@@ -84,6 +99,8 @@ namespace FWM::View
 		RE::FormID  heldBy{ 0 };   // the tank holding them
 		bool        targetsPlayer{ false };
 		Point       head;
+		Point       foot;
+		std::vector<Point> footRing;
 	};
 
 	struct Snapshot
@@ -92,6 +109,11 @@ namespace FWM::View
 		std::uint64_t       serial{ 0 };
 		bool                inGame{ false };
 		bool                inCombat{ false };
+		bool                driving{ false };   // the camera follows the plan (the glide is on)
+		bool                overhead{ false };  // the fight is seen from above
+		Point               playerHead;
+		Point               playerFoot;
+		std::vector<Point>  playerRing;
 		bool                walkWithMe{ false };
 		bool                lendHeal{ false };  // companions with no heal may still be Healers
 		Formation           formation{ Formation::kUnknown };

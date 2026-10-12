@@ -11,11 +11,16 @@
 namespace FWM::Styles
 {
 	// Point the follower's controller at their layered style, rebuilding it when
-	// the orders or the underlying style changed. Cheap when nothing did.
-	void Apply(RE::Actor* a_follower, const Orders& a_orders, Position a_resolved);
+	// the orders or the underlying style changed. Cheap when nothing did. Committed:
+	// sent after one enemy, so no circling or hanging back (see StyleLayer).
+	void Apply(RE::Actor* a_follower, const Orders& a_orders, Position a_resolved, bool a_committed = false);
 
 	// Put the follower's own style back if ours is still in place.
 	void Release(RE::Actor* a_follower);
+
+	// Enemies a taunt holds press the tank: their own style, committed, while held. Pass
+	// everyone held right now; anyone no longer in the list gets their own style back.
+	void Press(std::span<RE::Actor* const> a_held);
 
 	void ReleaseAll();
 }

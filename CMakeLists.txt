@@ -12,7 +12,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
 	FightWithMe
-	VERSION 0.1.0
+	VERSION 0.1.5
 	LANGUAGES CXX
 )
 

@@ -16,6 +16,10 @@ namespace FWM::Abilities
 	// Runs taunts and heals for everyone in the party and ages the holds.
 	void Update(float a_dt);
 
+	// Every frame of a fight: a tank with a shield raises it against arrows and spells about
+	// to reach them, whatever else they are doing.
+	void BlockIncoming(float a_dt);
+
 	void Clear();
 
 	[[nodiscard]] const std::vector<Hold>& Holds();
@@ -44,4 +48,11 @@ namespace FWM::Abilities
 	};
 
 	[[nodiscard]] std::optional<HealPreview> PreviewHeal(RE::Actor* a_healer);
+
+	// Shared with the specials and potions.
+	[[nodiscard]] bool Busy(RE::Actor* a_actor);  // mid-swing, staggered, down, in a kill move
+	[[nodiscard]] bool WaitedTooLong(const Party::Member& a_member);  // asked more than a moment ago
+	void               Play(RE::BGSSoundDescriptorForm* a_sound, RE::Actor* a_at);
+	bool               PlayIdle(RE::Actor* a_actor, RE::TESIdleForm* a_idle);
+	void               HandGlow(RE::Actor* a_caster, RE::SpellItem* a_spell, float a_seconds);  // the spell's casting art on the left hand
 }

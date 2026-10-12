@@ -210,4 +210,23 @@ namespace FWM
 		unit(s.strafe);
 		return s;
 	}
+
+	StyleData Committed(const StyleData& a_style)
+	{
+		StyleData s = a_style;
+		// Circle chance runs 25-75% on circleMult each time the combat AI is out of reach
+		// (fCombatCircleDistantChanceMin/Max); a dueling style circles up close as well, and a
+		// high defensive mult keeps a shield up against arrows instead of closing under them.
+		s.offensive = 1.0f;
+		s.groupOffensive = 1.0f;
+		s.defensive = std::min(s.defensive, 0.15f);
+		s.avoidThreat = std::min(s.avoidThreat, 0.05f);
+		s.circle = 0.0f;
+		s.fallback = 0.0f;
+		s.flankDistance = 0.0f;
+		s.stalkTime = 0.0f;
+		s.strafe = 0.0f;
+		s.flags &= ~(StyleData::kDueling | StyleData::kFlanking);
+		return s;
+	}
 }

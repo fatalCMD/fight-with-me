@@ -8,6 +8,12 @@ namespace FWM::Codec
 	{
 		constexpr std::size_t kEntrySize = 9;  // id(4) role focus position flags threshold
 
+		// The flags byte. Switches added later are stored as "off", so a save made before
+		// them reads as on, and an older version reading a newer save sees only bit 0.
+		constexpr std::uint8_t kAuto = 1 << 0;
+		constexpr std::uint8_t kSpecialOff = 1 << 1;
+		constexpr std::uint8_t kPotionsOff = 1 << 2;
+
 		template <class E>
 		E Clamp(std::uint8_t a_value, E a_fallback)
 		{
@@ -30,7 +36,7 @@ namespace FWM::Codec
 			out.push_back(static_cast<std::uint8_t>(orders.role));
 			out.push_back(static_cast<std::uint8_t>(orders.focus));
 			out.push_back(static_cast<std::uint8_t>(orders.position));
-			out.push_back(orders.autoAbility ? 1 : 0);
+			out.push_back(static_cast<std::uint8_t>((orders.autoAbility ? kAuto : 0) | (orders.autoSpecial ? 0 : kSpecialOff) | (orders.potions ? 0 : kPotionsOff)));
 			out.push_back(orders.healThreshold);
 		}
 		return out;
@@ -60,7 +66,9 @@ namespace FWM::Codec
 			orders.role = Clamp(p[4], defaults.role);
 			orders.focus = Clamp(p[5], defaults.focus);
 			orders.position = Clamp(p[6], defaults.position);
-			orders.autoAbility = (p[7] & 1) != 0;
+			orders.autoAbility = (p[7] & kAuto) != 0;
+			orders.autoSpecial = (p[7] & kSpecialOff) == 0;
+			orders.potions = (p[7] & kPotionsOff) == 0;
 			orders.healThreshold = static_cast<std::uint8_t>(std::clamp<int>(p[8], 10, 95));
 			out.emplace_back(id, orders);
 		}

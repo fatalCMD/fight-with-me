@@ -14,6 +14,9 @@ namespace FWM::Party
 		std::vector<Member>                    members;
 		std::unordered_map<RE::FormID, Orders> orders;
 
+		// Guessed with nothing in their hands, and for how many more seconds to look again.
+		std::unordered_map<RE::FormID, float> unsure;
+
 		bool IsFollower(RE::Actor* a_actor, bool& a_summon)
 		{
 			a_summon = false;
@@ -66,6 +69,36 @@ namespace FWM::Party
 		Role Guess(RE::Actor* a_actor, const Arsenal& a_arsenal)
 		{
 			return Playable(Loadout(a_actor), a_arsenal, Settings::Get().healFallback);
+		}
+
+		// Straight after a load a companion can be in the fight before anything is in their
+		// hands, and every first guess comes out Fighter. Guessed again once something is,
+		// unless you have changed their orders since.
+		void Reconsider(Member& a_member, RE::Actor* a_actor, float a_dt)
+		{
+			const auto it = unsure.find(a_member.id);
+			if (it == unsure.end()) {
+				return;
+			}
+			if (Game::LoadoutOf(a_actor) == Game::Loadout::kNone) {
+				it->second -= a_dt;
+				if (it->second <= 0.0f) {
+					unsure.erase(it);  // a brawler after all
+				}
+				return;
+			}
+			unsure.erase(it);
+			const auto saved = orders.find(a_member.id);
+			if (saved == orders.end() || saved->second != ForRole(Role::kFighter)) {
+				return;
+			}
+			const auto role = Guess(a_actor, a_member.arsenal);
+			if (role == Role::kFighter) {
+				return;
+			}
+			saved->second = ForRole(role);
+			Log::Info("[Party] {} has something in hand now: a {} after all ({} / {})."sv, a_member.name, Info(role).name,
+				Info(saved->second.focus).name, Info(saved->second.position).name);
 		}
 
 		// A saved role this companion can no longer play (the weapon was sold, the
@@ -126,6 +159,7 @@ namespace FWM::Party
 			}
 			if (!summon) {
 				(void)OrdersFor(actor.get());
+				Reconsider(member, actor.get(), a_dt);
 				Enforce(member, actor.get());
 			}
 			next.push_back(std::move(member));
@@ -150,6 +184,7 @@ namespace FWM::Party
 	{
 		members.clear();
 		orders.clear();
+		unsure.clear();
 	}
 
 	std::vector<Member>& Members()
@@ -176,6 +211,9 @@ namespace FWM::Party
 		Orders fresh;
 		if (Settings::Get().guessRoles) {
 			fresh = ForRole(Guess(a_actor, Game::ArsenalOf(a_actor)));
+			if (fresh.role == Role::kFighter && Game::LoadoutOf(a_actor) == Game::Loadout::kNone) {
+				unsure[id] = 30.0f;
+			}
 		}
 		Log::Info("[Party] {} joins as {} ({} / {})."sv, Game::Name(a_actor), Info(fresh.role).name,
 			Info(fresh.focus).name, Info(fresh.position).name);
@@ -203,6 +241,7 @@ namespace FWM::Party
 	void LoadOrders(const std::vector<std::pair<std::uint32_t, Orders>>& a_orders)
 	{
 		orders.clear();
+		unsure.clear();
 		for (const auto& [id, saved] : a_orders) {
 			orders[id] = saved;
 		}
@@ -226,5 +265,13 @@ namespace FWM::Party
 			return true;
 		}
 		return Find(a_actor->GetFormID()) != nullptr;
+	}
+
+	void Answer(Member& a_member, std::string a_text, bool a_done)
+	{
+		Log::Info("[Ability] {}: {}"sv, a_member.name, a_text);
+		a_member.answer = std::move(a_text);
+		a_member.answerAt = ::GetTickCount64();
+		a_member.answerDone = a_done;
 	}
 }

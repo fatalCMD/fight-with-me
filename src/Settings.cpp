@@ -12,6 +12,7 @@ namespace FWM::Settings
 		std::mutex                         versionsLock;
 		std::vector<std::unique_ptr<Data>> versions;
 		std::atomic<const Data*>           current{ &defaults };
+		std::atomic<const Data*>           shipped{ &defaults };  // FightWithMe.ini alone
 
 		std::mutex                                     submitLock;
 		std::optional<std::pair<std::uint64_t, Data>>  pending;
@@ -22,11 +23,24 @@ namespace FWM::Settings
 		// Wide profile calls take the path as UTF-16, so the Skyrim folder can be
 		// named in any script. Under MO2 the virtual Data path resolves to whichever
 		// mod provides the file.
-		[[nodiscard]] std::wstring IniPath()
+		[[nodiscard]] std::filesystem::path PluginFolder()
 		{
 			std::error_code ec;
-			const auto      root = std::filesystem::current_path(ec);
-			return (root / L"Data" / L"SKSE" / L"Plugins" / L"FightWithMe.ini").wstring();
+			return std::filesystem::current_path(ec) / L"Data" / L"SKSE" / L"Plugins";
+		}
+
+		// The shipped file: defaults and what each key does. Every update replaces it.
+		[[nodiscard]] std::wstring IniPath()
+		{
+			return (PluginFolder() / L"FightWithMe.ini").wstring();
+		}
+
+		// What the player changed in game. Never shipped, so an update cannot reset it;
+		// under MO2 a new file lands in overwrite. Holds only keys that differ from
+		// FightWithMe.ini, so a changed default in a later version still arrives.
+		[[nodiscard]] std::wstring UserIniPath()
+		{
+			return (PluginFolder() / L"FightWithMe_user.ini").wstring();
 		}
 
 		struct Reader
@@ -35,8 +49,18 @@ namespace FWM::Settings
 
 			[[nodiscard]] std::wstring Raw(const wchar_t* a_section, const wchar_t* a_key) const
 			{
-				wchar_t buffer[256]{};
-				::GetPrivateProfileStringW(a_section, a_key, L"", buffer, static_cast<DWORD>(std::size(buffer)), path.c_str());
+				return Saved(a_section, a_key).value_or(std::wstring{});
+			}
+
+			// The value as written, or nothing when the key is not in the file at all.
+			[[nodiscard]] std::optional<std::wstring> Saved(const wchar_t* a_section, const wchar_t* a_key) const
+			{
+				static constexpr wchar_t kAbsent[] = L"\x1";
+				wchar_t                  buffer[256]{};
+				::GetPrivateProfileStringW(a_section, a_key, kAbsent, buffer, static_cast<DWORD>(std::size(buffer)), path.c_str());
+				if (std::wcscmp(buffer, kAbsent) == 0) {
+					return std::nullopt;
+				}
 				std::wstring value = buffer;
 				// Trailing comments are allowed: "fFoo = 1.0 ; note".
 				if (const auto semi = value.find(L';'); semi != std::wstring::npos) {
@@ -102,16 +126,21 @@ namespace FWM::Settings
 			}
 		};
 
-		// Writes one key at a time, in place: comments and keys we do not know survive,
-		// and nothing is renamed or moved, which MO2's virtual file system handles badly.
-		struct Writer
+		// Every key as it would be written, in Visit order, so two versions can be compared
+		// line by line.
+		struct Lines
 		{
-			std::wstring path;
-			bool         ok{ true };
-
-			void Put(const wchar_t* a_section, const wchar_t* a_key, const std::wstring& a_value)
+			struct Line
 			{
-				ok = ::WritePrivateProfileStringW(a_section, a_key, a_value.c_str(), path.c_str()) != 0 && ok;
+				const wchar_t* section;
+				const wchar_t* key;
+				std::wstring   value;
+			};
+			std::vector<Line> lines;
+
+			void Put(const wchar_t* a_section, const wchar_t* a_key, std::wstring a_value)
+			{
+				lines.push_back({ a_section, a_key, std::move(a_value) });
 			}
 
 			void Bool(const wchar_t* a_section, const wchar_t* a_key, bool& a_value) { Put(a_section, a_key, a_value ? L"true" : L"false"); }
@@ -141,12 +170,17 @@ namespace FWM::Settings
 			v.Bool(L"General", L"bLeaveEmptyFights", d.leaveEmptyFights);
 			v.Float(L"General", L"fLeaveAfter", d.leaveAfter, 0.5f, 15.0f);
 
-			v.Key(L"BattlePlan", L"iKey", d.planKey);
+			v.Key(L"BattlePlan", L"iKey", d.planKey.key);
+			v.Key(L"BattlePlan", L"iKeyModifier", d.planKey.modifier);
 			v.Key(L"BattlePlan", L"iGamepadKey", d.planGamepadKey);
-			v.Key(L"Orders", L"iAttack", d.orderKeys[0]);
-			v.Key(L"Orders", L"iToMe", d.orderKeys[1]);
-			v.Key(L"Orders", L"iHoldBack", d.orderKeys[2]);
-			v.Key(L"Orders", L"iAsYouWere", d.orderKeys[3]);
+			v.Key(L"Orders", L"iAttack", d.orderKeys[0].key);
+			v.Key(L"Orders", L"iAttackModifier", d.orderKeys[0].modifier);
+			v.Key(L"Orders", L"iToMe", d.orderKeys[1].key);
+			v.Key(L"Orders", L"iToMeModifier", d.orderKeys[1].modifier);
+			v.Key(L"Orders", L"iHoldBack", d.orderKeys[2].key);
+			v.Key(L"Orders", L"iHoldBackModifier", d.orderKeys[2].modifier);
+			v.Key(L"Orders", L"iAsYouWere", d.orderKeys[3].key);
+			v.Key(L"Orders", L"iAsYouWereModifier", d.orderKeys[3].modifier);
 			v.Float(L"BattlePlan", L"fTimeScale", d.timeScale, 0.02f, 1.0f);
 			v.Bool(L"BattlePlan", L"bStopTime", d.stopTime);
 			v.Float(L"BattlePlan", L"fEaseSeconds", d.easeSeconds, 0.0f, 2.0f);
@@ -157,6 +191,13 @@ namespace FWM::Settings
 			v.Float(L"BattlePlan", L"fCameraDistance", d.cameraDistance, 120.0f, 700.0f);
 			v.Float(L"BattlePlan", L"fCameraHeight", d.cameraHeight, 0.0f, 300.0f);
 			v.Float(L"BattlePlan", L"fScale", d.uiScale, 0.6f, 2.0f);
+			v.Float(L"BattlePlan", L"fOrbitSpeed", d.orbitSpeed, 0.2f, 3.0f);
+			v.Key(L"BattlePlan", L"iOverheadKey", d.overheadKey.key);
+			v.Key(L"BattlePlan", L"iOverheadKeyModifier", d.overheadKey.modifier);
+			v.Key(L"BattlePlan", L"iOverheadGamepadKey", d.overheadGamepadKey);
+			v.Float(L"BattlePlan", L"fOverheadPitch", d.overheadPitch, 35.0f, 88.0f);
+			v.Bool(L"BattlePlan", L"bCutaway", d.cutaway);
+			v.Float(L"BattlePlan", L"fCutawayMargin", d.cutawayMargin, 0.0f, 400.0f);
 
 			v.Bool(L"Taunt", L"bEnabled", d.taunt);
 			v.Bool(L"Taunt", L"bOpener", d.tauntOpener);
@@ -205,8 +246,17 @@ namespace FWM::Settings
 			v.Float(L"Targeting", L"fStickiness", t.stickiness, 0.0f, 500.0f);
 			v.Float(L"Targeting", L"fSpreadPenalty", t.spreadPenalty, 0.0f, 500.0f);
 			v.Float(L"Targeting", L"fDistanceWeight", t.distanceWeight, 0.0f, 1.0f);
+			v.Bool(L"Targeting", L"bMarkGlow", d.markGlow);
+			v.String(L"Targeting", L"sMarkShader", d.markShader);
 			v.Bool(L"Targeting", L"bLeash", d.guardLeash);
 			v.Float(L"Targeting", L"fHoldBackLeash", d.holdBackLeash, 300.0f, 4000.0f);
+
+			v.Bool(L"Specials", L"bEnabled", d.specials);
+
+			v.Bool(L"Potions", L"bDrink", d.drinkPotions);
+			v.Float(L"Potions", L"fDrinkBelow", d.drinkBelow, 0.1f, 0.9f);
+			v.Bool(L"Potions", L"bBrew", d.brewPotions);
+			v.Bool(L"Potions", L"bBrewAnimation", d.brewAnimation);
 
 			v.String(L"TimeEffect", L"sIntro", d.imodIntro);
 			v.String(L"TimeEffect", L"sHold", d.imodHold);
@@ -223,6 +273,49 @@ namespace FWM::Settings
 			auto& t = a_data.tuning;
 			t.tauntRadiusMax = std::max(t.tauntRadiusMax, t.tauntRadiusBase);
 			t.cooldownMin = std::min(t.cooldownMin, t.cooldownBase);
+			// The first mark glow was Detect Life's haze, written into the INI by any settings
+			// change; it is the outline now.
+			if (_stricmp(a_data.markShader.c_str(), "Skyrim.esm|0x0DC209") == 0) {
+				a_data.markShader = Data{}.markShader;
+			}
+			a_data.planKey = Normalized(a_data.planKey);
+			for (auto& hotkey : a_data.orderKeys) {
+				hotkey = Normalized(hotkey);
+			}
+			a_data.overheadKey = Normalized(a_data.overheadKey);
+		}
+
+		[[nodiscard]] Lines Written(Data a_data)
+		{
+			Lines out;
+			Visit(out, a_data);
+			return out;
+		}
+
+		// Keys where the two differ.
+		[[nodiscard]] int Differences(const Data& a_one, const Data& a_other)
+		{
+			const auto one = Written(a_one);
+			const auto other = Written(a_other);
+			int        count = 0;
+			for (std::size_t i = 0; i < one.lines.size(); ++i) {
+				count += one.lines[i].value != other.lines[i].value ? 1 : 0;
+			}
+			return count;
+		}
+
+		// A new user file starts with a word on what it is; the profile calls add the rest.
+		bool EnsureUserFile(const std::wstring& a_path)
+		{
+			std::error_code ec;
+			if (std::filesystem::exists(a_path, ec)) {
+				return true;
+			}
+			std::ofstream out(std::filesystem::path(a_path), std::ios::binary);
+			out << "; Fight With Me: the settings you changed in game, read after FightWithMe.ini.\r\n"
+				   "; Updates never replace this file. Delete a line, or the whole file, to go back\r\n"
+				   "; to what FightWithMe.ini says.\r\n\r\n";
+			return static_cast<bool>(out);
 		}
 
 		void Publish(Data a_data)
@@ -236,16 +329,27 @@ namespace FWM::Settings
 
 	void Load()
 	{
-		const Reader r{ IniPath() };
-		const bool   found = std::filesystem::exists(r.path);
-		Data         d;
-		Visit(r, d);
+		const Reader    own{ IniPath() };
+		const Reader    user{ UserIniPath() };
+		std::error_code ec;
+		const bool      haveOwn = std::filesystem::exists(own.path, ec);
+		const bool      haveUser = std::filesystem::exists(user.path, ec);
+		Data            d;
+		Visit(own, d);
+		Sanitize(d);
+		{
+			const std::scoped_lock guard(versionsLock);
+			versions.push_back(std::make_unique<Data>(d));
+			shipped.store(versions.back().get(), std::memory_order_release);
+		}
+		Visit(user, d);
 		Publish(d);
 
 		const auto& live = Get();
-		Log::Info("Settings {}: plan key {}, time x{:.2f}{}, taunt {}, heal {}, style weight {:.2f}."sv,
-			found ? "read from FightWithMe.ini"sv : "defaulted (FightWithMe.ini not found)"sv,
-			live.planKey, live.timeScale, live.stopTime ? " (stopped)"sv : ""sv, live.taunt, live.heal, live.styleWeight);
+		const auto  mine = haveUser ? std::format(" and FightWithMe_user.ini ({} of your changes)", Differences(Defaults(), live)) : std::string{};
+		Log::Info("Settings {}{}: plan key {}, time x{:.2f}{}, taunt {}, heal {}, style weight {:.2f}."sv,
+			haveOwn ? "read from FightWithMe.ini"sv : "defaulted (FightWithMe.ini not found)"sv, mine,
+			live.planKey.key, live.timeScale, live.stopTime ? " (stopped)"sv : ""sv, live.taunt, live.heal, live.styleWeight);
 	}
 
 	const Data& Get() noexcept
@@ -255,19 +359,47 @@ namespace FWM::Settings
 
 	Data Defaults()
 	{
-		return {};
+		return *shipped.load(std::memory_order_acquire);
 	}
 
 	bool Apply(const Data& a_data)
 	{
 		Publish(a_data);
-		Writer w{ IniPath() };
-		Data   copy = Get();
-		Visit(w, copy);
-		if (!w.ok) {
-			Log::Error("[Settings] Could not write FightWithMe.ini (error {})."sv, ::GetLastError());
+		const auto   want = Written(Get());
+		const auto   base = Written(Defaults());
+		const auto   path = UserIniPath();
+		const Reader user{ path };
+		bool         ok = true;
+		int          mine = 0, writes = 0;
+		DWORD        error = 0;
+		// One key at a time, in place: comments survive, and nothing is renamed or moved,
+		// which MO2's virtual file system handles badly. A key back at FightWithMe.ini's
+		// value leaves the user file.
+		for (std::size_t i = 0; i < want.lines.size(); ++i) {
+			const auto& line = want.lines[i];
+			const bool  changed = line.value != base.lines[i].value;
+			const auto  saved = user.Saved(line.section, line.key);
+			mine += changed ? 1 : 0;
+			if (changed ? saved == line.value : !saved) {
+				continue;  // already so
+			}
+			if (changed && !EnsureUserFile(path)) {
+				ok = false;
+				error = ::GetLastError();
+				break;
+			}
+			if (!::WritePrivateProfileStringW(line.section, line.key, changed ? line.value.c_str() : nullptr, path.c_str())) {
+				ok = false;
+				error = ::GetLastError();
+			}
+			++writes;
 		}
-		return w.ok;
+		if (!ok) {
+			Log::Error("[Settings] Could not write FightWithMe_user.ini (error {})."sv, error);
+		} else if (writes > 0) {
+			Log::Info("[Settings] Saved: {} setting(s) of yours in FightWithMe_user.ini."sv, mine);
+		}
+		return ok;
 	}
 
 	std::uint64_t Submit(const Data& a_data)

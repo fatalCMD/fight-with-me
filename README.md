@@ -28,12 +28,39 @@ party, casters and archers, strongest, weakest, or one marked enemy) and positio
 free, guard you, hold back, front line, with me). Change either in the battle plan. Whatever
 the focus, an enemy attacking a companion up close is dealt with first.
 
+Click an enemy in the battle plan to send a companion (or everyone) after them. A companion
+sent after someone goes, whatever their position: no guard radius or leash holds them back,
+and melee companions press in like the front line. When that enemy falls they go back to
+the focus they had.
+
+## Abilities
+
+Every role has a special, with a button in the battle plan and an "on their own" switch:
+Bodyguard (tank: runs to you when you are in trouble and taunts what is on you), Volley
+(archer: every archer and mage fires at one enemy), War cry (bruiser: staggers everything close
+around them), Ward (mage and healer: Oakflesh up to Ebonyflesh on you, by their level) and
+Disarm (fighter: the Disarm shout's effect at their opponent). Tanks keep their taunt and
+healers their heal.
+
+Each companion's Potions switch lets them drink their own potions in a fight and brew what
+they are short of when the party rests, better grades and rarer kinds as they rise in level.
+
 ## Controls
 
 Numpad 7 opens the battle plan (LB + D-pad down on a pad). Walk With Me's party actions grid has
 a Battle plan tile as well. Party orders work without opening it: Numpad 8 Attack!, Numpad 6
-To me!, Numpad 4 Hold back, Numpad 2 As you were. Settings are in the Mod Control Panel and in
-`SKSE/Plugins/FightWithMe.ini`; each companion's orders are saved with your save game.
+To me!, Numpad 4 Hold back, Numpad 2 As you were. Any of these can be rebound on the Controls
+page, alone or with Shift, Ctrl or Alt held. Settings are in the Mod Control Panel and in
+`SKSE/Plugins/FightWithMe.ini`. What you change in game is saved to `FightWithMe_user.ini` next
+to it, which updates never replace (under MO2 it appears in overwrite). Each companion's orders
+are saved with your save game.
+
+In the battle plan, the right stick (or dragging with the right mouse button) turns the view
+around the chosen companion, and the triggers or the mouse wheel zoom. Numpad 5, the right
+stick click or the switch top left shows the whole fight from above: the party in blue rings,
+enemies in red, you in white. Drag with the middle mouse button (or the left stick, or WASD)
+to move the view about; a middle click brings it back over the fight. Where a roof or a cave
+ceiling hides the fight, it is cut away above everyone's heads; in the open, nothing is.
 
 ## Nether's Follower Framework
 

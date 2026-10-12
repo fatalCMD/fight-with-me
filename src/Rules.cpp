@@ -141,9 +141,27 @@ namespace FWM::Rules
 		if (a_enemies.empty()) {
 			return {};
 		}
+		// On foot there is no fighting someone on a ledge or across a gap: sending a melee
+		// follower at them leaves them circling below, looking up.
+		auto reachable = [&](const EnemyView& e) { return a_ranged || !e.outOfReach; };
+
+		// A marked enemy is an order to go and get them. No position holds a companion back
+		// from it: a guard sent across the room goes across the room.
+		if (a_focus == Focus::kMarked) {
+			for (std::size_t i = 0; i < a_enemies.size(); ++i) {
+				if (a_enemies[i].marked && reachable(a_enemies[i])) {
+					return { static_cast<int>(i), 400.0f };
+				}
+			}
+		}
 		const bool positional = a_position == Position::kGuard || a_position == Position::kFrontLine || a_position == Position::kWithMe ||
 		                        (a_position == Position::kHoldBack && !a_ranged);
-		if (a_focus == Focus::kEngine && !positional) {
+		// The combat AI settled on someone this follower cannot get to: choose for them.
+		bool stuck = false;
+		for (const auto& e : a_enemies) {
+			stuck = stuck || (!reachable(e) && (e.engineChoice || e.current));
+		}
+		if (a_focus == Focus::kEngine && !positional && !stuck) {
 			return {};
 		}
 
@@ -152,7 +170,7 @@ namespace FWM::Rules
 		bool  anyAllowed = false;
 		for (const auto& e : a_enemies) {
 			maxThreat = std::max(maxThreat, e.threat);
-			if (Allowed(e, a_position, a_ranged, a_tuning)) {
+			if (Allowed(e, a_position, a_ranged, a_tuning) && reachable(e)) {
 				anyAllowed = true;
 				if (a_focus != Focus::kEngine && Matches(e, a_focus)) {
 					anyMatch = true;
@@ -163,13 +181,13 @@ namespace FWM::Rules
 		// Guarding, or with the player, and nobody near them: go for whoever is closest to
 		// the player, which is what pulls a guard (or a straggler) back to them.
 		if (!anyAllowed) {
-			if (a_position != Position::kGuard && a_position != Position::kWithMe) {
+			if (a_position != Position::kGuard && a_position != Position::kWithMe && !stuck) {
 				return {};
 			}
 			Pick nearest;
 			float best = std::numeric_limits<float>::max();
 			for (std::size_t i = 0; i < a_enemies.size(); ++i) {
-				if (a_enemies[i].distanceToPlayer < best) {
+				if (reachable(a_enemies[i]) && a_enemies[i].distanceToPlayer < best) {
 					best = a_enemies[i].distanceToPlayer;
 					nearest = { static_cast<int>(i), 0.0f };
 				}
@@ -178,7 +196,7 @@ namespace FWM::Rules
 		}
 
 		// Nothing fits the focus and the position adds nothing: the combat AI's pick stands.
-		if (!anyMatch && !positional) {
+		if (!anyMatch && !positional && !stuck) {
 			return {};
 		}
 
@@ -187,8 +205,9 @@ namespace FWM::Rules
 		for (std::size_t i = 0; i < a_enemies.size(); ++i) {
 			const auto& e = a_enemies[i];
 			// Distance is never a reason to ignore an enemy: an ordered target is chased
-			// wherever it is. Only the position (staying near you, holding back) limits reach.
-			if (!Allowed(e, a_position, a_ranged, a_tuning)) {
+			// wherever it is. Only the position (staying near you, holding back) limits reach,
+			// and for melee, whether there is a way to them at all.
+			if (!Allowed(e, a_position, a_ranged, a_tuning) || !reachable(e)) {
 				continue;
 			}
 			// Your target and a marked enemy are orders, not leanings: while one is there,
@@ -252,6 +271,14 @@ namespace FWM::Rules
 			}
 		}
 		return best;
+	}
+
+	int PotionTier(int a_level, int a_from, int a_step, int a_tiers)
+	{
+		if (a_tiers <= 0) {
+			return 0;
+		}
+		return std::clamp((a_level - a_from) / std::max(a_step, 1), 0, a_tiers - 1);
 	}
 
 	Danger DangerFor(int a_followerLevel, int a_enemyLevel, bool a_boss, const Tuning& a_tuning)

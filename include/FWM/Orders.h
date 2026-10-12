@@ -54,9 +54,83 @@ namespace FWM
 		Position     position{ Position::kFormation };
 		bool         autoAbility{ true };  // taunt or heal without being told
 		std::uint8_t healThreshold{ 55 };  // percent, for a healer
+		bool         autoSpecial{ true };  // the role's special ability without being told
+		bool         potions{ true };      // drink potions in a fight, brew them at rest
 
 		friend bool operator==(const Orders&, const Orders&) = default;
 	};
+
+	// Each role's special ability: a button in the battle plan, and a switch for using it
+	// without being told.
+	enum class Special : std::uint8_t
+	{
+		kNone,
+		kBodyguard,  // tank: runs to you when you are in trouble and takes what is on you
+		kVolley,     // archer: everyone at range fires at one enemy
+		kWarCry,     // bruiser: staggers everything around them
+		kWard,       // mage, healer: hardens your skin with alteration
+		kDisarm,     // fighter: knocks the weapon out of their opponent's hands
+		kCount
+	};
+
+	struct SpecialInfo
+	{
+		std::string_view name;
+		std::string_view summary;  // what it does
+		std::string_view own;      // what "on their own" means for it
+		std::uint32_t    glyph;    // Font Awesome 6 solid
+	};
+
+	inline constexpr std::array<SpecialInfo, static_cast<std::size_t>(Special::kCount)> specials{ {
+		{ "", "", "", 0 },
+		{ "Bodyguard", "Runs to your side and taunts everything that is on you.", "When your health drops below 40% with enemies on you.", 0xF132 },
+		{ "Volley", "Looses five arrows in quick succession at their target; every other archer and mage turns on it too.", "When a boss or an enemy well above their level joins the fight.",
+			0xF140 },
+		{ "War cry", "A roar that staggers every enemy close around them.", "When three or more enemies close in on them, or two when they are hurt.",
+			0xF028 },
+		{ "Ward", "Hardens your skin with alteration: Oakflesh, then Stone, Iron and Ebony as they rise in level.",
+			"When enemies are on you or your health falls, and no ward of theirs is on you.", 0xF6FC },
+		{ "Disarm", "Knocks the weapon out of their opponent's hands and onto the ground, up to ten levels above their own.",
+			"When they meet a boss, a two-handed weapon, or someone at or above their level.", 0xF256 },
+	} };
+
+	[[nodiscard]] constexpr const SpecialInfo& Info(Special a_special) { return specials[static_cast<std::size_t>(a_special)]; }
+
+	// Seconds a special waits before it can be used again.
+	[[nodiscard]] constexpr float SpecialCooldown(Special a_special)
+	{
+		switch (a_special) {
+		case Special::kBodyguard:
+		case Special::kWarCry:
+			return 30.0f;
+		case Special::kDisarm:
+			return 40.0f;
+		case Special::kVolley:
+		case Special::kWard:
+			return 45.0f;
+		default:
+			return 0.0f;
+		}
+	}
+
+	[[nodiscard]] constexpr Special SpecialOf(Role a_role)
+	{
+		switch (a_role) {
+		case Role::kTank:
+			return Special::kBodyguard;
+		case Role::kArcher:
+			return Special::kVolley;
+		case Role::kBruiser:
+			return Special::kWarCry;
+		case Role::kMage:
+		case Role::kHealer:
+			return Special::kWard;
+		case Role::kFighter:
+			return Special::kDisarm;
+		default:
+			return Special::kNone;
+		}
+	}
 
 	struct RoleInfo
 	{

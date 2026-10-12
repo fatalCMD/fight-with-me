@@ -52,4 +52,10 @@ namespace FWM
 	// follower exactly as they were, 1 replaces their style). Score multipliers are
 	// scaled rather than pulled, so a follower who never casts does not start to.
 	[[nodiscard]] StyleData Layer(const StyleData& a_base, Role a_role, Position a_position, float a_weight);
+
+	// Committed to one enemy: a companion sent after them, or an enemy a taunt holds on the
+	// tank. Straight at them and stay on them: no circling or flanking while waiting a turn,
+	// no falling back, no hanging behind a raised shield, no strafing at range. The fight's
+	// own scores (what to fight with) are left alone.
+	[[nodiscard]] StyleData Committed(const StyleData& a_style);
 }

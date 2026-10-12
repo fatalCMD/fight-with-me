@@ -17,9 +17,19 @@ namespace FWM::Styles
 			Role                role{ Role::kCount };
 			Position            position{ Position::kCount };
 			float               weight{ -1.0f };
+			bool                committed{ false };
 		};
 
 		std::unordered_map<RE::FormID, Layered> styles;
+
+		// Enemies held by a taunt, pressing the tank.
+		struct Pressed
+		{
+			RE::TESCombatStyle* ours{ nullptr };
+			RE::TESCombatStyle* original{ nullptr };
+		};
+		std::unordered_map<RE::FormID, Pressed> pressed;
+		std::vector<RE::TESCombatStyle*>        spare;  // styles no controller points at any more, for reuse
 
 		StyleData Read(const RE::TESCombatStyle* a_style)
 		{
@@ -104,11 +114,27 @@ namespace FWM::Styles
 					return true;
 				}
 			}
+			for (const auto& [id, press] : pressed) {
+				if (press.ours == a_style) {
+					return true;
+				}
+			}
 			return false;
+		}
+
+		// Gives an enemy their own style back, if ours is still the one in place.
+		void Unpress(RE::FormID a_id, Pressed& a_press)
+		{
+			if (auto* actor = RE::TESForm::LookupByID<RE::Actor>(a_id)) {
+				if (auto* controller = Game::Controller(actor); controller && controller->combatStyle == a_press.ours) {
+					controller->combatStyle = a_press.original;
+				}
+			}
+			spare.push_back(a_press.ours);
 		}
 	}
 
-	void Apply(RE::Actor* a_follower, const Orders& a_orders, Position a_resolved)
+	void Apply(RE::Actor* a_follower, const Orders& a_orders, Position a_resolved, bool a_committed)
 	{
 		auto* controller = Game::Controller(a_follower);
 		if (!controller) {
@@ -137,11 +163,13 @@ namespace FWM::Styles
 				return;
 			}
 		}
-		if (layered.role != a_orders.role || layered.position != a_resolved || layered.weight != weight) {
-			Write(layered.ours, layered.original, Layer(Read(layered.original), a_orders.role, a_resolved, weight));
+		if (layered.role != a_orders.role || layered.position != a_resolved || layered.weight != weight || layered.committed != a_committed) {
+			const auto data = Layer(Read(layered.original), a_orders.role, a_resolved, weight);
+			Write(layered.ours, layered.original, a_committed ? Committed(data) : data);
 			layered.role = a_orders.role;
 			layered.position = a_resolved;
 			layered.weight = weight;
+			layered.committed = a_committed;
 			if (Settings::Get().logDecisions) {
 				Log::Info("[Style] {} fights as {} ({}), over {:08X}."sv, Game::Name(a_follower), Info(a_orders.role).name,
 					Info(a_resolved).name, layered.original ? layered.original->GetFormID() : 0);
@@ -164,8 +192,58 @@ namespace FWM::Styles
 		it->second.original = nullptr;
 	}
 
+	void Press(std::span<RE::Actor* const> a_held)
+	{
+		for (auto it = pressed.begin(); it != pressed.end();) {
+			const bool still = std::any_of(a_held.begin(), a_held.end(), [&](RE::Actor* a_actor) { return a_actor && a_actor->GetFormID() == it->first; });
+			if (still) {
+				++it;
+				continue;
+			}
+			Unpress(it->first, it->second);
+			it = pressed.erase(it);
+		}
+		for (auto* enemy : a_held) {
+			auto* controller = enemy ? Game::Controller(enemy) : nullptr;
+			if (!controller || !controller->combatStyle) {
+				continue;
+			}
+			auto [it, added] = pressed.try_emplace(enemy->GetFormID());
+			auto& press = it->second;
+			if (controller->combatStyle == press.ours && press.ours) {
+				continue;
+			}
+			// Their own style, or a new one if the controller changed it under us.
+			if (Ours(controller->combatStyle)) {
+				continue;  // someone else's pressed style: leave it
+			}
+			press.original = controller->combatStyle;
+			if (!press.ours) {
+				if (!spare.empty()) {
+					press.ours = spare.back();
+					spare.pop_back();
+				} else {
+					press.ours = Create();
+				}
+				if (!press.ours) {
+					pressed.erase(it);
+					continue;
+				}
+			}
+			Write(press.ours, press.original, Committed(Read(press.original)));
+			controller->combatStyle = press.ours;
+			if (Settings::Get().logDecisions) {
+				Log::Info("[Style] {} presses the tank (held by a taunt)."sv, Game::Name(enemy));
+			}
+		}
+	}
+
 	void ReleaseAll()
 	{
+		for (auto& [id, press] : pressed) {
+			Unpress(id, press);
+		}
+		pressed.clear();
 		for (auto& [id, layered] : styles) {
 			if (auto* actor = RE::TESForm::LookupByID<RE::Actor>(id)) {
 				if (auto* controller = Game::Controller(actor); controller && controller->combatStyle == layered.ours) {

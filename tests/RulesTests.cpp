@@ -1,3 +1,4 @@
+#include "FWM/Hotkey.h"
 #include "FWM/OrdersCodec.h"
 #include "FWM/Rules.h"
 #include "FWM/StyleLayer.h"
@@ -191,6 +192,46 @@ namespace
 		pt[1].playerTarget = true;
 		CHECK(PickTarget(pt, Focus::kPlayerTarget, Position::kFree, false, t).index == 1);
 
+		// A marked enemy is chased from any position, even one that would never reach them:
+		// a guard, a melee companion holding back, a companion at your side.
+		std::vector<EnemyView> mk{ Enemy(150), Enemy(2600) };
+		mk[0].attackingSelf = true;
+		mk[0].attackingPlayer = true;
+		mk[1].marked = true;
+		for (const auto position : { Position::kGuard, Position::kHoldBack, Position::kWithMe, Position::kFree, Position::kFrontLine }) {
+			CHECK(PickTarget(mk, Focus::kMarked, position, false, t).index == 1);
+			CHECK(PickTarget(mk, Focus::kMarked, position, true, t).index == 1);
+		}
+		// Nothing marked any more: the position decides again.
+		mk[1].marked = false;
+		CHECK(PickTarget(mk, Focus::kMarked, Position::kGuard, false, t).index == 0);
+
+		// Out of reach on foot (an archer on a ledge): melee goes for someone they can reach,
+		// even against an order; at range the order stands.
+		std::vector<EnemyView> ledge{ Enemy(1100), Enemy(700) };
+		ledge[0].playerTarget = true;
+		ledge[0].archer = true;
+		ledge[0].outOfReach = true;
+		ledge[0].current = true;  // they were sent at it, and stand below looking up
+		CHECK(PickTarget(ledge, Focus::kPlayerTarget, Position::kFree, false, t).index == 1);
+		CHECK(PickTarget(ledge, Focus::kPlayerTarget, Position::kFree, true, t).index == 0);
+		ledge[0].marked = true;
+		CHECK(PickTarget(ledge, Focus::kMarked, Position::kFree, false, t).index == 1);
+		CHECK(PickTarget(ledge, Focus::kMarked, Position::kFree, true, t).index == 0);
+		ledge[0].marked = false;
+		ledge[0].current = false;
+		// The combat AI's own pick is the one on the ledge: moved off it.
+		ledge[0].engineChoice = true;
+		CHECK(PickTarget(ledge, Focus::kEngine, Position::kFree, false, t).index == 1);
+		ledge[0].engineChoice = false;
+		ledge[1].engineChoice = true;
+		CHECK(PickTarget(ledge, Focus::kEngine, Position::kFree, false, t).index == -1);  // their pick stands
+		// Nobody can be reached: nothing to choose.
+		ledge[1].outOfReach = true;
+		ledge[1].engineChoice = false;
+		ledge[0].engineChoice = true;
+		CHECK(PickTarget(ledge, Focus::kEngine, Position::kFree, false, t).index == -1);
+
 		// Strongest and weakest.
 		std::vector<EnemyView> s{ Enemy(400), Enemy(400), Enemy(400) };
 		s[0].threat = 50;
@@ -272,6 +313,14 @@ namespace
 		const auto half = Layer(base, Role::kTank, Position::kFree, 0.5f);
 		CHECK(Near(half.defensive, 0.575f));
 
+		// Sent after someone (or held by a taunt): no circling, falling back, dueling or
+		// strafing, and the shield comes down; what they fight with is untouched.
+		const auto committed = Committed(tank);
+		CHECK(Near(committed.circle, 0.0f) && Near(committed.fallback, 0.0f) && Near(committed.strafe, 0.0f));
+		CHECK(Near(committed.offensive, 1.0f) && committed.defensive <= 0.15f);
+		CHECK((committed.flags & (StyleData::kDueling | StyleData::kFlanking)) == 0);
+		CHECK(Near(committed.meleeScore, tank.meleeScore) && Near(committed.bash, tank.bash));
+
 		// A follower who never uses magic does not start because of a role.
 		base.magicScore = 0.0f;
 		CHECK(Near(Layer(base, Role::kMage, Position::kFree, 1.0f).magicScore, 0.0f));
@@ -326,6 +375,29 @@ namespace
 		CHECK(fixed.size() == 2 && fixed[0].second.role == Role::kFighter && fixed[0].second.healThreshold == 95);
 
 		CHECK(FWM::Codec::Decode(bytes, 0).empty());
+
+		// The special and potion switches ride in the flags byte, stored as "off": a save
+		// from before them (flags 0 or 1) reads with both on.
+		Orders quiet = ForRole(Role::kArcher);
+		quiet.autoSpecial = false;
+		quiet.potions = false;
+		const std::vector<FWM::Codec::Entry> switched{ { 0x00000D62, quiet } };
+		const auto back = FWM::Codec::Decode(FWM::Codec::Encode(switched), FWM::Codec::kVersion);
+		CHECK(back.size() == 1 && back[0].second == quiet);
+		auto old = FWM::Codec::Encode(switched);
+		old[4 + 7] = 1;  // what the first version wrote: only "on their own"
+		const auto upgraded = FWM::Codec::Decode(old, FWM::Codec::kVersion);
+		CHECK(upgraded.size() == 1 && upgraded[0].second.autoSpecial && upgraded[0].second.potions && upgraded[0].second.autoAbility);
+
+		// Brewed grades climb with level: healing from Minor at 1 to Ultimate at 51.
+		CHECK(Rules::PotionTier(1, 1, 10, 6) == 0 && Rules::PotionTier(10, 1, 10, 6) == 0 && Rules::PotionTier(11, 1, 10, 6) == 1);
+		CHECK(Rules::PotionTier(51, 1, 10, 6) == 5 && Rules::PotionTier(80, 1, 10, 6) == 5);
+		CHECK(Rules::PotionTier(14, 15, 15, 4) == 0 && Rules::PotionTier(45, 15, 15, 4) == 2);
+
+		// Every role has its own special.
+		CHECK(SpecialOf(Role::kTank) == Special::kBodyguard && SpecialOf(Role::kArcher) == Special::kVolley);
+		CHECK(SpecialOf(Role::kBruiser) == Special::kWarCry && SpecialOf(Role::kFighter) == Special::kDisarm);
+		CHECK(SpecialOf(Role::kMage) == Special::kWard && SpecialOf(Role::kHealer) == Special::kWard);
 	}
 
 	void RoleGating()
@@ -400,6 +472,24 @@ namespace
 		const auto back = Shouted(own, Shout::kHoldBack);
 		CHECK(back.position == Position::kHoldBack && back.focus == Focus::kAttackingParty);
 	}
+
+	void Hotkeys()
+	{
+		// Either side of a modifier is the same modifier; other keys are none.
+		CHECK(ModifierOf(0x36) == kShift && ModifierOf(0x9D) == kCtrl && ModifierOf(0xB8) == kAlt && ModifierOf(0x48) == 0);
+
+		// A modifier is only kept with a real key, never on an unbound one or on itself.
+		CHECK((Normalized({ 0x48, 0x9D }) == Hotkey{ 0x48, kCtrl }));
+		CHECK((Normalized({ 0, kCtrl }) == Hotkey{}));
+		CHECK((Normalized({ 0x38, kShift }) == Hotkey{ 0x38, 0 }));
+		CHECK((Normalized({ 0x48, 0x48 }) == Hotkey{ 0x48, 0 }));
+
+		// Ctrl + 8 beats a plain 8 while Ctrl is held; the plain one still works with it held.
+		const Hotkey plain{ 0x48 }, combo{ 0x48, kCtrl };
+		CHECK(Fit(combo, 0x48, true) > Fit(plain, 0x48, true) && Fit(plain, 0x48, true) > 0);
+		CHECK(Fit(combo, 0x48, false) == 0 && Fit(plain, 0x48, false) == 1);
+		CHECK(Fit(plain, 0x49, false) == 0 && Fit(Hotkey{}, 0, false) == 0);
+	}
 }
 
 int main()
@@ -412,6 +502,7 @@ int main()
 	CodecRoundTrip();
 	RoleDefaults();
 	RoleGating();
+	Hotkeys();
 	std::printf("%d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;
 }

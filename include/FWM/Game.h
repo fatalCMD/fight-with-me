@@ -31,8 +31,9 @@ namespace FWM::Game
 
 	[[nodiscard]] float Distance(const RE::TESObjectREFR* a_a, const RE::TESObjectREFR* a_b);
 
-	// Head height, for markers and line of sight.
+	// Head height, for markers and line of sight. The bone is cached per body.
 	[[nodiscard]] RE::NiPoint3 HeadPosition(RE::Actor* a_actor);
+	void                       ForgetHeads();  // a fight or the plan is over, or a load: let the bodies go
 
 	[[nodiscard]] bool IsBoss(RE::Actor* a_actor);
 

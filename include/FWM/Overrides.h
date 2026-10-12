@@ -51,6 +51,10 @@ namespace FWM::Overrides
 	// The combat AI's own pick for a controller in the current table, or 0.
 	[[nodiscard]] std::uint32_t EngineChoice(std::uintptr_t a_controller);
 
+	// Whether the combat AI would accept a_target from this controller: alive, enabled,
+	// and known to its combat group. An override that fails this is ignored.
+	[[nodiscard]] bool Takes(RE::CombatController* a_controller, RE::ActorHandle a_target);
+
 	void Install();
 
 	struct Stats

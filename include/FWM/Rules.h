@@ -101,6 +101,7 @@ namespace FWM::Rules
 		bool  marked{ false };
 		bool  current{ false };       // the follower's current target
 		bool  engineChoice{ false };  // what the combat AI would pick
+		bool  outOfReach{ false };    // this follower found no way to them on foot, lately
 		int   alliesOn{ 0 };          // other party members already on it
 	};
 
@@ -112,10 +113,18 @@ namespace FWM::Rules
 	};
 
 	// a_ranged: the follower fights at range (Archer, Mage, Healer), so Hold back
-	// is about where they stand, not whom they shoot.
+	// is about where they stand, not whom they shoot. A melee follower never gets an
+	// enemy out of their reach, not even an ordered one, and is moved off one the
+	// combat AI chose when anyone else can be reached.
 	[[nodiscard]] Pick PickTarget(std::span<const EnemyView> a_enemies, Focus a_focus, Position a_position, bool a_ranged, const Tuning& a_tuning);
 
 	[[nodiscard]] bool Matches(const EnemyView& a_enemy, Focus a_focus);
+
+	// --- Potions -----------------------------------------------------------
+
+	// Which grade of a potion (0 the weakest of a_tiers) someone of this level brews: the
+	// first grade from a_from, one more every a_step levels.
+	[[nodiscard]] int PotionTier(int a_level, int a_from, int a_step, int a_tiers);
 
 	// --- Danger ------------------------------------------------------------
 

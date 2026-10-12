@@ -40,6 +40,7 @@ namespace FWM::Battle
 			kMark,
 			kTauntNow,
 			kHealNow,
+			kSpecialNow,  // the role's special: bodyguard, volley, war cry, ward, disarm
 			kPreset,
 			kShout  // a party order for this fight
 		};
