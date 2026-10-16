@@ -469,15 +469,20 @@ namespace
 		CHECK(book.Divest(aela, tank) == Block::kNothing);
 		CHECK(book.Unspent(lydia) == left - 1);
 
-		// Saved and loaded: each record back with its own companion, and their own points.
+		// Saved and loaded: each record back with its own companion, and their own points. With
+		// unlimited points, bonus points go in like anything else, and leave with them.
 		CHECK(book.SetUnlimited(lydia, true) == Block::kNone);
+		CHECK(book.Invest(lydia, tank, 50) == Block::kNone);
+		CHECK(Invested(*book.Find(lydia), tank) == 2);
 		Book loaded;
 		loaded.points = book.points;
 		CHECK(loaded.Load(book.Records(), book.KeptAside()) == 0);
 		CHECK(loaded.Unlimited(lydia) && !loaded.Unlimited(aela));
 		CHECK(loaded.Unspent(aela) == 2);
+		CHECK(Invested(*loaded.Find(lydia), tank) == 2);
 		CHECK(loaded.SetUnlimited(lydia, false) == Block::kNone);
 		CHECK(loaded.Unspent(lydia) == left - 1);
+		CHECK(Invested(*loaded.Find(lydia), tank) == 1);
 		CHECK(*loaded.Find(aela) == *book.Find(aela));
 
 		// A record overspent for its own level loses only its own points.

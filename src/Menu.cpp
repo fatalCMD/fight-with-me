@@ -2160,7 +2160,7 @@ namespace FWM::Menu
 						const float id = static_cast<float>(a_badge.index);
 						++placed;
 						const float charge = a_badge.cooldown > 0.0f && a_badge.ready > 0.0f ? Clamp01(1.0f - a_badge.ready / a_badge.cooldown) : 1.0f;
-						const bool  cooling = charge < 1.0f && a_member.inCombat;
+						const bool  cooling = charge < 1.0f;  // cooldowns run on after a fight, so the wait shows then too
 						const bool  lit = a_badge.usable && !cooling;
 
 						bool hovered = false;
@@ -3580,19 +3580,48 @@ namespace FWM::Menu
 					Diamond(a_draw, { lx + 11.0f * a_s, cy }, 4.0f * a_s, Alpha(kAccent, alpha), Alpha(kEdge, alpha), 1.0f);
 					Text(a_draw, { lx + 19.0f * a_s, cy - TextSize(12.0f * a_s, tally).y * 0.5f }, Alpha(working ? kText : kTextDim, alpha), 12.0f * a_s, tally);
 				}
-				// One point back out of it: beside the chip while any are in it.
-				if (invested > 0 && a_member.respec) {
-					const bool  fighting = a_member.inCombat;
-					const V     at{ bmax.x + 6.0f * a_s, bmin.y };
-					if (GhostButton(a_draw, "pathDivest", at, { h, h }, 0xF068, "", false, false, a_s, alpha * (fighting ? 0.5f : 1.0f), 0x7260) && live && !fighting) {
+				// Points straight into the bonus and back out, beside the chip. Always there, so the way in
+				// is seen; dim when shut, and saying why.
+				{
+					const auto investBlock = Paths::CanInvest(record, path, a_member.pointsEarned, bonusRoom);
+					const bool canPut = investBlock == Paths::Block::kNone;
+					const bool fighting = a_member.inCombat;
+					const bool canTake = invested > 0 && a_member.respec && !fighting;
+					const V    minus{ bmax.x + 6.0f * a_s, bmin.y };
+					const V    plus{ minus.x + h + 4.0f * a_s, bmin.y };
+					if (GhostButton(a_draw, "pathDivest", minus, { h, h }, 0xF068, "", false, false, a_s, alpha * (canTake ? 1.0f : 0.4f), 0x7260) && live && canTake) {
 						PathCommand(Battle::Command::Type::kDivest, a_member.id, path);
 						Sound("UIMenuCancel");
 					}
 					if (Im::IsItemHovered()) {
-						if (fighting) {
-							Readout("Points come back out of the bonus once the fight is over."s);
-						} else {
+						if (canTake) {
 							Tip("Take a point back out of the bonus."s);
+						} else if (invested == 0) {
+							Readout("No points in the bonus to take back."s);
+						} else {
+							Readout(a_member.respec ? "Points come back out of the bonus once the fight is over."s : std::string(Paths::Why(Paths::Block::kNoRespec)));
+						}
+					}
+					if (GhostButton(a_draw, "pathInvestChip", plus, { h, h }, 0xF067, "", canPut, false, a_s, alpha * (canPut ? 1.0f : 0.4f), 0x7262) && live && canPut) {
+						PathCommand(Battle::Command::Type::kInvest, a_member.id, path);
+						Sound("UIMenuOK");
+					}
+					if (Im::IsItemHovered()) {
+						if (canPut) {
+							Tip(std::format("Put a leftover point straight into the bonus: {} now, {} with it.", Rules::PathBonusText(path, bonus),
+								Rules::PathBonusText(path, Rules::PathBonus(path, onPath + 1, a_tuning))));
+						} else if (investBlock == Paths::Block::kNotMastered) {
+							int left = 0;
+							for (std::size_t i = 0; i < Paths::kNodes; ++i) {
+								left += tree[i].Empty() ? 0 : std::max(tree[i].most - record.ranks[static_cast<std::size_t>(path)][i], 0);
+							}
+							Readout(std::format("Points go straight into the bonus once every node on this path is mastered: {} more rank{} to go.", left, left == 1 ? "" : "s"));
+						} else if (investBlock == Paths::Block::kBonusFull) {
+							Readout(std::format("The bonus is at its highest: {}.", Rules::PathBonusText(path, bonus)));
+						} else if (investBlock == Paths::Block::kNoPoints) {
+							Readout("No points left. One more comes with every level."s);
+						} else {
+							Readout(std::string(Paths::Why(investBlock)));
 						}
 					}
 				}
