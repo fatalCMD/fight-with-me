@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FWM/Cooldowns.h"
 #include "FWM/Orders.h"
 
 // The player's companions: everyone loaded who follows the player, their saved
@@ -24,6 +25,7 @@ namespace FWM::Party
 		std::optional<Focus> focusBeforeMark;  // what the mark replaced, given back when it ends
 		float           markFor{ 0.0f };       // seconds since the mark was given
 		float           markEngageIn{ 0.0f };  // before asking the engine again to add the mark to their fight
+		float           markAway{ 0.0f };      // seconds the marked enemy has been out of the fight
 		int             markAsks{ 0 };         // times it was asked
 		bool            markTaken{ false };    // the combat AI has them on the mark
 		bool            markWarned{ false };   // the log has said they are not
@@ -36,10 +38,13 @@ namespace FWM::Party
 		float           tauntReady{ 0.0f };  // seconds until the next taunt is allowed
 		float           tauntCooldown{ 0.0f };  // length of the last cooldown, for the menu
 		float           healReady{ 0.0f };
+		float           rejuvenateReady{ 0.0f };     // a healer's Rejuvenate: seconds until it can be used again
+		float           rejuvenateCooldown{ 0.0f };  // length of the last cooldown, for the menu
 		float           inCombatFor{ 0.0f };
 		bool            opened{ false };     // the opening taunt is spent
 		bool            tauntRequested{ false };
 		bool            healRequested{ false };
+		bool            rejuvenateRequested{ false };
 		std::uint64_t   askedAt{ 0 };    // tick of the last ability the player asked for
 		std::string     answer;          // what came of it, for the plan: done, or why not
 		std::uint64_t   answerAt{ 0 };
@@ -50,25 +55,25 @@ namespace FWM::Party
 		// A taunt waiting for its animation to start.
 		bool  tauntPending{ false };
 		float tauntPendingFor{ 0.0f };
-
-		// A heal being cast by hand: the spell in the left hand, aimed at the patient.
-		RE::ActorHandle castPatient;
-		RE::SpellItem*  castSpell{ nullptr };
-		float           castElapsed{ 0.0f };
-		float           castHold{ 0.0f };       // how long the cast is held before release
-		float           castHealthAt{ 0.0f };   // the patient's health when it began
-		float           castEffectiveness{ 1.0f };
-		float           castCost{ 0.0f };
-		int             castPhase{ 0 };          // 0 equipping, 1 charging, 2 released
-		float           castPhaseFor{ 0.0f };
-		float           castExpected{ 0.0f };    // the heal as a fraction of the patient's health
-		int             castFurthest{ 0 };       // the furthest caster state reached, for the log
-		int             castFailures{ 0 };       // hand casts in a row that did not land, this fight
-		float           tauntRollIn{ 0.0f };  // seconds until a ready tank rolls for a taunt again
+		float tauntRollIn{ 0.0f };  // seconds until a ready tank rolls for a taunt again
 
 		const RE::TESForm* rightHand{ nullptr };  // what was in the right hand at the last decision
 		bool               armed{ false };        // the start-of-fight weapon check is done
 		bool               warnedAmmo{ false };   // told the player this fight that they have no arrows
+
+		// Out of magicka: a mage or healer falls back until it comes back.
+		bool drained{ false };
+		bool drainedTold{ false };  // the notice is given once a fight
+
+		// A mage's or healer's chosen spells, kept in use: seconds since one was last cast (by the
+		// combat AI or for them), a pause per hand after casting one for them, and what the log
+		// has said this fight.
+		bool                 handsChecked{ false };  // what the combat AI made of them is logged
+		float                spellIdle{ 0.0f };
+		std::array<float, 2> spellReady{};
+		std::array<bool, 2>  spellTold{};
+		bool                 spellsByAi{ false };  // the combat AI has cast one of them itself this fight
+		int                  spellsDriven{ 0 };    // cast for them this fight
 
 		// Drawing fire: the shield up and turned to the nearest archer or caster shooting at them.
 		bool            shielding{ false };
@@ -90,10 +95,7 @@ namespace FWM::Party
 		bool            chasingLogged{ false };
 		RE::NiPoint3    chasingAt{};  // where they stood when the clock started
 
-		// A healer on their way to a downed companion, to heal them up close.
-		RE::ActorHandle reviving;
-		float           revivingFor{ 0.0f };
-		bool            leashOnPatient{ false };  // the leash is centred on them, not the player
+		bool leashMoved{ false };  // a bodyguard run moved the leash: put it back once it is over
 
 		// The role's special: bodyguard, volley, war cry, ward or disarm.
 		bool  specialRequested{ false };
@@ -104,18 +106,6 @@ namespace FWM::Party
 		int             burstLeft{ 0 };
 		float           burstIn{ 0.0f };
 		bool  guardTaunted{ false };    // bodyguard: the taunt on arrival is spent
-
-		// Potions: drunk in a fight, brewed at rest.
-		float        drinkReady{ 0.0f };
-		bool         fortified{ false };  // drank a fortify potion this fight
-		bool         resisted{ false };   // drank a resist potion this fight
-		float        brewIn{ -1.0f };     // until they think about brewing again; below zero, not yet rolled
-		float        stillFor{ 0.0f };    // seconds standing about, out of any fight
-		RE::NiPoint3 lastSeen{};
-		float        brewing{ -1.0f };    // seconds into a brew, or below zero
-		float        brewTakes{ 8.0f };
-		bool         brewAnimated{ false };
-		float        brewExit{ -1.0f };   // seconds until the hands are made sure to be back at rest
 	};
 
 	// What came of something the player asked a companion for: done, or why not. Shown under
@@ -124,6 +114,15 @@ namespace FWM::Party
 
 	// a_dt ages the arsenal timers.
 	void Refresh(float a_dt = 0.0f);
+
+	// Every frame, in a fight or out of it: the cooldowns of everyone met run down by the world
+	// seconds since the last frame, those away from the roster included. Returns those seconds.
+	float Cool(float a_frame);
+
+	// Cooldowns still running, for the co-save, and back from it. Anyone not in the roster yet
+	// takes theirs up on arriving.
+	[[nodiscard]] std::vector<Cooldowns::Wait> SavedWaits();
+	void LoadWaits(std::span<const Cooldowns::Wait> a_waits);
 
 	// Forget the roster and the fight; orders survive.
 	void ResetRuntime();
@@ -142,6 +141,13 @@ namespace FWM::Party
 
 	[[nodiscard]] std::vector<std::pair<std::uint32_t, Orders>> SavedOrders();
 	void LoadOrders(const std::vector<std::pair<std::uint32_t, Orders>>& a_orders);
+
+	// The spells chosen for a mage's or healer's hands; none chosen is all zero.
+	[[nodiscard]] Hands HandsOf(RE::FormID a_id);
+	void                SetHands(RE::FormID a_id, const Hands& a_hands);
+
+	[[nodiscard]] std::vector<std::pair<std::uint32_t, Hands>> SavedHands();
+	void LoadHands(const std::vector<std::pair<std::uint32_t, Hands>>& a_hands);
 
 	// The player plus everyone above, for healing and "attacking the party".
 	[[nodiscard]] bool IsPartyActor(RE::Actor* a_actor);

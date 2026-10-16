@@ -1,3 +1,4 @@
+#include "FWM/Cooldowns.h"
 #include "FWM/Hotkey.h"
 #include "FWM/OrdersCodec.h"
 #include "FWM/Rules.h"
@@ -50,55 +51,88 @@ namespace
 		CHECK(Near(TauntRadius(20, 100, t), 1100.0f));
 		CHECK(Near(TauntRadius(200, 0, t), 1100.0f));  // skills clamp at 100
 
-		CHECK(Near(HoldSeconds(40, 38, t), 7.0f));
-		CHECK(Near(HoldSeconds(40, 30, t), 10.5f));  // cowed: ten below
+		// Ten seconds, fifteen from level 30, thirty from level 60.
+		CHECK(Near(HoldSeconds(1, 1, t), 10.0f));
+		CHECK(Near(HoldSeconds(29, 29, t), 10.0f));
+		CHECK(Near(HoldSeconds(30, 30, t), 15.0f));
+		CHECK(Near(HoldSeconds(59, 55, t), 15.0f));
+		CHECK(Near(HoldSeconds(60, 60, t), 30.0f));
+		CHECK(Near(HoldSeconds(81, 80, t), 30.0f));
+		CHECK(Near(HoldSeconds(40, 30, t), 22.5f));  // cowed: ten below
 
 		CHECK(Near(TauntCooldown(20, t), 13.0f));
 		CHECK(Near(TauntCooldown(200, t), 8.0f));
+
+		// Bracing: 10 + 1.5 a level, up to 120.
+		CHECK(Near(TauntArmor(1, t), 11.5f));
+		CHECK(Near(TauntArmor(30, t), 55.0f));
+		CHECK(Near(TauntArmor(100, t), 120.0f));
+		CHECK(TauntArmor(40, t) > TauntArmor(20, t));
+	}
+
+	void Magicka()
+	{
+		// Out once the cheapest spell is out of reach.
+		CHECK(!OutOfMagicka(40.0f, 200.0f, 30.0f, false));
+		CHECK(OutOfMagicka(29.0f, 200.0f, 30.0f, false));
+		// Back once there is enough for two casts or a third of the pool, whichever is more.
+		CHECK(OutOfMagicka(60.0f, 200.0f, 30.0f, true));
+		CHECK(!OutOfMagicka(67.0f, 200.0f, 30.0f, true));
+		CHECK(OutOfMagicka(110.0f, 200.0f, 60.0f, true));
+		CHECK(!OutOfMagicka(120.0f, 200.0f, 60.0f, true));
+		// A spell dearer than half the pool: a full pool brings them back.
+		CHECK(OutOfMagicka(140.0f, 150.0f, 100.0f, true));
+		CHECK(!OutOfMagicka(150.0f, 150.0f, 100.0f, true));
+		// Nothing to cast, or no magicka at all to speak of: never out.
+		CHECK(!OutOfMagicka(0.0f, 200.0f, 0.0f, true));
+		CHECK(!OutOfMagicka(0.0f, 0.0f, 30.0f, false));
+	}
+
+	void Spells()
+	{
+		CHECK(TierFromSkill(0) == SpellTier::kNovice && TierFromSkill(25) == SpellTier::kApprentice && TierFromSkill(50) == SpellTier::kAdept);
+		CHECK(TierFromSkill(75) == SpellTier::kExpert && TierFromSkill(100) == SpellTier::kMaster && TierFromSkill(250) == SpellTier::kMaster);
+		CHECK(TierFromSkill(-5) == SpellTier::kNovice);
+
+		// Mages: anything but a heal, whatever their level.
+		CHECK(SpellAllowed(Role::kMage, false, true, SpellTier::kMaster, 1, false));
+		CHECK(SpellAllowed(Role::kMage, false, false, SpellTier::kMaster, 1, false));  // a ward or a cloak as much as an attack
+		CHECK(!SpellAllowed(Role::kMage, true, false, SpellTier::kNovice, 50, false));
+
+		// Healers: every heal and every other kind of spell; attack spells climb with level and stop at Adept.
+		CHECK(SpellAllowed(Role::kHealer, true, false, SpellTier::kMaster, 1, false));
+		CHECK(SpellAllowed(Role::kHealer, false, false, SpellTier::kExpert, 1, false));  // a ward, armor, a summons: no cap
+		CHECK(SpellAllowed(Role::kHealer, false, true, SpellTier::kNovice, 1, false));
+		CHECK(!SpellAllowed(Role::kHealer, false, true, SpellTier::kApprentice, 9, false));
+		CHECK(SpellAllowed(Role::kHealer, false, true, SpellTier::kApprentice, 10, false));
+		CHECK(!SpellAllowed(Role::kHealer, false, true, SpellTier::kAdept, 24, false));
+		CHECK(SpellAllowed(Role::kHealer, false, true, SpellTier::kAdept, 25, false));
+		CHECK(!SpellAllowed(Role::kHealer, false, true, SpellTier::kExpert, 81, false));
+		CHECK(!SpellAllowed(Role::kHealer, false, true, SpellTier::kMaster, 81, false));
+		CHECK(SpellAllowed(Role::kHealer, false, true, SpellTier::kMaster, 5, true));  // the "any spell" setting
+
+		// Nobody else chooses spells.
+		CHECK(!SpellAllowed(Role::kFighter, false, true, SpellTier::kNovice, 50, true));
+		CHECK(!SpellAllowed(Role::kTank, true, false, SpellTier::kNovice, 50, true));
 	}
 
 	void Heal()
 	{
-		const Tuning                t;
-		std::vector<HealCandidate> c(3);
-		c[0] = { 0.9f, 100, false, false, true, false };   // player, fine
-		c[1] = { 0.5f, 300, false, false, false, false };  // follower under 55%
-		c[2] = { 0.5f, 300, true, false, false, false };   // same, but being hit
-		CHECK(PickHealTarget(c, 0.55f, t) == 2);
+		const Tuning t;
+		// The team heal: 40 and 3.5 a level, never past 400.
+		CHECK(Near(TeamHealAmount(1, t), 43.5f));
+		CHECK(Near(TeamHealAmount(30, t), 145.0f));
+		CHECK(Near(TeamHealAmount(60, t), 250.0f));
+		CHECK(Near(TeamHealAmount(200, t), 400.0f));
+		CHECK(Near(TeamHealAmount(0, t), 43.5f));  // level 0 counts as 1
 
-		c[2].attacked = false;
-		c[0].health = 0.5f;  // the player at the same health wins the tie
-		CHECK(PickHealTarget(c, 0.55f, t) == 0);
-
-		// The healer holds themselves to a lower line.
-		std::vector<HealCandidate> self{ { 0.45f, 0, false, true, false, false } };
-		CHECK(PickHealTarget(self, 0.55f, t) == -1);
-		self[0].health = 0.35f;
-		CHECK(PickHealTarget(self, 0.55f, t) == 0);
-
-		// Out of range is ignored; bleeding out is always worth a heal.
-		std::vector<HealCandidate> far{ { 0.1f, 5000, false, false, false, false }, { 0.8f, 200, false, false, false, true } };
-		CHECK(PickHealTarget(far, 0.55f, t) == 1);
-
-		std::vector<HealCandidate> fine{ { 0.9f, 100, false, false, true, false } };
-		CHECK(PickHealTarget(fine, 0.55f, t) == -1);
-
-		// The player under the line comes first, even before a companion who is down.
-		std::vector<HealCandidate> first{ { 0.5f, 600, false, false, true, false }, { 0.0f, 300, true, false, false, true } };
-		CHECK(PickHealTarget(first, 0.55f, t) == 0);
-		first[0].health = 0.8f;  // the player is fine: the downed companion
-		CHECK(PickHealTarget(first, 0.55f, t) == 1);
-		first[0] = { 0.3f, 1500, false, false, true, false };  // under the line but out of reach
-		CHECK(PickHealTarget(first, 0.55f, t) == 1);
-
-		// A downed companion is walked to from much further than a heal is cast.
-		std::vector<HealCandidate> reach{ { 0.2f, 1500, false, false, false, false }, { 0.3f, 2000, false, false, false, true } };
-		CHECK(PickHealTarget(reach, 0.55f, t) == 1);
-		reach[1].taken = true;  // another healer is on the way: nobody else goes
-		CHECK(PickHealTarget(reach, 0.55f, t) == -1);
-		reach[1].distance = 3000;
-		reach[1].taken = false;
-		CHECK(PickHealTarget(reach, 0.55f, t) == -1);
+		// Rejuvenate: 30 s, a minute from level 30, three from 60; ready again after twice that.
+		CHECK(Near(RejuvenateSeconds(1, t), 30.0f) && Near(RejuvenateCooldown(1, t), 60.0f));
+		CHECK(Near(RejuvenateSeconds(29, t), 30.0f));
+		CHECK(Near(RejuvenateSeconds(30, t), 60.0f) && Near(RejuvenateCooldown(30, t), 120.0f));
+		CHECK(Near(RejuvenateSeconds(59, t), 60.0f));
+		CHECK(Near(RejuvenateSeconds(60, t), 180.0f) && Near(RejuvenateCooldown(60, t), 360.0f));
+		CHECK(Near(RejuvenateSeconds(81, t), 180.0f));
 	}
 
 	EnemyView Enemy(float a_distance)
@@ -164,6 +198,21 @@ namespace
 		CHECK(PickTarget(w, Focus::kAttackingPlayer, Position::kWithMe, false, t).index == 0);
 		w[0].distance = 900;  // on them, but far off: the one nearest the player instead
 		CHECK(PickTarget(w, Focus::kAttackingPlayer, Position::kWithMe, false, t).index == 1);
+
+		// With me, shooting from the player's side: anyone, the nearest first, however far.
+		std::vector<EnemyView> wr{ Enemy(1800), Enemy(1200), Enemy(300) };
+		wr[0].distanceToPlayer = 1700;
+		wr[1].distanceToPlayer = 1100;
+		wr[2].distanceToPlayer = 350;
+		CHECK(PickTarget(wr, Focus::kAttackingPlayer, Position::kWithMe, true, t).index == 2);
+		wr[2].distance = wr[2].distanceToPlayer = 2600;  // nobody near: still the nearest, not nothing
+		CHECK(PickTarget(wr, Focus::kAttackingPlayer, Position::kWithMe, true, t).index == 1);
+		wr[0].attackingPlayer = true;  // the leaning still counts: whoever is on you first
+		CHECK(PickTarget(wr, Focus::kAttackingPlayer, Position::kWithMe, true, t).index == 0);
+		// A blade at your side still only takes what reaches you.
+		wr[0].attackingPlayer = false;
+		wr[1].distanceToPlayer = 450;
+		CHECK(PickTarget(wr, Focus::kAttackingPlayer, Position::kWithMe, false, t).index == 1);
 
 		// Fighting back: an enemy on them from close by comes first, whatever the leaning.
 		std::vector<EnemyView> fb{ Enemy(1000), Enemy(120) };
@@ -348,6 +397,11 @@ namespace
 		CHECK(archerFront.meleeScore > 0.2f);
 		CHECK(archerBack.fallback >= 0.67f);
 		CHECK(archerFree.fallback < archerBack.fallback);  // free to move as they like
+		// With me: planted at your side, never backing off or circling away to cover; still no dagger.
+		const auto archerWithMe = Layer(base, Role::kArcher, Position::kWithMe, 0.75f);
+		CHECK(archerWithMe.fallback < archerFree.fallback && archerWithMe.avoidThreat < archerBack.avoidThreat);
+		CHECK(archerWithMe.meleeScore < 0.01f && archerWithMe.circle <= 0.2f);
+		CHECK(Layer(base, Role::kFighter, Position::kWithMe, 1.0f).fallback < free.fallback);
 		CHECK(Layer(base, Role::kMage, Position::kFree, 0.75f).meleeScore < 0.01f);
 		CHECK(Layer(base, Role::kFighter, Position::kHoldBack, 0.75f).meleeScore > 0.5f);
 	}
@@ -376,23 +430,33 @@ namespace
 
 		CHECK(FWM::Codec::Decode(bytes, 0).empty());
 
-		// The special and potion switches ride in the flags byte, stored as "off": a save
-		// from before them (flags 0 or 1) reads with both on.
+		// The special and Rejuvenate switches ride in the flags byte, stored as "off": a save from
+		// before them (flags 0 or 1) reads with both on.
 		Orders quiet = ForRole(Role::kArcher);
 		quiet.autoSpecial = false;
-		quiet.potions = false;
+		quiet.autoRejuvenate = false;
 		const std::vector<FWM::Codec::Entry> switched{ { 0x00000D62, quiet } };
 		const auto back = FWM::Codec::Decode(FWM::Codec::Encode(switched), FWM::Codec::kVersion);
 		CHECK(back.size() == 1 && back[0].second == quiet);
 		auto old = FWM::Codec::Encode(switched);
 		old[4 + 7] = 1;  // what the first version wrote: only "on their own"
 		const auto upgraded = FWM::Codec::Decode(old, FWM::Codec::kVersion);
-		CHECK(upgraded.size() == 1 && upgraded[0].second.autoSpecial && upgraded[0].second.potions && upgraded[0].second.autoAbility);
+		CHECK(upgraded.size() == 1 && upgraded[0].second.autoSpecial && upgraded[0].second.autoAbility && upgraded[0].second.autoRejuvenate);
+		// The old Potions switch (bit 2) in a save is passed over, and never written again.
+		auto potionsOff = FWM::Codec::Encode(switched);
+		potionsOff[4 + 7] |= 1 << 2;
+		const auto ignored = FWM::Codec::Decode(potionsOff, FWM::Codec::kVersion);
+		CHECK(ignored.size() == 1 && ignored[0].second == quiet);
+		CHECK((FWM::Codec::Encode(ignored)[4 + 7] & (1 << 2)) == 0);
 
-		// Brewed grades climb with level: healing from Minor at 1 to Ultimate at 51.
-		CHECK(Rules::PotionTier(1, 1, 10, 6) == 0 && Rules::PotionTier(10, 1, 10, 6) == 0 && Rules::PotionTier(11, 1, 10, 6) == 1);
-		CHECK(Rules::PotionTier(51, 1, 10, 6) == 5 && Rules::PotionTier(80, 1, 10, 6) == 5);
-		CHECK(Rules::PotionTier(14, 15, 15, 4) == 0 && Rules::PotionTier(45, 15, 15, 4) == 2);
+		// Chosen spells: (follower, left, right) round-trip; a short record keeps what is whole.
+		const std::vector<FWM::Codec::HandsEntry> hands{ { 0x00000D62, { 0x0001C789, 0 } }, { 0xFE001234, { 0x0002B96B, 0x0002B96C } } };
+		auto handBytes = FWM::Codec::EncodeHands(hands);
+		CHECK(FWM::Codec::DecodeHands(handBytes, FWM::Codec::kHandsVersion) == hands);
+		handBytes.resize(handBytes.size() - 3);
+		const auto shortHands = FWM::Codec::DecodeHands(handBytes, FWM::Codec::kHandsVersion);
+		CHECK(shortHands.size() == 1 && shortHands[0] == hands[0]);
+		CHECK(FWM::Codec::DecodeHands(handBytes, 0).empty());
 
 		// Every role has its own special.
 		CHECK(SpecialOf(Role::kTank) == Special::kBodyguard && SpecialOf(Role::kArcher) == Special::kVolley);
@@ -409,29 +473,29 @@ namespace
 		Arsenal ranger{ true, true, false, false };
 
 		// No weapon: no melee roles; an empty-handed companion can still brawl.
-		CHECK(LackFor(Role::kTank, mage, false) == Lack::kWeapon);
-		CHECK(LackFor(Role::kBruiser, mage, false) == Lack::kWeapon);
-		CHECK(LackFor(Role::kFighter, mage, false) == Lack::kWeapon);
-		CHECK(LackFor(Role::kFighter, bare, false) == Lack::kNothing);
-		CHECK(LackFor(Role::kTank, bare, false) == Lack::kWeapon);
-		CHECK(LackFor(Role::kTank, sword, false) == Lack::kNothing);
+		CHECK(LackFor(Role::kTank, mage) == Lack::kWeapon);
+		CHECK(LackFor(Role::kBruiser, mage) == Lack::kWeapon);
+		CHECK(LackFor(Role::kFighter, mage) == Lack::kWeapon);
+		CHECK(LackFor(Role::kFighter, bare) == Lack::kNothing);
+		CHECK(LackFor(Role::kTank, bare) == Lack::kWeapon);
+		CHECK(LackFor(Role::kTank, sword) == Lack::kNothing);
 
-		// Healer needs a heal of their own unless the borrowed heal is on.
-		CHECK(LackFor(Role::kHealer, sword, false) == Lack::kHeal);
-		CHECK(LackFor(Role::kHealer, sword, true) == Lack::kNothing);
-		CHECK(LackFor(Role::kHealer, priest, false) == Lack::kNothing);
-		CHECK(LackFor(Role::kArcher, sword, false) == Lack::kBow);
-		CHECK(LackFor(Role::kArcher, ranger, false) == Lack::kNothing);
-		CHECK(LackFor(Role::kMage, sword, false) == Lack::kSpells);
+		// A healer's heal is their own, not a spell: anyone can be one.
+		CHECK(LackFor(Role::kHealer, sword) == Lack::kNothing);
+		CHECK(LackFor(Role::kHealer, bare) == Lack::kNothing);
+		CHECK(LackFor(Role::kHealer, priest) == Lack::kNothing);
+		CHECK(LackFor(Role::kArcher, sword) == Lack::kBow);
+		CHECK(LackFor(Role::kArcher, ranger) == Lack::kNothing);
+		CHECK(LackFor(Role::kMage, sword) == Lack::kSpells);
 
 		// Falling back to the closest playable role.
-		CHECK(Playable(Role::kTank, mage, false) == Role::kMage);
-		CHECK(Playable(Role::kTank, priest, false) == Role::kHealer);
-		CHECK(Playable(Role::kHealer, sword, false) == Role::kFighter);
-		CHECK(Playable(Role::kArcher, sword, false) == Role::kFighter);
-		CHECK(Playable(Role::kMage, ranger, false) == Role::kFighter);
-		CHECK(Playable(Role::kTank, bare, false) == Role::kFighter);
-		CHECK(Playable(Role::kTank, sword, false) == Role::kTank);
+		CHECK(Playable(Role::kTank, mage) == Role::kMage);
+		CHECK(Playable(Role::kTank, priest) == Role::kHealer);
+		CHECK(Playable(Role::kHealer, sword) == Role::kHealer);
+		CHECK(Playable(Role::kArcher, sword) == Role::kFighter);
+		CHECK(Playable(Role::kMage, ranger) == Role::kFighter);
+		CHECK(Playable(Role::kTank, bare) == Role::kFighter);
+		CHECK(Playable(Role::kTank, sword) == Role::kTank);
 	}
 
 	void RoleDefaults()
@@ -490,11 +554,128 @@ namespace
 		CHECK(Fit(combo, 0x48, false) == 0 && Fit(plain, 0x48, false) == 1);
 		CHECK(Fit(plain, 0x49, false) == 0 && Fit(Hotkey{}, 0, false) == 0);
 	}
+
+	void Sight()
+	{
+		// Auto battle: everyone but those holding back starts a fight, and nobody while you sneak.
+		CHECK(Rules::StartsFight(Position::kFree, false) && Rules::StartsFight(Position::kGuard, false) && Rules::StartsFight(Position::kWithMe, false));
+		CHECK(!Rules::StartsFight(Position::kHoldBack, false));
+		CHECK(!Rules::StartsFight(Position::kFrontLine, true));
+
+		// Weapons drawn on sight go away once the view is clear for long enough, but follow yours when out.
+		CHECK(!Rules::SheathesAfterSight(2.0f, 5.0f, false));
+		CHECK(Rules::SheathesAfterSight(5.0f, 5.0f, false));
+		CHECK(!Rules::SheathesAfterSight(30.0f, 5.0f, true));
+	}
+
+	void PathBonus()
+	{
+		const Rules::Tuning t;
+		// A percent a point by default, for every role.
+		CHECK(Rules::PathBonus(Role::kFighter, 17, t) == 17.0f);
+		CHECK(Rules::PathBonus(Role::kTank, 0, t) == 0.0f);
+		CHECK(Rules::PathBonus(Role::kHealer, -3, t) == 0.0f);
+		// The archer's chance and the mage's cut stop short of free.
+		CHECK(Rules::PathBonus(Role::kArcher, 200, t) == Rules::kMostArrowsKept);
+		CHECK(Rules::PathBonus(Role::kMage, 200, t) == Rules::kMostCostCut);
+		CHECK(Rules::PathBonus(Role::kTank, 200, t) == Rules::kMostDamageCut);
+		CHECK(Rules::PathBonus(Role::kBruiser, 200, t) == 200.0f);
+		// Each role has its own rate.
+		Rules::Tuning half;
+		half.bonusDamage = 0.5f;
+		CHECK(Rules::PathBonus(Role::kBruiser, 9, half) == 4.5f);
+		CHECK(Rules::PathBonus(Role::kFighter, 9, half) == 9.0f);
+		// As it reads.
+		CHECK(Rules::PathBonusText(Role::kFighter, 17.0f) == "+17% attack speed");
+		CHECK(Rules::PathBonusText(Role::kArcher, 12.0f) == "12% arrows kept");
+		CHECK(Rules::PathBonusText(Role::kMage, 30.0f) == "-30% magicka cost");
+		CHECK(Rules::PathBonusText(Role::kMage, 0.0f) == "0% magicka cost");
+		CHECK(Rules::PathBonusText(Role::kTank, 14.0f) == "-14% damage taken");
+		CHECK(Rules::PathBonusNumber(Role::kBruiser, 4.5f) == "+4.5%");
+		CHECK(Rules::Percent(16.96f) == "17%");
+
+		// Room left for points put straight into the bonus: up to the cap, none past it.
+		CHECK(Rules::PathBonusRoom(Role::kMage, 30, t) == 45);
+		CHECK(Rules::PathBonusRoom(Role::kMage, 75, t) == 0);
+		CHECK(Rules::PathBonusRoom(Role::kMage, 200, t) == 0);
+		CHECK(Rules::PathBonusRoom(Role::kArcher, 0, t) == 90);
+		CHECK(Rules::PathBonusRoom(Role::kTank, 74, t) == 1);
+		CHECK(Rules::PathBonusRoom(Role::kFighter, 30, t) == 970);
+		// The point that reaches the cap still counts, even part way: 0.7 a point caps the mage at 108.
+		Rules::Tuning odd;
+		odd.bonusMagickaCost = 0.7f;
+		CHECK(Rules::PathBonusRoom(Role::kMage, 0, odd) == 108);
+		CHECK(Rules::PathBonus(Role::kMage, 107, odd) < Rules::kMostCostCut && Rules::PathBonus(Role::kMage, 108, odd) == Rules::kMostCostCut);
+		odd.bonusHealing = 0.0f;
+		CHECK(Rules::PathBonusRoom(Role::kHealer, 0, odd) == 0);
+		CHECK(Rules::PathBonusCap(Role::kBruiser) == Rules::kMostOtherBonus);
+	}
+
+	void CooldownClock()
+	{
+		using namespace FWM::Cooldowns;
+		CHECK(Near(Down(5.0f, 2.0f), 3.0f));
+		CHECK(Down(1.0f, 2.0f) == 0.0f);
+		CHECK(Near(Down(1.0f, -3.0f), 1.0f));
+
+		// Hours between two readings: whole days from the days (which carry the day's fraction, as
+		// GameDaysPassed does), the rest from the hour.
+		CHECK(std::abs(Clock::HoursBetween(100.0f + 23.5f / 24.0f, 23.5f, 101.0f + 0.5f / 24.0f, 0.5f) - 1.0) < 1e-4);
+		CHECK(std::abs(Clock::HoursBetween(400.25f, 6.0f, 400.25f, 6.0f)) < 1e-6);
+		CHECK(std::abs(Clock::HoursBetween(10.0f + 8.0f / 24.0f, 8.0f, 12.0f + 20.0f / 24.0f, 20.0f) - 60.0) < 1e-4);
+
+		// Frames as the calendar runs with them, late in a game where the days alone cannot show a
+		// minute: only the frames count.
+		Clock clock;
+		float days = 512.0f, hour = 10.0f, total = 0.0f;
+		CHECK(Near(clock.Advance(0.05f, days, hour, 20.0f), 0.05f));
+		for (int i = 0; i < 1200; ++i) {
+			hour += 0.05f * 20.0f / 3600.0f;
+			days += 0.05f * 20.0f / 86400.0f;  // a float this size loses every one of these
+			total += clock.Advance(0.05f, days, hour, 20.0f);
+		}
+		CHECK(Near(total, 60.0f, 0.01f));
+
+		// An hour's wait in one frame: 3600 game seconds at a timescale of 20 is 180 world seconds.
+		hour += 1.0f;
+		days += 1.0f / 24.0f;
+		const float waited = clock.Advance(0.016f, days, hour, 20.0f);
+		CHECK(waited > 175.0f && waited < 182.0f);
+		// Asleep past midnight: 14 hours, the hour wrapping round.
+		hour = std::fmod(hour + 14.0f, 24.0f);
+		days += 14.0f / 24.0f;
+		CHECK(hour < 2.0f);
+		CHECK(Near(clock.Advance(0.0f, days, hour, 20.0f), 2520.0f, 1.0f));
+
+		// A load into an earlier day: counting starts again, and only the frame counts.
+		CHECK(Near(clock.Advance(0.02f, 40.0f, 9.0f, 20.0f), 0.02f));
+		CHECK(Near(clock.Advance(0.02f, 40.0f, 9.0f + 0.02f * 20.0f / 3600.0f, 20.0f), 0.02f));
+		// Nothing readable: frames only, and never backwards.
+		Clock blind;
+		CHECK(Near(blind.Advance(0.1f, 1.0f, 8.0f, 0.0f), 0.1f));
+		CHECK(blind.Advance(-1.0f, 1.0f, 8.0f, 20.0f) == 0.0f);
+
+		// The save record: what is running comes back; what is over or damaged does not.
+		const std::vector<Wait> waits{ { 0x14, kTaunt, 12.5f, 30.0f }, { 0xFF000801, 18, 3.0f, 45.0f }, { 0x14, kSpecial, 60.0f, 40.0f } };
+		const auto back = Decode(Encode(waits), kVersion);
+		CHECK(back.size() == 3);
+		CHECK(back.size() == 3 && back[0] == waits[0] && back[1] == waits[1]);
+		CHECK(back.size() == 3 && back[2].length == 60.0f);  // a wait is never longer than its whole
+		const std::vector<Wait> bad{ { 0, kHeal, 5.0f, 5.0f }, { 0x14, kHeal, 0.0f, 5.0f }, { 0x14, kHeal, 99999.0f, 5.0f },
+			{ 0x14, kHeal, std::nanf(""), 5.0f } };
+		CHECK(Decode(Encode(bad), kVersion).empty());
+		auto bytes = Encode(waits);
+		bytes.resize(bytes.size() - 5);
+		CHECK(Decode(bytes, kVersion).size() == 2);  // a short record keeps what is whole
+		CHECK(Decode(Encode(waits), 0).empty());
+	}
 }
 
 int main()
 {
 	Taunt();
+	Magicka();
+	Spells();
 	Heal();
 	Targeting();
 	DangerTiers();
@@ -503,6 +684,9 @@ int main()
 	RoleDefaults();
 	RoleGating();
 	Hotkeys();
+	Sight();
+	PathBonus();
+	CooldownClock();
 	std::printf("%d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;
 }

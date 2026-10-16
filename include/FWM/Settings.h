@@ -21,6 +21,12 @@ namespace FWM::Settings
 		bool        markGlow{ true };  // in the plan, an enemy someone is sent after is outlined, through walls
 		std::string markShader{ "Skyrim.esm|0x0FE68D" };  // GhostWolfSpiritFXShader: edge only; recoloured
 
+		// Out of a fight: an enemy in view brings weapons out, and with auto battle the
+		// companion who sees it starts the fight instead of waiting to be attacked.
+		bool  drawOnSight{ true };
+		bool  autoBattle{ false };
+		float sightRange{ 2500.0f };
+
 		// Battle plan
 		Hotkey        planKey{ 71 };        // Numpad 7
 		std::uint32_t planGamepadKey{ 2 };  // XInput button pressed with LB held, 0 = none
@@ -50,36 +56,35 @@ namespace FWM::Settings
 		bool        shieldWall{ true };  // tanks raise the shield against archers and casters shooting at them
 		float       tauntChance{ 0.35f };       // once ready, the chance of taunting at each check
 		float       tauntCheckSeconds{ 2.0f };
-		float       glowSeconds{ 1.2f };
-		std::string glowShader{ "Skyrim.esm|0x0FE68D" };
+		bool        brace{ true };  // a taunt braces the tank with armor while it holds
+		float       glowSeconds{ 1.2f };  // the gold flash on a tank as they taunt
 		std::string tauntSound{ "Skyrim.esm|0x0FF86A" };
 		std::string idleShield{ "Skyrim.esm|0x0B8C74" };
 		std::string idleWeapon{ "Skyrim.esm|0x0B8C73" };
 		std::string idleCry{ "Skyrim.esm|0x0F7C8C" };
 
 		// Heal
-		bool        heal{ true };
-		bool        healFallback{ false };
-		std::string fallbackSpell{ "Skyrim.esm|0x04D3F2" };
-		float       concentrationSeconds{ 2.5f };
+		bool heal{ true };              // a healer's heal for the whole party
+		bool healersAnySpell{ false };  // besides heals, any spell in their hands; off: only weaker ones, by level
+		bool rejuvenate{ true };        // a healer quickens everyone's magicka
 
 		// Specials: bodyguard, volley, war cry, ward, disarm
 		bool specials{ true };
 
-		// Potions
-		bool  drinkPotions{ true };
-		float drinkBelow{ 0.35f };   // health they drink a healing potion at
-		bool  brewPotions{ true };   // at rest, they brew what they are short of
-		bool  brewAnimation{ true }; // and mix it in their hands, if no station is to hand
+		// What abilities look like in the world: the glows on a tank and the enemies a taunt holds,
+		// the gesture and sparks of a healer's or mage's ability, a volley's target, and so on.
+		bool abilityEffects{ true };
 
 		// Time effect
 		std::string imodIntro{ "Skyrim.esm|0x0486F7" };
 		std::string imodHold{ "Skyrim.esm|0x0486F4" };
 
 		// Interface
+		int uiTheme{ 1 };  // 0 Vanilla, 1 Oxblood (default), 2 Nordic; shared with Paths
 		bool notices{ true };
 		bool sounds{ true };  // the game's own menu sounds in the battle plan
 		bool tooltips{ true };  // describe controls on hover and pad focus
+		bool pathsGuideSeen{ false };  // the paths guide has opened once by itself
 
 		// Debug
 		bool logDecisions{ false };
@@ -92,6 +97,14 @@ namespace FWM::Settings
 
 	// The live settings. Safe from any thread; a reference stays valid for the session.
 	[[nodiscard]] const Data& Get() noexcept;
+
+	// The player's own: what the settings pages edit and what is saved, so copy this, not Get(),
+	// to change one and Apply or Submit. The same as Get() except while Paths - Follower Ability
+	// Skilltree is installed: the role settings (the Tanks and Healers pages) in effect are then
+	// FightWithMe.ini's, and the player's own wait in FightWithMe_user.ini for when it is removed.
+	[[nodiscard]] const Data& Chosen() noexcept;
+	void                      LockRoles(bool a_locked);  // main thread
+	[[nodiscard]] bool        RolesLocked() noexcept;
 
 	// What FightWithMe.ini says, before the player's own changes: what "Reset" goes back to.
 	[[nodiscard]] Data Defaults();

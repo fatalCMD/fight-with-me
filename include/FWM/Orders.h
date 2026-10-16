@@ -43,7 +43,7 @@ namespace FWM
 		kGuard,
 		kHoldBack,
 		kFrontLine,
-		kWithMe,  // broken off: at your side, fighting only what reaches you
+		kWithMe,  // at your side and staying there: a blade fights what reaches you, a bow or spell anyone
 		kCount
 	};
 
@@ -55,10 +55,19 @@ namespace FWM
 		bool         autoAbility{ true };  // taunt or heal without being told
 		std::uint8_t healThreshold{ 55 };  // percent, for a healer
 		bool         autoSpecial{ true };  // the role's special ability without being told
-		bool         potions{ true };      // drink potions in a fight, brew them at rest
+		bool         autoRejuvenate{ true };  // a healer's Rejuvenate without being told
+		std::uint32_t manual{ 0 };         // with the Paths add-on: abilities used only when told, one bit per Paths::Ability
 
 		friend bool operator==(const Orders&, const Orders&) = default;
 	};
+
+	// The spell a mage or healer holds in each hand, by form id: left, then right. 0 leaves
+	// that hand to their own choice.
+	using Hands = std::array<std::uint32_t, 2>;
+	inline constexpr std::size_t kLeftHand = 0;
+	inline constexpr std::size_t kRightHand = 1;
+
+	[[nodiscard]] constexpr bool ChoosesSpells(Role a_role) { return a_role == Role::kMage || a_role == Role::kHealer; }
 
 	// Each role's special ability: a button in the battle plan, and a switch for using it
 	// without being told.
@@ -90,7 +99,7 @@ namespace FWM
 			0xF028 },
 		{ "Ward", "Hardens your skin with alteration: Oakflesh, then Stone, Iron and Ebony as they rise in level.",
 			"When enemies are on you or your health falls, and no ward of theirs is on you.", 0xF6FC },
-		{ "Disarm", "Knocks the weapon out of their opponent's hands and onto the ground, up to ten levels above their own.",
+		{ "Disarm", "Staggers their opponent and knocks the weapon out of their hands, as the Disarm shout does, up to ten levels above their own.",
 			"When they meet a boss, a two-handed weapon, or someone at or above their level.", 0xF256 },
 	} };
 
@@ -144,7 +153,7 @@ namespace FWM
 	inline constexpr std::array<RoleInfo, static_cast<std::size_t>(Role::kCount)> roles{ {
 		{ "Fighter", "Balanced melee. Flanks and presses whoever the fight puts in front of them.", Focus::kEngine, Position::kFormation, 0xF6DE },
 		{ "Tank", "Holds the line. Blocks, bashes and taunts enemies off the rest of the party.", Focus::kAttackingParty, Position::kGuard, 0xF3ED },
-		{ "Healer", "Stays back and keeps everyone standing with healing magic.", Focus::kAttackingParty, Position::kHoldBack, 0xF4BE },
+		{ "Healer", "Stays back, heals the whole party at once and quickens everyone's magicka.", Focus::kAttackingParty, Position::kHoldBack, 0xF4BE },
 		{ "Bruiser", "Heavy hitter. Power attacks and bashes to stagger the big ones.", Focus::kStrongest, Position::kFrontLine, 0xF0E3 },
 		{ "Archer", "Keeps range and picks off casters and other archers first.", Focus::kBackLine, Position::kHoldBack, 0xF05B },
 		{ "Mage", "Spell pressure from range. Finishes off whoever is weakest.", Focus::kWeakest, Position::kHoldBack, 0xE2CA },
@@ -177,7 +186,7 @@ namespace FWM
 		{ "Guard you", "Only fight enemies near you or attacking you.", 0xF505 },
 		{ "Hold back", "Stay behind and fight only what comes close.", 0xF2EA },
 		{ "Front line", "Meet the enemies furthest forward first.", 0xF124 },
-		{ "With me", "Stay at your side, weapons out, and fight there: whatever comes near you, and whoever is on them.", 0xF076 },
+		{ "With me", "Stay at your side, weapons out, and fight from there: melee takes whatever comes near you, ranged shoots the nearest enemy.", 0xF076 },
 	} };
 
 	[[nodiscard]] constexpr const RoleInfo& Info(Role a_role) { return roles[static_cast<std::size_t>(a_role)]; }
@@ -270,11 +279,13 @@ namespace FWM
 	// spells they know. A role needs the means to play it.
 	struct Arsenal
 	{
-		bool melee{ false };   // a sword, axe, mace, dagger or two-hander
-		bool ranged{ false };  // a bow or crossbow
-		bool casts{ false };   // offensive spells or a staff
-		bool heals{ false };   // a spell that heals someone else
-		bool ammo{ true };     // arrows or bolts for the bow or crossbow they carry
+		bool  melee{ false };     // a sword, axe, mace, dagger or two-hander
+		bool  ranged{ false };    // a bow or crossbow
+		bool  casts{ false };     // offensive spells or a staff
+		bool  heals{ false };     // a spell that heals someone else
+		bool  ammo{ true };       // arrows or bolts for the bow or crossbow they carry
+		bool  staff{ false };     // a staff, which casts without magicka
+		float castCost{ 0.0f };   // magicka for the cheapest spell they would fight or heal with; 0 for none
 
 		friend bool operator==(const Arsenal&, const Arsenal&) = default;
 	};
@@ -284,13 +295,13 @@ namespace FWM
 		kNothing,
 		kWeapon,
 		kBow,
-		kSpells,
-		kHeal
+		kSpells
 	};
 
 	// What stops a companion taking a role, if anything. Someone with no weapon and no
-	// magic at all can still brawl as a Fighter. a_lendHeal: the borrowed heal is on.
-	[[nodiscard]] constexpr Lack LackFor(Role a_role, const Arsenal& a_arsenal, bool a_lendHeal)
+	// magic at all can still brawl as a Fighter. A healer's heal is their own, not a spell,
+	// so anyone can be one.
+	[[nodiscard]] constexpr Lack LackFor(Role a_role, const Arsenal& a_arsenal)
 	{
 		const bool empty = !a_arsenal.melee && !a_arsenal.ranged && !a_arsenal.casts && !a_arsenal.heals;
 		switch (a_role) {
@@ -303,8 +314,6 @@ namespace FWM
 			return a_arsenal.ranged ? Lack::kNothing : Lack::kBow;
 		case Role::kMage:
 			return a_arsenal.casts ? Lack::kNothing : Lack::kSpells;
-		case Role::kHealer:
-			return a_arsenal.heals || a_lendHeal ? Lack::kNothing : Lack::kHeal;
 		default:
 			return Lack::kNothing;
 		}
@@ -319,17 +328,15 @@ namespace FWM
 			return "Carries no bow or crossbow.";
 		case Lack::kSpells:
 			return "Knows no attack spell and carries no staff.";
-		case Lack::kHeal:
-			return "Knows no spell that heals others.";
 		default:
 			return "";
 		}
 	}
 
 	// The preferred role if it can be played, otherwise the closest one that can.
-	[[nodiscard]] constexpr Role Playable(Role a_preferred, const Arsenal& a_arsenal, bool a_lendHeal)
+	[[nodiscard]] constexpr Role Playable(Role a_preferred, const Arsenal& a_arsenal)
 	{
-		if (LackFor(a_preferred, a_arsenal, a_lendHeal) == Lack::kNothing) {
+		if (LackFor(a_preferred, a_arsenal) == Lack::kNothing) {
 			return a_preferred;
 		}
 		if (a_arsenal.melee) {
@@ -341,7 +348,7 @@ namespace FWM
 		if (a_arsenal.casts) {
 			return Role::kMage;
 		}
-		if (a_arsenal.heals || a_lendHeal) {
+		if (a_arsenal.heals) {
 			return Role::kHealer;
 		}
 		return Role::kFighter;

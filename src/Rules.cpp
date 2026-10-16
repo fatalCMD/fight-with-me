@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <format>
 #include <limits>
 
 namespace FWM::Rules
@@ -33,7 +34,7 @@ namespace FWM::Rules
 
 	float HoldSeconds(int a_tankLevel, int a_enemyLevel, const Tuning& a_tuning)
 	{
-		float seconds = a_tuning.holdBase + a_tuning.holdPerLevel * static_cast<float>(std::max(a_tankLevel, 1));
+		float seconds = a_tankLevel >= 60 ? a_tuning.holdSecondsAt60 : (a_tankLevel >= 30 ? a_tuning.holdSecondsAt30 : a_tuning.holdSeconds);
 		if (a_tankLevel - a_enemyLevel >= a_tuning.cowedLevelGap) {
 			seconds *= a_tuning.cowedHoldMult;
 		}
@@ -46,45 +47,60 @@ namespace FWM::Rules
 		return std::max(cooldown, a_tuning.cooldownMin);
 	}
 
-	int PickHealTarget(std::span<const HealCandidate> a_candidates, float a_allyThreshold, const Tuning& a_tuning)
+	float TauntArmor(int a_tankLevel, const Tuning& a_tuning)
 	{
-		auto wanted = [&](const HealCandidate& c) {
-			const bool walkedTo = c.bleeding && !c.player && !c.self;
-			if (c.distance > (walkedTo ? a_tuning.reviveReach : a_tuning.healRange) || (walkedTo && c.taken)) {
-				return false;
-			}
-			const float threshold = c.self ? std::min(a_tuning.healSelfThreshold, a_allyThreshold) : a_allyThreshold;
-			return c.health < threshold || c.bleeding;
-		};
-		for (std::size_t i = 0; i < a_candidates.size(); ++i) {
-			if (a_candidates[i].player && wanted(a_candidates[i])) {
-				return static_cast<int>(i);
-			}
-		}
+		const float armor = a_tuning.tauntArmorBase + a_tuning.tauntArmorPerLevel * static_cast<float>(std::max(a_tankLevel, 1));
+		return std::clamp(armor, 0.0f, std::max(a_tuning.tauntArmorMax, 0.0f));
+	}
 
-		int   best = -1;
-		float bestUrgency = 0.0f;
-		for (std::size_t i = 0; i < a_candidates.size(); ++i) {
-			const auto& c = a_candidates[i];
-			if (!wanted(c)) {
-				continue;
-			}
-			const float threshold = c.self ? std::min(a_tuning.healSelfThreshold, a_allyThreshold) : a_allyThreshold;
-			// How far under the line they are, then who is in the most danger.
-			float urgency = threshold - c.health;
-			if (c.bleeding) {
-				urgency += 0.25f;
-			}
-			if (c.attacked) {
-				urgency += 0.15f;
-			}
-			urgency += 0.0001f;  // anyone under the line beats nobody
-			if (urgency > bestUrgency) {
-				bestUrgency = urgency;
-				best = static_cast<int>(i);
-			}
+	bool OutOfMagicka(float a_magicka, float a_maximum, float a_cost, bool a_wasOut)
+	{
+		if (a_cost <= 0.0f || a_maximum <= 0.0f) {
+			return false;
 		}
-		return best;
+		if (!a_wasOut) {
+			return a_magicka < a_cost;
+		}
+		const float back = std::min(std::max(a_cost * 2.0f, a_maximum / 3.0f), a_maximum);
+		return a_magicka < back;
+	}
+
+	SpellTier TierFromSkill(int a_minimumSkill)
+	{
+		return static_cast<SpellTier>(std::clamp(a_minimumSkill / 25, 0, static_cast<int>(SpellTier::kMaster)));
+	}
+
+	SpellTier HealerTierCap(int a_level)
+	{
+		return a_level >= 25 ? SpellTier::kAdept : (a_level >= 10 ? SpellTier::kApprentice : SpellTier::kNovice);
+	}
+
+	bool SpellAllowed(Role a_role, bool a_healing, bool a_attack, SpellTier a_tier, int a_level, bool a_healersAny)
+	{
+		switch (a_role) {
+		case Role::kMage:
+			return !a_healing;
+		case Role::kHealer:
+			return a_healing || !a_attack || a_healersAny || a_tier <= HealerTierCap(a_level);
+		default:
+			return false;
+		}
+	}
+
+	float TeamHealAmount(int a_level, const Tuning& a_tuning)
+	{
+		const float amount = a_tuning.healAmountBase + a_tuning.healAmountPerLevel * static_cast<float>(std::max(a_level, 1));
+		return std::clamp(amount, 0.0f, std::max(a_tuning.healAmountMax, 0.0f));
+	}
+
+	float RejuvenateSeconds(int a_level, const Tuning& a_tuning)
+	{
+		return a_level >= 60 ? a_tuning.rejuvenateSecondsAt60 : (a_level >= 30 ? a_tuning.rejuvenateSecondsAt30 : a_tuning.rejuvenateSeconds);
+	}
+
+	float RejuvenateCooldown(int a_level, const Tuning& a_tuning)
+	{
+		return 2.0f * RejuvenateSeconds(a_level, a_tuning);
 	}
 
 	bool Matches(const EnemyView& a_enemy, Focus a_focus)
@@ -125,8 +141,12 @@ namespace FWM::Rules
 			case Position::kHoldBack:
 				return a_ranged || a_enemy.attackingSelf || a_enemy.distance <= a_tuning.holdBackRadius;
 			case Position::kWithMe:
-				// At the player's side: whatever comes near them, whoever is on them from close by,
-				// and whoever is on the follower within reach.
+				// At the player's side. A bow or a spell reaches from there, so anyone will do,
+				// nearest first. A blade only reaches whatever comes near them, whoever is on them
+				// from close by, and whoever is on the follower within reach.
+				if (a_ranged) {
+					return true;
+				}
 				return a_enemy.distanceToPlayer <= a_tuning.withMeRadius + 150.0f ||
 				       (a_enemy.attackingPlayer && a_enemy.distanceToPlayer <= a_tuning.withMeRadius * 2.0f) ||
 				       (a_enemy.attackingSelf && a_enemy.distance <= a_tuning.defendRange);
@@ -239,6 +259,11 @@ namespace FWM::Rules
 			if (a_position == Position::kGuard) {
 				score -= e.distanceToPlayer * a_tuning.distanceWeight;
 			}
+			// Shooting from the player's side: the nearest enemy first, however far, as long as
+			// the leaning has nothing better.
+			if (a_position == Position::kWithMe && a_ranged) {
+				score -= e.distanceToPlayer * a_tuning.distanceWeight;
+			}
 
 			// Nearer is better up to engage range; beyond it distance stops counting, so a far
 			// enemy that fits the focus still wins over a near one that does not.
@@ -273,14 +298,6 @@ namespace FWM::Rules
 		return best;
 	}
 
-	int PotionTier(int a_level, int a_from, int a_step, int a_tiers)
-	{
-		if (a_tiers <= 0) {
-			return 0;
-		}
-		return std::clamp((a_level - a_from) / std::max(a_step, 1), 0, a_tiers - 1);
-	}
-
 	Danger DangerFor(int a_followerLevel, int a_enemyLevel, bool a_boss, const Tuning& a_tuning)
 	{
 		const int gap = a_enemyLevel + (a_boss ? a_tuning.bossLevelBonus : 0) - a_followerLevel;
@@ -297,5 +314,101 @@ namespace FWM::Rules
 			return Danger::kHard;
 		}
 		return Danger::kDeadly;
+	}
+
+	float PathBonusPerPoint(Role a_role, const Tuning& a_tuning)
+	{
+		switch (a_role) {
+		case Role::kFighter:
+			return a_tuning.bonusAttackSpeed;
+		case Role::kTank:
+			return a_tuning.bonusDamageTaken;
+		case Role::kHealer:
+			return a_tuning.bonusHealing;
+		case Role::kBruiser:
+			return a_tuning.bonusDamage;
+		case Role::kArcher:
+			return a_tuning.bonusArrowsKept;
+		case Role::kMage:
+			return a_tuning.bonusMagickaCost;
+		default:
+			return 0.0f;
+		}
+	}
+
+	float PathBonusCap(Role a_role)
+	{
+		switch (a_role) {
+		case Role::kArcher:
+			return kMostArrowsKept;
+		case Role::kMage:
+			return kMostCostCut;
+		case Role::kTank:
+			return kMostDamageCut;
+		default:
+			return kMostOtherBonus;
+		}
+	}
+
+	float PathBonus(Role a_role, int a_spent, const Tuning& a_tuning)
+	{
+		const float percent = std::max(PathBonusPerPoint(a_role, a_tuning), 0.0f) * static_cast<float>(std::max(a_spent, 0));
+		return std::min(percent, PathBonusCap(a_role));
+	}
+
+	int PathBonusRoom(Role a_role, int a_points, const Tuning& a_tuning)
+	{
+		const float per = PathBonusPerPoint(a_role, a_tuning);
+		if (per <= 0.0f) {
+			return 0;
+		}
+		// The first point count at which the bonus reaches its cap; a hair under, so 75 / 1 is 75.
+		const int most = static_cast<int>(std::ceil(PathBonusCap(a_role) / per - 0.001f));
+		return std::max(most - std::max(a_points, 0), 0);
+	}
+
+	std::string Percent(float a_percent)
+	{
+		const float tenths = std::round(a_percent * 10.0f) / 10.0f;
+		return std::abs(tenths - std::round(tenths)) < 0.05f ? std::format("{:.0f}%", tenths) : std::format("{:.1f}%", tenths);
+	}
+
+	std::string PathBonusNumber(Role a_role, float a_percent)
+	{
+		const auto amount = Percent(a_percent);
+		switch (a_role) {
+		case Role::kArcher:
+			return amount;
+		case Role::kTank:
+		case Role::kMage:
+			return a_percent > 0.0f ? "-" + amount : amount;
+		default:
+			return "+" + amount;
+		}
+	}
+
+	std::string_view PathBonusName(Role a_role)
+	{
+		switch (a_role) {
+		case Role::kFighter:
+			return "attack speed";
+		case Role::kTank:
+			return "damage taken";
+		case Role::kHealer:
+			return "healing";
+		case Role::kBruiser:
+			return "damage";
+		case Role::kArcher:
+			return "arrows kept";
+		case Role::kMage:
+			return "magicka cost";
+		default:
+			return "";
+		}
+	}
+
+	std::string PathBonusText(Role a_role, float a_percent)
+	{
+		return std::format("{} {}", PathBonusNumber(a_role, a_percent), PathBonusName(a_role));
 	}
 }

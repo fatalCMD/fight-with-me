@@ -45,6 +45,12 @@ namespace FWM::Game
 	// The actor the controller is fighting right now, or null.
 	[[nodiscard]] RE::NiPointer<RE::Actor> CombatTarget(RE::Actor* a_actor);
 
+	// The engine's own stagger, the one a heavy blow or the Disarm shout gives. It refuses
+	// anyone already staggered, restrained or otherwise unable to be, applies stagger perks
+	// on both sides and sets the staggered flag itself. Magnitude 0..1, small to large.
+	// True if they are staggered afterwards.
+	bool Stagger(RE::Actor* a_target, float a_magnitude, RE::Actor* a_aggressor);
+
 	enum class Loadout : std::uint8_t
 	{
 		kNone,
@@ -69,13 +75,22 @@ namespace FWM::Game
 	// heals whose conditions accept that patient count.
 	[[nodiscard]] Magic MagicOf(RE::Actor* a_actor, RE::Actor* a_patient = nullptr);
 
+	// Every spell they know: the base record's, then those added at runtime.
+	[[nodiscard]] std::vector<RE::SpellItem*> SpellsOf(RE::Actor* a_actor);
+
+	// Restores health: a heal of any kind, on anyone.
+	[[nodiscard]] bool IsHeal(const RE::SpellItem* a_spell);
+
 	// Has a heal that works on the player or on someone like this companion.
 	[[nodiscard]] bool HealsParty(RE::Actor* a_actor);
 
-	// Heal per cast, for comparing spells: magnitude, times the channel time for
-	// concentration spells.
-	[[nodiscard]] float HealAmount(const RE::SpellItem* a_spell, float a_concentrationSeconds);
-	[[nodiscard]] bool  HealsOthers(const RE::SpellItem* a_spell, RE::Actor* a_caster = nullptr, RE::Actor* a_patient = nullptr);
+	// A spell that heals someone other than its caster, under its conditions for this caster
+	// and patient when given.
+	[[nodiscard]] bool HealsOthers(const RE::SpellItem* a_spell, RE::Actor* a_caster = nullptr, RE::Actor* a_patient = nullptr);
+
+	// Magicka for the cheapest spell they would fight or heal with: one aimed at an enemy, or
+	// a heal. 0 when they know none. A concentration spell counts one second of it.
+	[[nodiscard]] float CheapestCast(RE::Actor* a_actor);
 
 	// Weapons equipped or carried, and spells known. Walks the inventory, so callers
 	// cache it for a few seconds.

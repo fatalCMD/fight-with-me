@@ -53,6 +53,27 @@ namespace FWM
 	// scaled rather than pulled, so a follower who never casts does not start to.
 	[[nodiscard]] StyleData Layer(const StyleData& a_base, Role a_role, Position a_position, float a_weight);
 
+	// What a companion's path and the abilities running on them change in how they fight:
+	// Shield Master bashes more, Heavy Hands and Berserk power attack more, a Flanker goes
+	// round to the side, a Skirmisher steps back from melee, Riposte and Deadeye hold their
+	// ground. Multipliers, plus offensive and defensive added on top.
+	struct StyleTweaks
+	{
+		float bash{ 1.0f };
+		float power{ 1.0f };
+		float flank{ 1.0f };
+		float circle{ 1.0f };
+		float fallback{ 1.0f };
+		float strafe{ 1.0f };
+		float avoidThreat{ 1.0f };
+		float offensive{ 0.0f };
+		float defensive{ 0.0f };
+
+		friend bool operator==(const StyleTweaks&, const StyleTweaks&) = default;
+	};
+
+	[[nodiscard]] StyleData Tweaked(const StyleData& a_style, const StyleTweaks& a_tweaks);
+
 	// Committed to one enemy: a companion sent after them, or an enemy a taunt holds on the
 	// tank. Straight at them and stay on them: no circling or flanking while waiting a turn,
 	// no falling back, no hanging behind a raised shield, no strafing at range. The fight's

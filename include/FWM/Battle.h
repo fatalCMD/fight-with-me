@@ -24,6 +24,10 @@ namespace FWM::Battle
 	void RequestClose();
 	[[nodiscard]] bool PlanOpen() noexcept;
 
+	// The plan's window has gone (it fades out after RequestClose). From the render thread;
+	// a_menuStillOpen: another Menu Framework window that takes input is still up.
+	void PlanWindowClosed(bool a_menuStillOpen);
+
 	enum class Preset : std::uint8_t
 	{
 		kRoles,      // everyone back to what their role is for
@@ -40,17 +44,36 @@ namespace FWM::Battle
 			kMark,
 			kTauntNow,
 			kHealNow,
+			kRejuvenateNow,  // a healer quickens everyone's magicka
 			kSpecialNow,  // the role's special: bodyguard, volley, war cry, ward, disarm
 			kPreset,
-			kShout  // a party order for this fight
+			kShout,    // a party order for this fight
+			kSetSpell,  // a mage's or healer's hand: a spell, or 0 for their own choice
+			kAutoBattle,  // the party starts fights with enemies it sees (on), or waits for them (off)
+			kAbilityNow,  // with the Paths add-on: one of the two abilities carried, now
+			kLearn,       // a rank of a node on a path
+			kForget,      // a rank given back
+			kResetPath,   // every point on a path given back
+			kEquip,       // an ability carried in a slot
+			kUnlimited,   // unlimited points for one companion (on), or back to what they had (off)
+			kInvest,      // a leftover point straight into a mastered path's bonus
+			kDivest       // one back out of it
 		};
 
-		Type       type{ Type::kSetOrders };
-		RE::FormID member{ 0 };
-		Orders     orders;
-		RE::FormID enemy{ 0 };
-		Preset     preset{ Preset::kRoles };
-		Shout      shout{ Shout::kNone };
+		Type        type{ Type::kSetOrders };
+		RE::FormID  member{ 0 };
+		Orders      orders;
+		RE::FormID  enemy{ 0 };
+		Preset      preset{ Preset::kRoles };
+		Shout       shout{ Shout::kNone };
+		std::size_t hand{ kLeftHand };
+		RE::FormID  spell{ 0 };
+		bool        on{ false };
+		// Paths: which path, which node or slot, which ability.
+		Role           path{ Role::kFighter };
+		std::size_t    node{ 0 };
+		std::size_t    slot{ 0 };
+		Paths::Ability ability{ Paths::Ability::kNone };
 	};
 
 	// From the render thread. Applied on the main thread before the next view.

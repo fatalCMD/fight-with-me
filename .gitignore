@@ -20,3 +20,4 @@ docs/
 # Personal tooling: deployment into a local mod manager, and the offline menu preview.
 tools/Deploy.ps1
 tools/preview/
+paths/

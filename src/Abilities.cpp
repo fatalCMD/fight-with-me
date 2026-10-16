@@ -1,11 +1,13 @@
 #include "FWM/Abilities.h"
 
+#include "FWM/Effects.h"
 #include "FWM/Enemies.h"
 #include "FWM/Forms.h"
 #include "FWM/Game.h"
 #include "FWM/Leash.h"
 #include "FWM/Log.h"
 #include "FWM/Notices.h"
+#include "FWM/PathBonus.h"
 #include "FWM/Rules.h"
 #include "FWM/Settings.h"
 
@@ -43,27 +45,75 @@ namespace FWM::Abilities
 		handle.Play();
 	}
 
-	// The game refuses an idle mid-swing or when its conditions fail; the graph event the
-	// idle names often still plays.
+	// An idle pushed past the AI's checks can leave someone in a pose the combat AI does not
+	// know how to leave: a drink or a cheer mid-fight, weapons still out.
 	bool PlayIdle(RE::Actor* a_actor, RE::TESIdleForm* a_idle)
 	{
 		if (!a_actor || !a_idle) {
 			return false;
 		}
-		if (auto* process = a_actor->GetActorRuntimeData().currentProcess; process && process->PlayIdle(a_actor, a_idle, nullptr)) {
-			return true;
-		}
-		return !a_idle->animEventName.empty() && a_actor->NotifyAnimationGraph(a_idle->animEventName);
+		auto* process = a_actor->GetActorRuntimeData().currentProcess;
+		return process && process->PlayIdle(a_actor, a_idle, nullptr);
 	}
 
-	void HandGlow(RE::Actor* a_caster, RE::SpellItem* a_spell, float a_seconds)
+	bool Challenge(RE::Actor* a_actor)
+	{
+		if (!a_actor) {
+			return false;
+		}
+		const auto& forms = Forms::Get();
+		const bool  shield = Game::LoadoutOf(a_actor) == Game::Loadout::kShield;
+		for (auto* idle : { shield ? forms.idleShield : forms.idleCry, shield ? nullptr : forms.idleWeapon }) {
+			if (PlayIdle(a_actor, idle)) {
+				return true;
+			}
+		}
+		// Mid-swing the AI refuses. The two combat idles are made for a drawn weapon and end
+		// on their own, so their event can be sent anyway; the cheer never is.
+		auto* combat = shield ? forms.idleShield : forms.idleWeapon;
+		return combat && !combat->animEventName.empty() && a_actor->NotifyAnimationGraph(combat->animEventName);
+	}
+
+	bool CastGesture(RE::Actor* a_caster)
+	{
+		auto* idle = Forms::Get().idleMagic;
+		if (!a_caster || !idle || Busy(a_caster)) {
+			return false;
+		}
+		if (PlayIdle(a_caster, idle)) {
+			return true;
+		}
+		// Refused mid-fight. With a spell in hand the gesture belongs to the stance they are in
+		// and ends on its own, so its event is sent anyway, as the taunt's combat idles are.
+		auto       holdsSpell = [&](bool a_left) {
+            auto* form = a_caster->GetEquippedObject(a_left);
+            return form && form->Is(RE::FormType::Spell);
+		};
+		const bool ready = a_caster->AsActorState()->IsWeaponDrawn() && (holdsSpell(true) || holdsSpell(false));
+		return ready && !idle->animEventName.empty() && a_caster->NotifyAnimationGraph(idle->animEventName);
+	}
+
+	void Used(RE::FormID a_member, RE::Actor* a_actor)
+	{
+		if (!a_actor || !PathsLink::Unlimited(a_member)) {
+			return;
+		}
+		static std::mt19937 dice{ std::random_device{}() };
+		if (std::uniform_real_distribution<float>(0.0f, 1.0f)(dice) >= 0.35f) {
+			return;
+		}
+		const auto& sounds = Forms::Get().chicken;
+		Play(sounds[std::uniform_int_distribution<std::size_t>(0, sounds.size() - 1)(dice)], a_actor);
+	}
+
+	void HandGlow(RE::Actor* a_caster, RE::SpellItem* a_spell, float a_seconds, std::size_t a_hand)
 	{
 		if (!a_caster || !a_spell || a_spell->effects.empty() || !a_spell->effects[0] || !a_spell->effects[0]->baseEffect) {
 			return;
 		}
 		if (auto* art = a_spell->effects[0]->baseEffect->data.castingArt) {
 			auto* model = a_caster->Get3D();
-			auto* hand = model ? model->GetObjectByName("NPC L MagicNode [LMag]") : nullptr;
+			auto* hand = model ? model->GetObjectByName(a_hand == kRightHand ? "NPC R MagicNode [RMag]" : "NPC L MagicNode [LMag]") : nullptr;
 			a_caster->ApplyArtObject(art, a_seconds, nullptr, false, false, hand);
 		}
 	}
@@ -82,32 +132,106 @@ namespace FWM::Abilities
 			return Game::Current(a_actor, RE::ActorValue::kInvisibility) > 0.0f;
 		}
 
-		RE::TESIdleForm* TauntIdle(RE::Actor* a_tank)
-		{
-			const auto& forms = Forms::Get();
-			// Skyrim's own shield bang (CombatIdleShield) is the human cousin of the draugr's;
-			// without a shield, the raised-weapon war cry.
-			if (Game::LoadoutOf(a_tank) == Game::Loadout::kShield && forms.idleShield) {
-				return forms.idleShield;
-			}
-			return forms.idleCry ? forms.idleCry : forms.idleWeapon;
-		}
-
-		// The game refuses an idle mid-swing or when its conditions fail; the graph event the
-		// idle names often still plays.
-		bool PlayTauntAnimation(RE::Actor* a_tank)
-		{
-			auto* idle = TauntIdle(a_tank);
-			if (!idle) {
-				return false;
-			}
-			if (auto* process = a_tank->GetActorRuntimeData().currentProcess; process && process->PlayIdle(a_tank, idle, nullptr)) {
-				return true;
-			}
-			return !idle->animEventName.empty() && a_tank->NotifyAnimationGraph(idle->animEventName);
-		}
-
 		constexpr float kTauntWait = 1.2f;  // seconds a taunt waits for its animation
+
+		// --- Boosts: a taunt's armor, Rejuvenate's magicka ------------------
+
+		// A lift on one of someone's values for a while. It sits on the value's temporary
+		// modifier, which a save keeps, so each comes off when it runs out, and whatever was on
+		// when the game saved goes in the co-save and comes off again after loading it.
+		struct Boost
+		{
+			RE::FormID     id{ 0 };
+			RE::ActorValue value{ RE::ActorValue::kNone };
+			float          amount{ 0.0f };
+			float          left{ 0.0f };
+			float          length{ 0.0f };  // how long it was set for
+			std::uint16_t  source{ 0 };     // what gave it: 0 for a taunt's armor and Rejuvenate without a path, else the Paths::Perk
+		};
+		std::vector<Boost> boosts;
+		std::vector<Boost> fromSave;  // on in a save just loaded; taken off at the next update
+
+		void Mod(RE::FormID a_id, RE::ActorValue a_value, float a_amount)
+		{
+			if (auto* actor = RE::TESForm::LookupByID<RE::Actor>(a_id); actor && a_amount != 0.0f) {
+				actor->AsActorValueOwner()->ModActorValue(RE::ACTOR_VALUE_MODIFIER::kTemporary, a_value, a_amount);
+			}
+		}
+
+		// Off at once: every boost of one kind, or every boost.
+		void Drop(std::optional<RE::ActorValue> a_value)
+		{
+			std::erase_if(boosts, [&](const Boost& a_boost) {
+				if (a_value && a_boost.value != *a_value) {
+					return false;
+				}
+				Mod(a_boost.id, a_boost.value, -a_boost.amount);
+				return true;
+			});
+		}
+
+		// (who, amount) or (who, seconds left) for every boost of one kind.
+		std::vector<std::pair<std::uint32_t, float>> Listed(RE::ActorValue a_value, bool a_left)
+		{
+			std::vector<std::pair<std::uint32_t, float>> out;
+			for (const auto& boost : boosts) {
+				if (boost.value == a_value) {
+					out.emplace_back(boost.id, a_left ? boost.left : boost.amount);
+				}
+			}
+			return out;
+		}
+
+		// The numbers behind a taunt: from the tank's path when they have one, else from
+		// their level.
+		struct TauntNumbers
+		{
+			float hold{ 0.0f };      // for an enemy of the tank's own level
+			float cooldown{ 0.0f };
+			float armor{ 0.0f };     // braced with
+			float intimidate{ 0.0f };  // held enemies deal this much less, 0..1
+		};
+
+		TauntNumbers NumbersFor(RE::Actor* a_tank, const PathsLink::Kit& a_kit)
+		{
+			const auto&  settings = Settings::Get();
+			const auto&  tuning = settings.tuning;
+			const int    level = a_tank->GetLevel();
+			TauntNumbers n;
+			if (a_kit.tree) {
+				n.hold = Paths::Value(Paths::Perk::kTaunt, std::max(a_kit.Rank(Paths::Ability::kTaunt), 1));
+				n.cooldown = a_kit.Cooldown(Paths::Ability::kTaunt);
+				n.armor = settings.brace ? a_kit.Value(Paths::Perk::kTauntBrace) : 0.0f;
+				n.intimidate = a_kit.Value(Paths::Perk::kTauntIntimidate) / 100.0f;
+			} else {
+				n.hold = Rules::HoldSeconds(level, level, tuning);
+				n.cooldown = Rules::TauntCooldown(level, tuning);
+				n.armor = settings.brace ? Rules::TauntArmor(level, tuning) : 0.0f;
+			}
+			return n;
+		}
+
+		// Seconds an enemy stays on the tank. On a path, a rank sets the hold, and an enemy far
+		// below the tank still stays longer, as without one.
+		float HoldFor(int a_tankLevel, int a_enemyLevel, const TauntNumbers& a_numbers, const PathsLink::Kit& a_kit)
+		{
+			const auto& tuning = Settings::Get().tuning;
+			if (!a_kit.tree) {
+				return Rules::HoldSeconds(a_tankLevel, a_enemyLevel, tuning);
+			}
+			const bool cowed = a_tankLevel - a_enemyLevel >= tuning.cowedLevelGap;
+			return a_numbers.hold * (cowed ? tuning.cowedHoldMult : 1.0f);
+		}
+
+		// Braced, or braced again, for as long as their taunt holds an enemy of their own level.
+		float BraceTank(RE::Actor* a_tank, const TauntNumbers& a_numbers, const PathsLink::Kit& a_kit)
+		{
+			if (a_numbers.armor > 0.0f) {
+				Lift(a_tank->GetFormID(), RE::ActorValue::kDamageResist, a_numbers.armor, a_numbers.hold,
+					a_kit.tree ? static_cast<std::uint16_t>(Paths::Perk::kTauntBrace) : 0);
+			}
+			return a_numbers.armor;
+		}
 
 		std::string Count(int a_count)
 		{
@@ -141,6 +265,17 @@ namespace FWM::Abilities
 			if (!a_why.empty()) {
 				Log::Info("[Taunt] {} lowers the shield: {}."sv, a_member.name, a_why);
 			}
+		}
+
+		// The block raised against an arrow in flight (BlockIncoming), let go of.
+		void DropBlock(Party::Member& a_member, RE::Actor* a_tank)
+		{
+			if (a_member.blockRaised && a_tank && !a_member.shielding) {
+				a_tank->NotifyAnimationGraph("blockStop");
+			}
+			a_member.blockRaised = false;
+			a_member.blockHold = 0.0f;
+			a_member.blockTries = 0;
 		}
 
 		// Drawing fire is only half the job: arrows and spells aimed at the tank should land
@@ -228,7 +363,7 @@ namespace FWM::Abilities
 
 		// --- Taunt ---------------------------------------------------------
 
-		void Taunt(Party::Member& a_member, RE::Actor* a_tank, const Orders& a_orders, float a_dt)
+		void Taunt(Party::Member& a_member, RE::Actor* a_tank, const Orders& a_orders, const PathsLink::Kit& a_kit, float a_dt)
 		{
 			const auto& settings = Settings::Get();
 			const auto& tuning = settings.tuning;
@@ -259,6 +394,7 @@ namespace FWM::Abilities
 			}
 
 			const auto preview = PreviewTaunt(a_tank);
+			const auto numbers = NumbersFor(a_tank, a_kit);
 			const auto tankHandle = a_tank->GetHandle();
 			const int  tankLevel = a_tank->GetLevel();
 
@@ -280,11 +416,15 @@ namespace FWM::Abilities
 				if (!enemy || !Game::Usable(enemy.get()) || Game::Distance(a_tank, enemy.get()) > reach) {
 					continue;
 				}
+				// Only ever an enemy: never anyone in the party, nor anyone fighting at your side.
+				if (Party::IsPartyActor(enemy.get()) || enemy->IsPlayerTeammate()) {
+					continue;
+				}
 				// Already ours with time to spare: not worth a taunt on its own.
 				bool fresh = true;
 				for (const auto& hold : holds) {
 					if (hold.enemy == profile.handle && hold.tank == tankHandle &&
-						hold.remaining > 0.5f * Rules::HoldSeconds(tankLevel, profile.level, tuning)) {
+						hold.remaining > 0.5f * HoldFor(tankLevel, profile.level, numbers, a_kit)) {
 						fresh = false;
 					}
 				}
@@ -310,7 +450,7 @@ namespace FWM::Abilities
 
 			if (!a_member.tauntPending) {
 				const bool opener = settings.tauntOpener && !a_member.opened && a_member.inCombatFor < 4.0f;
-				const bool wanted = a_member.tauntRequested || (a_orders.autoAbility && (peel || opener));
+				const bool wanted = a_member.tauntRequested || (PathsLink::AutoOn(a_orders, a_kit, Paths::Ability::kTaunt) && (peel || opener));
 				if (!wanted) {
 					return;
 				}
@@ -331,17 +471,19 @@ namespace FWM::Abilities
 
 			// The challenge lands with its animation: tried again for a moment if the game
 			// refuses it, and only taken without one once that moment has passed.
-			const bool animated = PlayTauntAnimation(a_tank);
+			const bool animated = Challenge(a_tank);
 			if (!animated && a_member.tauntPendingFor < kTauntWait) {
 				return;
 			}
 			a_member.tauntPending = false;
 			const auto& forms = Forms::Get();
-			if (forms.glow && settings.glowSeconds > 0.0f) {
-				a_tank->ApplyEffectShader(forms.glow, settings.glowSeconds);
+			if (settings.glowSeconds > 0.0f) {
+				Effects::Flash(a_tank, Effects::Look::kTaunt, settings.glowSeconds);
 			}
 			Play(forms.tauntSound, a_tank);
+			Used(a_member.id, a_tank);
 			a_tank->AsActorValueOwner()->DamageActorValue(RE::ActorValue::kStamina, tuning.tauntStamina);
+			const float braced = BraceTank(a_tank, numbers, a_kit);
 
 			int         heldCount = 0;
 			std::string shrugged;
@@ -355,7 +497,7 @@ namespace FWM::Abilities
 					}
 					continue;
 				}
-				const float seconds = Rules::HoldSeconds(tankLevel, profile.level, tuning);
+				const float seconds = HoldFor(tankLevel, profile.level, numbers, a_kit);
 				bool        refreshed = false;
 				for (auto& hold : holds) {
 					if (hold.enemy == profile.handle) {
@@ -367,6 +509,9 @@ namespace FWM::Abilities
 				if (!refreshed) {
 					holds.push_back({ profile.handle, tankHandle, seconds });
 				}
+				if (numbers.intimidate > 0.0f) {
+					Lift(profile.id, RE::ActorValue::kAttackDamageMult, -numbers.intimidate, seconds, static_cast<std::uint16_t>(Paths::Perk::kTauntIntimidate));
+				}
 				++heldCount;
 			}
 
@@ -376,7 +521,7 @@ namespace FWM::Abilities
 				                                 std::format("Taunted, but {} shrugged it off.", shrugged.empty() ? "everyone"s : shrugged),
 					heldCount > 0);
 			}
-			a_member.tauntCooldown = Rules::TauntCooldown(tankLevel, tuning);
+			a_member.tauntCooldown = numbers.cooldown;
 			a_member.tauntReady = a_member.tauntCooldown;
 			a_member.opened = true;
 			a_member.tauntRequested = false;
@@ -388,10 +533,13 @@ namespace FWM::Abilities
 			if (!shrugged.empty()) {
 				line += std::format(" {} shrugs it off.", shrugged);
 			}
+			if (braced > 0.0f) {
+				line += std::format(" Braced: +{:.0f} armor.", braced);
+			}
 			Notices::Push(std::move(line), Notices::Kind::kTaunt);
-			Log::Info("[Taunt] {} (Lv {}) radius {:.0f}: held {} of {}, idle {}, why {}."sv, a_member.name, tankLevel,
+			Log::Info("[Taunt] {} (Lv {}) radius {:.0f}: held {} of {}, idle {}, why {}, braced +{:.0f} armor for {:.0f} s."sv, a_member.name, tankLevel,
 				preview.radius, heldCount, candidates.size(), animated ? "played"sv : "refused"sv,
-				ordered ? "ordered"sv : (peel ? "peel"sv : "opener"sv));
+				ordered ? "ordered"sv : (peel ? "peel"sv : "opener"sv), braced, braced > 0.0f ? numbers.hold : 0.0f);
 		}
 
 		void AgeHolds(float a_dt)
@@ -421,446 +569,285 @@ namespace FWM::Abilities
 			}
 		}
 
-		// --- Heal ----------------------------------------------------------
+		// --- Heal: the whole party at once ---------------------------------
 
-		struct Cast
+		// Knocked about too badly to do anything: staggered, thrown, or in a kill move.
+		bool Reeling(RE::Actor* a_actor)
 		{
-			RE::SpellItem* spell{ nullptr };
-			float          effectiveness{ 1.0f };
-			float          cost{ 0.0f };
-			float          amount{ 0.0f };
-			bool           borrowed{ false };
-		};
-
-		float Reach(const RE::SpellItem* a_spell)
-		{
-			if (a_spell->GetDelivery() != RE::MagicSystem::Delivery::kSelf) {
-				return std::numeric_limits<float>::max();
-			}
-			std::uint32_t area = 0;
-			for (const auto* effect : a_spell->effects) {
-				area = std::max(area, effect->effectItem.area);
-			}
-			return std::max(static_cast<float>(area) * kUnitsPerFoot, 150.0f);
+			return a_actor->AsActorState()->IsStaggered() || a_actor->IsInRagdollState() || a_actor->IsInKillMove();
 		}
 
-		std::optional<Cast> ChooseHeal(RE::Actor* a_healer, RE::Actor* a_patient, float a_distance)
+		// The game's own magic art on both of someone's hands.
+		void BothHands(RE::Actor* a_actor, RE::BGSArtObject* a_art, float a_seconds)
 		{
-			const auto& settings = Settings::Get();
-			const float seconds = settings.concentrationSeconds;
-			auto        cost = [&](const RE::SpellItem* a_spell) {
-                const float base = a_spell->CalculateMagickaCost(a_healer);
-                return a_spell->GetCastingType() == RE::MagicSystem::CastingType::kConcentration ? base * seconds : base;
-			};
-			auto effectiveness = [&](const RE::SpellItem* a_spell) {
-				return a_spell->GetCastingType() == RE::MagicSystem::CastingType::kConcentration ? seconds : 1.0f;
-			};
+			auto* model = a_actor->Get3D();
+			if (!a_art || !model) {
+				return;
+			}
+			for (const auto* node : { "NPC L MagicNode [LMag]", "NPC R MagicNode [RMag]" }) {
+				if (auto* hand = model->GetObjectByName(node)) {
+					a_actor->ApplyArtObject(a_art, a_seconds, nullptr, false, false, hand);
+				}
+			}
+		}
 
-			std::optional<Cast> best;
-			for (auto* spell : Game::MagicOf(a_healer, a_patient).heals) {
-				if (a_distance > Reach(spell)) {
+		// What a healer's or mage's ability looks like: a gesture with magic in hand, the colour in
+		// both hands, the sound, and a column of sparks round them that a smaller one answers on
+		// everyone it reaches. Green for a heal, blue for Rejuvenate.
+		void ShowCast(RE::Actor* a_caster, std::span<const RE::NiPointer<RE::Actor>> a_reached, RE::BGSArtObject* a_hands,
+			RE::BGSSoundDescriptorForm* a_sound, Effects::Look a_aura)
+		{
+			if (!Settings::Get().abilityEffects) {
+				return;
+			}
+			CastGesture(a_caster);
+			BothHands(a_caster, a_hands, 2.0f);
+			Play(a_sound, a_caster);
+			Effects::Flash(a_caster, a_aura);
+			for (const auto& actor : a_reached) {
+				if (actor.get() != a_caster) {
+					Effects::Flash(actor.get(), a_aura, 2.2f);
+				}
+			}
+		}
+
+		// Everyone a healer's heal reaches: you, the companions and their summons, alive and
+		// within healReach of the healer.
+		std::vector<RE::NiPointer<RE::Actor>> Team(RE::Actor* a_healer, float a_reach)
+		{
+			std::vector<RE::NiPointer<RE::Actor>> team;
+			auto add = [&](RE::NiPointer<RE::Actor> a_actor) {
+				if (a_actor && !a_actor->IsDead() && a_actor->Is3DLoaded() && Game::Distance(a_healer, a_actor.get()) <= a_reach) {
+					team.push_back(std::move(a_actor));
+				}
+			};
+			add(RE::NiPointer<RE::Actor>(RE::PlayerCharacter::GetSingleton()));
+			for (auto& member : Party::Members()) {
+				add(member.handle.get());
+			}
+			return team;
+		}
+
+		// Sun's Bane: undead the heal reaches lose a share of their health to it.
+		int SunsBane(RE::Actor* a_healer, float a_share)
+		{
+			const auto* undead = Forms::Get().undead;
+			if (a_share <= 0.0f || !undead) {
+				return 0;
+			}
+			int burned = 0;
+			for (const auto& profile : Enemies::All()) {
+				auto enemy = profile.handle.get();
+				if (!enemy || !Game::Usable(enemy.get()) || Game::Distance(a_healer, enemy.get()) > Settings::Get().tuning.healReach || !enemy->HasKeyword(undead)) {
 					continue;
 				}
-				const float amount = Game::HealAmount(spell, seconds);
-				if (!best || amount > best->amount) {
-					best = Cast{ spell, effectiveness(spell), cost(spell), amount, false };
-				}
+				const float share = profile.boss ? a_share * 0.5f : a_share;
+				enemy->AsActorValueOwner()->DamageActorValue(RE::ActorValue::kHealth, Game::Maximum(enemy.get(), RE::ActorValue::kHealth) * share);
+				Effects::Flash(enemy.get(), Effects::Look::kShaken);
+				++burned;
 			}
-			if (!best && settings.healFallback && Game::HealsOthers(Forms::Get().fallbackHeal, a_healer, a_patient)) {
-				auto*       spell = Forms::Get().fallbackHeal;
-				const float skill = Game::Current(a_healer, RE::ActorValue::kRestoration);
-				const float scale = 0.5f + std::clamp(skill, 0.0f, 100.0f) / 100.0f;
-				best = Cast{ spell, effectiveness(spell) * scale, cost(spell), Game::HealAmount(spell, seconds) * scale, true };
-			}
-			return best;
+			return burned;
 		}
 
-		std::string PatientName(RE::Actor* a_healer, RE::Actor* a_patient)
+		// Not a spell: the healer's own gift, no magicka spent, so a healer gone dry still has
+		// it. Without a path, everyone within reach is healed by the same amount, more as the
+		// healer rises in level; on one, by a share of each one's own health, more with each
+		// rank. On their own, they use it once anyone is down or under their line.
+		void Heal(Party::Member& a_member, RE::Actor* a_healer, const Orders& a_orders, const PathsLink::Kit& a_kit)
 		{
-			return a_patient == a_healer ? std::string("themselves") : (a_patient->IsPlayerRef() ? std::string("you") : Game::Name(a_patient));
-		}
-
-		// The heal straight from the instant caster, without a hand or an animation: for a
-		// borrowed spell, and when a cast by hand does not land.
-		void HealDirectly(Party::Member& a_member, RE::Actor* a_healer, RE::Actor* a_patient, RE::SpellItem* a_spell, float a_effectiveness, float a_cost)
-		{
-			auto* caster = a_healer->GetMagicCaster(RE::MagicSystem::CastingSource::kInstant);
-			if (!caster) {
-				return;
-			}
-			// A self-centred burst heals everyone around the healer, the patient included.
-			auto* aim = a_spell->GetDelivery() == RE::MagicSystem::Delivery::kSelf ? a_healer : a_patient;
-			caster->CastSpellImmediate(a_spell, false, aim, a_effectiveness, false, 0.0f, a_healer);
-			a_healer->AsActorValueOwner()->DamageActorValue(RE::ActorValue::kMagicka, a_cost);
-			// The spell's own casting glow on the left hand, so even a heal without the
-			// animation is seen to come from the healer.
-			if (!a_spell->effects.empty() && a_spell->effects[0] && a_spell->effects[0]->baseEffect) {
-				if (auto* art = a_spell->effects[0]->baseEffect->data.castingArt) {
-					auto* model = a_healer->Get3D();
-					auto* hand = model ? model->GetObjectByName("NPC L MagicNode [LMag]") : nullptr;
-					a_healer->ApplyArtObject(art, 1.2f, nullptr, false, false, hand);
-				}
-			}
-			Notices::Push(std::format("{} heals {}.", a_member.name, PatientName(a_healer, a_patient)), Notices::Kind::kHeal);
-		}
-
-		void EndCast(Party::Member& a_member, RE::Actor* a_healer)
-		{
-			if (a_member.castSpell && a_healer) {
-				a_healer->SetGraphVariableBool("bWantCastLeft", false);
-			}
-			a_member.castSpell = nullptr;
-			a_member.castPatient = {};
-			a_member.castPhase = 0;
-		}
-
-		void Face(RE::Actor* a_actor, RE::Actor* a_toward)
-		{
-			const auto from = a_actor->GetPosition();
-			const auto to = a_toward->GetPosition();
-			const float dx = to.x - from.x, dy = to.y - from.y;
-			if (dx * dx + dy * dy > 1.0f) {
-				a_actor->SetHeading(std::atan2(dx, dy));
-			}
-		}
-
-		// A heal cast the way the healer casts anything, in three steps: the spell goes into
-		// the left hand; once it is there the hand's caster selects it, aims at the patient
-		// and asks for the cast (the engine's own path, which plays the animation); when the
-		// charge is done it is let go. The healer turns to the patient throughout.
-		bool StartCast(Party::Member& a_member, RE::Actor* a_healer, RE::Actor* a_patient, RE::SpellItem* a_spell, float a_effectiveness, float a_cost,
-			float a_expected)
-		{
-			auto* hand = a_healer->GetMagicCaster(RE::MagicSystem::CastingSource::kLeftHand);
-			auto* equip = RE::ActorEquipManager::GetSingleton();
-			auto* defaults = RE::BGSDefaultObjectManager::GetSingleton();
-			auto* slot = defaults ? defaults->GetObject<RE::BGSEquipSlot>(RE::DEFAULT_OBJECTS::kLeftHandEquip) : nullptr;
-			if (!hand || !equip || !slot) {
-				return false;
-			}
-			if (a_healer->GetEquippedObject(true) != a_spell) {
-				equip->EquipSpell(a_healer, a_spell, slot);
-			}
-			a_member.castPatient = a_patient->GetHandle();
-			a_member.castSpell = a_spell;
-			a_member.castElapsed = 0.0f;
-			a_member.castPhase = 0;
-			a_member.castPhaseFor = 0.0f;
-			a_member.castFurthest = 0;
-			a_member.castHealthAt = Game::Fraction(a_patient, RE::ActorValue::kHealth);
-			a_member.castExpected = a_expected;
-			a_member.castEffectiveness = a_effectiveness;
-			a_member.castCost = a_cost;
-			return true;
-		}
-
-		void ContinueCast(Party::Member& a_member, RE::Actor* a_healer, float a_dt, float a_concentrationSeconds)
-		{
-			a_member.castElapsed += a_dt;
-			a_member.castPhaseFor += a_dt;
-			auto  patient = a_member.castPatient.get();
-			auto* spell = a_member.castSpell;
-			auto* hand = a_healer->GetMagicCaster(RE::MagicSystem::CastingSource::kLeftHand);
-			if (!patient || patient->IsDead() || !hand) {
-				EndCast(a_member, a_healer);
-				return;
-			}
-			const auto who = PatientName(a_healer, patient.get());
-			auto       giveUp = [&](std::string_view a_why) {
-                HealDirectly(a_member, a_healer, patient.get(), spell, a_member.castEffectiveness, a_member.castCost);
-                Log::Info("[Heal] {}'s cast of {} at {} {} (caster state reached {}); healed directly."sv, a_member.name, spell->GetName(), who, a_why,
-                    a_member.castFurthest);
-                if (++a_member.castFailures == 2) {
-                    Log::Info("[Heal] {}'s hands will not cast here; healing directly for the rest of this fight."sv, a_member.name);
-                }
-                EndCast(a_member, a_healer);
-			};
-			a_member.castFurthest = std::max(a_member.castFurthest, static_cast<int>(hand->state.underlying()));
-
-			switch (a_member.castPhase) {
-			case 0:  // waiting for the spell to be in hand
-				if (a_healer->GetEquippedObject(true) == spell) {
-					// A spell swapped in for a bow or a two-hander is not drawn yet.
-					a_healer->DrawWeaponMagicHands(true);
-					hand->SetCurrentSpell(spell);
-					hand->desiredTarget = patient->CreateRefHandle();
-					Face(a_healer, patient.get());
-					hand->RequestCastImpl();
-					a_member.castPhase = 1;
-					a_member.castPhaseFor = 0.0f;
-				} else if (a_member.castPhaseFor > 1.0f) {
-					giveUp("could not equip it");
-				}
-				return;
-			case 1:  // charging: keep aimed and facing, let go once it is ready
-			{
-				hand->desiredTarget = patient->CreateRefHandle();
-				Face(a_healer, patient.get());
-				const bool concentration = spell->GetCastingType() == RE::MagicSystem::CastingType::kConcentration;
-				const float hold = spell->GetChargeTime() + (concentration ? a_concentrationSeconds : 0.25f);
-				const bool  ready = hand->state.underlying() >= static_cast<std::uint32_t>(RE::MagicCaster::State::kReady);
-				a_healer->SetGraphVariableBool("bWantCastLeft", true);
-				if (a_member.castPhaseFor > 1.0f && a_member.castFurthest < static_cast<int>(RE::MagicCaster::State::kUnk02)) {
-					a_healer->SetGraphVariableBool("bWantCastLeft", false);
-					giveUp("never began to charge");
-				} else if ((ready && !concentration) || a_member.castPhaseFor > hold) {
-					a_healer->SetGraphVariableBool("bWantCastLeft", false);
-					a_member.castPhase = 2;
-					a_member.castPhaseFor = 0.0f;
-				} else if (a_member.castPhaseFor > hold + 1.0f) {
-					giveUp("never charged");
-				}
-				return;
-			}
-			default:  // released: did it land?
-			{
-				// Landed means a real share of the heal, not a point or two of regeneration.
-				const float health = Game::Fraction(patient.get(), RE::ActorValue::kHealth);
-				const float room = 1.0f - a_member.castHealthAt;
-				const float wanted = std::max(0.04f, std::min(a_member.castExpected, room) * 0.5f);
-				if (health >= a_member.castHealthAt + wanted && a_member.castFurthest < static_cast<int>(RE::MagicCaster::State::kUnk02)) {
-					Log::Info("[Heal] {} recovered on their own ({:.0f}% to {:.0f}%) while {} was casting; no heal needed."sv, who,
-						a_member.castHealthAt * 100.0f, health * 100.0f, a_member.name);
-					EndCast(a_member, a_healer);
-				} else if (health >= a_member.castHealthAt + wanted) {
-					Notices::Push(std::format("{} heals {}.", a_member.name, who), Notices::Kind::kHeal);
-					Log::Info("[Heal] {} casts {} at {} by hand ({:.0f}% to {:.0f}%, caster state reached {})."sv, a_member.name, spell->GetName(), who,
-						a_member.castHealthAt * 100.0f, health * 100.0f, a_member.castFurthest);
-					a_member.castFailures = 0;
-					EndCast(a_member, a_healer);
-				} else if (a_member.castPhaseFor > 1.0f) {
-					giveUp("did not land");
-				}
-				return;
-			}
-			}
-		}
-
-		// How long a healer keeps trying to reach a downed companion before healing from
-		// where they are, if that is close enough, or leaving it.
-		constexpr float kReviveGiveUp = 8.0f;
-
-		// Healers turn back from a walk below this, and do not start one under kReviveFit.
-		constexpr float kReviveFit = 0.5f;
-		constexpr float kReviveTurnBack = 0.35f;
-
-		void StopReviving(Party::Member& a_member, std::string_view a_why = {})
-		{
-			if (a_member.reviving && !a_why.empty()) {
-				auto patient = a_member.reviving.get();
-				Log::Info("[Heal] {} stops going to {}: {}."sv, a_member.name, patient ? Game::Name(patient.get()) : std::string("them"), a_why);
-			}
-			a_member.reviving = {};
-			a_member.revivingFor = 0.0f;
-		}
-
-		// Another healer already going to (or casting on) this downed companion.
-		bool Tended(const Party::Member& a_self, RE::Actor* a_patient)
-		{
-			const auto handle = a_patient->GetHandle();
-			for (const auto& other : Party::Members()) {
-				if (&other != &a_self && (other.reviving == handle || (other.castSpell && other.castPatient == handle))) {
-					return true;
-				}
-			}
-			return false;
-		}
-
-		// The heal itself: the best spell for the distance, then by hand, or directly when
-		// the hand cannot. False when there is no spell or not the magicka for it.
-		bool Treat(Party::Member& a_member, RE::Actor* a_healer, RE::Actor* a_patient, float a_distance, float a_health)
-		{
-			const auto& settings = Settings::Get();
-			const auto  cast = ChooseHeal(a_healer, a_patient, a_distance);
-			if (!cast || Game::Current(a_healer, RE::ActorValue::kMagicka) < cast->cost) {
-				return false;
-			}
-			a_member.healReady = settings.tuning.healCooldown;
-			Log::Info("[Heal] {} -> {} ({:.0f}% health, {:.0f} away) with {}{}, effectiveness {:.2f}, cost {:.0f}."sv, a_member.name,
-				PatientName(a_healer, a_patient), a_health * 100.0f, a_distance, cast->spell->GetName(), cast->borrowed ? " (borrowed)"sv : ""sv,
-				cast->effectiveness, cast->cost);
-			// A spell of their own is cast from the hand; a borrowed one has no hand to come
-			// from, and a spell aimed at others cannot be aimed at the healer themselves.
-			const float maxHealth = std::max(Game::Maximum(a_patient, RE::ActorValue::kHealth), 1.0f);
-			const bool  aimable = a_patient != a_healer || cast->spell->GetDelivery() == RE::MagicSystem::Delivery::kSelf;
-			if (cast->borrowed || !aimable || a_member.castFailures >= 2 ||
-				!StartCast(a_member, a_healer, a_patient, cast->spell, cast->effectiveness, cast->cost, cast->amount / maxHealth)) {
-				HealDirectly(a_member, a_healer, a_patient, cast->spell, cast->effectiveness, cast->cost);
-			}
-			return true;
-		}
-
-		void Heal(Party::Member& a_member, RE::Actor* a_healer, const Orders& a_orders, float a_dt)
-		{
-			if (a_member.castSpell) {
-				ContinueCast(a_member, a_healer, a_dt, Settings::Get().concentrationSeconds);
-				return;
-			}
 			const auto& settings = Settings::Get();
 			const auto& tuning = settings.tuning;
 			auto        refuse = [&](std::string a_why) {
-				if (a_member.healRequested) {
-					a_member.healRequested = false;
-					Answer(a_member, std::move(a_why));
-				}
+                if (a_member.healRequested) {
+                    a_member.healRequested = false;
+                    Answer(a_member, std::move(a_why));
+                }
 			};
 			if (!settings.heal) {
-				StopReviving(a_member, "healing is switched off");
 				refuse("Healing is switched off (Healers settings).");
 				return;
 			}
+			if (a_member.healReady > 0.0f) {
+				refuse(std::format("Not yet: ready in {:.0f} s.", std::ceil(a_member.healReady)));
+				return;
+			}
 			if (a_healer->AsActorState()->IsBleedingOut()) {
-				StopReviving(a_member, "they went down on the way");
 				refuse("Down themselves.");
 				return;
 			}
-			if (!a_member.reviving) {
-				if (a_member.healReady > 0.0f) {
-					refuse(std::format("Not yet: ready in {:.0f} s.", std::ceil(a_member.healReady)));
-					return;
+			if (Reeling(a_healer)) {
+				if (a_member.healRequested && WaitedTooLong(a_member)) {
+					refuse("Knocked about; could not.");
 				}
-				if (Busy(a_healer)) {
-					if (a_member.healRequested && WaitedTooLong(a_member)) {
-						refuse("Could not break off to heal.");
-					}
-					return;
-				}
-				if (!a_orders.autoAbility && !a_member.healRequested) {
-					return;
-				}
-			} else if (a_member.healRequested) {
-				if (auto patient = a_member.reviving.get()) {
-					refuse(std::format("Already on the way to {}.", Game::Name(patient.get())));
-				}
-			}
-
-			auto* player = RE::PlayerCharacter::GetSingleton();
-			std::vector<RE::NiPointer<RE::Actor>> allies;
-			std::vector<Rules::HealCandidate>     candidates;
-			auto                                  add = [&](RE::Actor* a_ally) {
-                if (!a_ally || a_ally->IsDead() || !a_ally->Is3DLoaded()) {
-                    return;
-                }
-                // An undead or dwarven ally is no patient for Heal Other; tend to the others.
-                if (!ChooseHeal(a_healer, a_ally, 0.0f)) {
-                    return;
-                }
-                Rules::HealCandidate c;
-                c.health = Game::Fraction(a_ally, RE::ActorValue::kHealth);
-                c.distance = Game::Distance(a_healer, a_ally);
-                c.self = a_ally == a_healer;
-                c.player = a_ally->IsPlayerRef();
-                c.bleeding = a_ally->AsActorState()->IsBleedingOut();
-                c.taken = c.bleeding && Tended(a_member, a_ally);
-                for (const auto& profile : Enemies::All()) {
-                    if (profile.target.get().get() == a_ally) {
-                        c.attacked = true;
-                        break;
-                    }
-                }
-                allies.emplace_back(a_ally);
-                candidates.push_back(c);
-			};
-			add(player);
-			for (auto& member : Party::Members()) {
-				add(member.handle.get().get());
-			}
-
-			const float threshold = static_cast<float>(a_orders.healThreshold) / 100.0f;
-			int         pick = Rules::PickHealTarget(candidates, threshold, tuning);
-
-			// On the way to a downed companion: heal them once within arm's reach. You come
-			// first, so needing a heal yourself turns the healer back to you.
-			if (a_member.reviving) {
-				auto        patient = a_member.reviving.get();
-				const bool  you = pick >= 0 && candidates[static_cast<std::size_t>(pick)].player;
-				const auto  name = patient ? Game::Name(patient.get()) : std::string("them");
-				if (!patient || patient->IsDead() || !patient->AsActorState()->IsBleedingOut() || you) {
-					Log::Info("[Heal] {} stops going to {}: {}."sv, a_member.name, name,
-						you ? "you need healing first"sv : (patient && !patient->IsDead() ? "they are back up"sv : "they are gone"sv));
-					StopReviving(a_member);
-				} else if (Game::Fraction(a_healer, RE::ActorValue::kHealth) < kReviveTurnBack) {
-					StopReviving(a_member, "too hurt to go on");
-				} else {
-					a_member.revivingFor += a_dt;
-					const float distance = Game::Distance(a_healer, patient.get());
-					const bool  close = distance <= tuning.reviveDistance;
-					if ((!close && a_member.revivingFor < kReviveGiveUp) || Busy(a_healer)) {
-						return;
-					}
-					StopReviving(a_member);
-					if (!close) {
-						if (distance > tuning.healRange) {
-							Log::Info("[Heal] {} could not reach {} ({:.0f} away after {:.0f} s)."sv, a_member.name, name, distance, kReviveGiveUp);
-							a_member.healReady = 3.0f;  // a breath before the next try
-							return;
-						}
-						Log::Info("[Heal] {} could not get closer to {} than {:.0f}; healing from there."sv, a_member.name, name, distance);
-					}
-					Treat(a_member, a_healer, patient.get(), distance, Game::Fraction(patient.get(), RE::ActorValue::kHealth));
-					return;
-				}
-				if (a_member.healReady > 0.0f || Busy(a_healer)) {
-					return;
-				}
-			}
-
-			if (pick < 0 && a_member.healRequested) {
-				// Told to heal: the most hurt ally, whatever the line.
-				float lowest = 0.95f;
-				for (std::size_t i = 0; i < candidates.size(); ++i) {
-					if (candidates[i].health < lowest && candidates[i].distance <= tuning.healRange) {
-						lowest = candidates[i].health;
-						pick = static_cast<int>(i);
-					}
-				}
-			}
-			const bool asked = a_member.healRequested;
-			if (pick < 0) {
-				refuse(std::format("Nobody within {:.0f} needs healing.", tuning.healRange));
 				return;
 			}
-			a_member.healRequested = false;
+			if (!PathsLink::AutoOn(a_orders, a_kit, Paths::Ability::kHeal) && !a_member.healRequested) {
+				return;
+			}
 
-			auto*       target = allies[static_cast<std::size_t>(pick)].get();
-			const auto& chosen = candidates[static_cast<std::size_t>(pick)];
-			if (chosen.bleeding && !chosen.player && !chosen.self && chosen.distance > tuning.reviveDistance) {
-				// A companion who is down is gone to and healed up close: a small combat area
-				// around them, which the combat AI walks the healer into, weapons still out.
-				// Too hurt themselves to cross the field: heal from here if it reaches.
-				if (Leash::Available() && Game::Fraction(a_healer, RE::ActorValue::kHealth) >= kReviveFit) {
-					const auto cast = ChooseHeal(a_healer, target, tuning.reviveDistance);
-					if (!cast || Game::Current(a_healer, RE::ActorValue::kMagicka) < cast->cost) {
-						if (asked) {
-							Answer(a_member, cast ? std::format("Not enough magicka: {} takes {:.0f}.", cast->spell->GetName(), cast->cost) : "Knows no heal for them."s);
-						}
-						return;
-					}
-					a_member.reviving = target->GetHandle();
-					a_member.revivingFor = 0.0f;
-					Log::Info("[Heal] {} goes to {} (down, {:.0f} away)."sv, a_member.name, Game::Name(target), chosen.distance);
-					Notices::Push(std::format("{} runs to {}.", a_member.name, Game::Name(target)), Notices::Kind::kHeal);
-					if (asked) {
-						Answer(a_member, std::format("Running to {}, who is down.", Game::Name(target)), true);
-					}
-					return;
-				}
-				if (chosen.distance > tuning.healRange) {
-					if (asked) {
-						Answer(a_member, std::format("{} is too far to heal ({:.0f} away).", Game::Name(target), chosen.distance));
-					}
-					return;  // no way to walk them over, and too far to heal from here
+			const auto  team = Team(a_healer, tuning.healReach);
+			const float line = static_cast<float>(a_orders.healThreshold) / 100.0f;
+			float       lowest = 1.0f;
+			RE::Actor*  worst = nullptr;
+			int         down = 0;
+			int         hurt = 0;
+			for (const auto& actor : team) {
+				const float health = Game::Fraction(actor.get(), RE::ActorValue::kHealth);
+				down += actor->AsActorState()->IsBleedingOut() ? 1 : 0;
+				hurt += health < 0.95f ? 1 : 0;
+				if (health < lowest) {
+					lowest = health;
+					worst = actor.get();
 				}
 			}
-			const bool treated = Treat(a_member, a_healer, target, chosen.distance, chosen.health);
-			if (asked) {
-				if (treated) {
-					Answer(a_member, std::format("Healing {}.", PatientName(a_healer, target)), true);
-				} else if (const auto cast = ChooseHeal(a_healer, target, chosen.distance)) {
-					Answer(a_member, std::format("Not enough magicka: {} takes {:.0f}.", cast->spell->GetName(), cast->cost));
-				} else {
-					Answer(a_member, std::format("Knows no heal for {}.", PatientName(a_healer, target)));
+			if (!a_member.healRequested && down == 0 && lowest >= line) {
+				return;
+			}
+			if (down == 0 && hurt == 0) {
+				refuse(std::format("Nobody within {:.0f} needs healing.", tuning.healReach));
+				return;
+			}
+
+			float       amount = Rules::TeamHealAmount(a_healer->GetLevel(), tuning);
+			const float bonus = PathBonus::Healing(a_member.id);
+			if (a_kit.tree) {
+				// A share of each one's own health; Triage gives more to the badly hurt.
+				const float share = Paths::Value(Paths::Perk::kHeal, std::max(a_kit.Rank(Paths::Ability::kHeal), 1)) / 100.0f;
+				const float triage = a_kit.Value(Paths::Perk::kTriage) / 100.0f;
+				float       most = 0.0f;
+				for (const auto& actor : team) {
+					const bool  badly = Game::Fraction(actor.get(), RE::ActorValue::kHealth) < Paths::kTriageLine;
+					const float give = Game::Maximum(actor.get(), RE::ActorValue::kHealth) * share * (badly ? 1.0f + triage : 1.0f) * bonus;
+					actor->AsActorValueOwner()->RestoreActorValue(RE::ActorValue::kHealth, give);
+					most = std::max(most, give);
 				}
+				amount = most;
+				if (const int burned = SunsBane(a_healer, a_kit.Value(Paths::Perk::kHealSunsBane) / 100.0f); burned > 0) {
+					Log::Info("[Heal] {}'s heal burns {} undead."sv, a_member.name, burned);
+				}
+			} else {
+				for (const auto& actor : team) {
+					actor->AsActorValueOwner()->RestoreActorValue(RE::ActorValue::kHealth, amount);
+				}
+			}
+			ShowCast(a_healer, team, Forms::Get().handsGreen, Forms::Get().healSound, Effects::Look::kHealAura);
+			Used(a_member.id, a_healer);
+			a_member.healReady = a_kit.tree ? a_kit.Cooldown(Paths::Ability::kHeal) : tuning.healCooldown;
+			const auto who = team.size() == 1 ? std::string(team.front()->IsPlayerRef() ? "you" : "themselves") : std::format("{} of the party", team.size());
+			const auto gift = a_kit.tree ? std::format("{:.0f}% of their health", Paths::Value(Paths::Perk::kHeal, std::max(a_kit.Rank(Paths::Ability::kHeal), 1)) * bonus) :
+			                               std::format("+{:.0f} health", amount);
+			Notices::Push(std::format("{} heals {}: {}.", a_member.name, team.size() == 1 ? who : "the party"s, gift), Notices::Kind::kHeal);
+			Log::Info("[Heal] {} heals {} for {:.0f} each ({} down; lowest {} at {:.0f}%){}."sv, a_member.name, who, amount, down,
+				worst ? (worst->IsPlayerRef() ? "you"s : Game::Name(worst)) : "nobody"s, lowest * 100.0f, a_member.healRequested ? ", as ordered" : "");
+			if (a_member.healRequested) {
+				a_member.healRequested = false;
+				Answer(a_member, std::format("Healed {}: {} each.", who, gift), true);
+			}
+		}
+
+		// --- Rejuvenate: everyone's magicka back faster ----------------------
+
+		// Your magicka and every companion's comes back faster for a while: rejuvenateBonus percent,
+		// for longer as the healer rises in level. On their own, they use it once you or a caster in
+		// the party has run dry or is close to it.
+		void Rejuvenate(Party::Member& a_member, RE::Actor* a_healer, const Orders& a_orders, const PathsLink::Kit& a_kit)
+		{
+			const auto& settings = Settings::Get();
+			const auto& tuning = settings.tuning;
+			auto        refuse = [&](std::string a_why) {
+                if (a_member.rejuvenateRequested) {
+                    a_member.rejuvenateRequested = false;
+                    Answer(a_member, std::move(a_why));
+                }
+			};
+			if (!settings.rejuvenate) {
+				refuse("Rejuvenate is switched off (Healers settings).");
+				return;
+			}
+			if (a_member.rejuvenateReady > 0.0f) {
+				refuse(std::format("Not yet: ready in {:.0f} s.", std::ceil(a_member.rejuvenateReady)));
+				return;
+			}
+			if (a_healer->AsActorState()->IsBleedingOut()) {
+				refuse("Down themselves.");
+				return;
+			}
+			if (Reeling(a_healer)) {
+				if (a_member.rejuvenateRequested && WaitedTooLong(a_member)) {
+					refuse("Knocked about; could not.");
+				}
+				return;
+			}
+			if (!PathsLink::AutoOn(a_orders, a_kit, Paths::Ability::kRejuvenate) && !a_member.rejuvenateRequested) {
+				return;
+			}
+
+			std::vector<RE::NiPointer<RE::Actor>> reached;
+			bool                                  needed = false;
+			bool                                  anyShort = false;
+			std::string                           dry;
+			// You first: low on magicka yourself is as good a reason as a companion running dry.
+			if (auto* player = RE::PlayerCharacter::GetSingleton()) {
+				const float yours = Game::Fraction(player, RE::ActorValue::kMagicka);
+				anyShort = yours < 0.95f;
+				if (yours < 0.3f && RejuvenatedFor(player->GetFormID()) <= 0.0f) {
+					needed = true;
+					dry = "you";
+				}
+				reached.emplace_back(player);
+			}
+			for (const auto& member : Party::Members()) {
+				auto actor = member.summon ? RE::NiPointer<RE::Actor>{} : member.handle.get();
+				if (!actor || actor->IsDead() || !actor->Is3DLoaded()) {
+					continue;
+				}
+				const auto* orders = Party::FindOrders(member.id);
+				const bool  caster = (orders && ChoosesSpells(orders->role)) || member.arsenal.casts;
+				const float magicka = Game::Fraction(actor.get(), RE::ActorValue::kMagicka);
+				anyShort = anyShort || magicka < 0.95f;
+				if (caster && (member.drained || magicka < 0.3f) && RejuvenatedFor(member.id) <= 0.0f) {
+					needed = true;
+					if (dry.empty()) {
+						dry = member.name;
+					}
+				}
+				reached.push_back(std::move(actor));
+			}
+			if (!a_member.rejuvenateRequested && !needed) {
+				return;
+			}
+			if (!anyShort) {
+				refuse("Everyone's magicka is full.");
+				return;
+			}
+
+			const int   level = a_healer->GetLevel();
+			const float seconds = a_kit.tree ? Paths::Value(Paths::Perk::kRejuvenate, std::max(a_kit.Rank(Paths::Ability::kRejuvenate), 1)) :
+			                                   Rules::RejuvenateSeconds(level, tuning);
+			const float wellspring = a_kit.Value(Paths::Perk::kRejuvenateWellspring) / 100.0f;
+			const float vigor = a_kit.Value(Paths::Perk::kRejuvenateVigor);
+			for (const auto& actor : reached) {
+				Lift(actor->GetFormID(), RE::ActorValue::kMagickaRateMult, tuning.rejuvenateBonus, seconds,
+					a_kit.tree ? static_cast<std::uint16_t>(Paths::Perk::kRejuvenate) : 0);
+				if (wellspring > 0.0f) {
+					actor->AsActorValueOwner()->RestoreActorValue(RE::ActorValue::kMagicka, Game::Maximum(actor.get(), RE::ActorValue::kMagicka) * wellspring);
+				}
+				if (vigor > 0.0f) {
+					Lift(actor->GetFormID(), RE::ActorValue::kStaminaRateMult, vigor, seconds, static_cast<std::uint16_t>(Paths::Perk::kRejuvenateVigor));
+				}
+			}
+			ShowCast(a_healer, reached, Forms::Get().handsBlue, Forms::Get().rejuvenateSound, Effects::Look::kRejuvenateAura);
+			Used(a_member.id, a_healer);
+			a_member.rejuvenateCooldown = a_kit.tree ? a_kit.Cooldown(Paths::Ability::kRejuvenate) : Rules::RejuvenateCooldown(level, tuning);
+			a_member.rejuvenateReady = a_member.rejuvenateCooldown;
+			Notices::Push(std::format("{} rejuvenates you and the party: magicka {:.0f}% faster for {:.0f} s.", a_member.name, tuning.rejuvenateBonus, seconds),
+				Notices::Kind::kHeal);
+			Log::Info("[Heal] {} rejuvenates you and {} companion(s): magicka {:.0f}% faster for {:.0f} s, ready again in {:.0f} s{}."sv, a_member.name, reached.size() - 1,
+				tuning.rejuvenateBonus, seconds, a_member.rejuvenateCooldown,
+				a_member.rejuvenateRequested ? ", as ordered"s : (dry.empty() ? ""s : std::format(" ({} ran low)", dry)));
+			if (a_member.rejuvenateRequested) {
+				a_member.rejuvenateRequested = false;
+				Answer(a_member, std::format("Rejuvenated: magicka {:.0f}% faster for {:.0f} s.", tuning.rejuvenateBonus, seconds), true);
 			}
 		}
 	}
@@ -869,8 +856,7 @@ namespace FWM::Abilities
 	{
 		AgeHolds(a_dt);
 		for (auto& member : Party::Members()) {
-			member.tauntReady = std::max(member.tauntReady - a_dt, 0.0f);
-			member.healReady = std::max(member.healReady - a_dt, 0.0f);
+			// The cooldowns run in Party::Cool, on world time, fight or not.
 			member.tauntRollIn = std::max(member.tauntRollIn - a_dt, 0.0f);
 			if (member.tauntPending) {
 				member.tauntPendingFor += a_dt;
@@ -883,32 +869,44 @@ namespace FWM::Abilities
 				member.inCombatFor = 0.0f;
 				member.opened = false;
 				member.tauntPending = false;
-				// One more try by hand next fight: a hand that keeps failing goes straight
-				// back to direct heals after a single miss.
-				member.castFailures = std::min(member.castFailures, 1);
-				StopReviving(member, "they left the fight");
 				LowerShield(member, actor.get());
-				EndCast(member, actor.get());
+				DropBlock(member, actor.get());
 				continue;
 			}
 			const auto* orders = Party::FindOrders(member.id);
 			if (!orders) {
 				continue;
 			}
-			if (orders->role != Role::kHealer) {
-				StopReviving(member, "no longer the healer");  // the leash goes back to you
-			}
 			if (orders->role != Role::kTank) {
 				LowerShield(member, actor.get(), "no longer the tank"sv);
 			}
+			// What they carry: on a path, the two abilities slotted there; without one, the
+			// role's own. A request for something not carried is answered at once.
+			const auto kit = PathsLink::KitOf(member.id, orders->role);
+			auto       notCarried = [&](bool& a_requested, Paths::Ability a_ability) {
+                if (a_requested && !kit.Carries(a_ability)) {
+                    a_requested = false;
+                    Answer(member, std::format("{} is not one of the abilities they carry.", Paths::Info(a_ability).name));
+                }
+			};
+			notCarried(member.tauntRequested, Paths::Ability::kTaunt);
+			notCarried(member.healRequested, Paths::Ability::kHeal);
+			notCarried(member.rejuvenateRequested, Paths::Ability::kRejuvenate);
 			if (orders->role == Role::kTank) {
-				Taunt(member, actor.get(), *orders, a_dt);
+				if (kit.Carries(Paths::Ability::kTaunt)) {
+					Taunt(member, actor.get(), *orders, kit, a_dt);
+				} else {
+					member.inCombatFor += a_dt;
+				}
 				ShieldWall(member, actor.get(), a_dt);
-			} else if (orders->role == Role::kHealer) {
-				member.inCombatFor += a_dt;
-				Heal(member, actor.get(), *orders, a_dt);
 			} else {
 				member.inCombatFor += a_dt;
+				if (kit.Carries(Paths::Ability::kHeal)) {
+					Heal(member, actor.get(), *orders, kit);
+				}
+				if (kit.Carries(Paths::Ability::kRejuvenate)) {
+					Rejuvenate(member, actor.get(), *orders, kit);
+				}
 			}
 		}
 	}
@@ -937,34 +935,40 @@ namespace FWM::Abilities
 		if (!watching) {
 			return;
 		}
-		auto collect = [&](const RE::BSTArray<RE::ProjectileHandle>& a_list) {
-			for (const auto& handle : a_list) {
-				auto projectile = handle.get();
-				if (!projectile) {
-					continue;
-				}
-				auto&      data = projectile->GetProjectileRuntimeData();
-				const auto velocity = data.linearVelocity;
-				if (velocity.SqrLength() < 300.0f * 300.0f) {
-					continue;  // landed, or stuck in something
-				}
-				auto  from = data.shooter.get();
-				auto* shooter = from ? from->As<RE::Actor>() : nullptr;
-				if (!shooter || !Enemies::Find(shooter->GetFormID())) {
-					continue;  // not an enemy's
-				}
-				auto aimed = data.desiredTarget.get();
-				flying.push_back({ projectile->GetPosition(), velocity, aimed ? aimed->As<RE::Actor>() : nullptr, shooter });
+		// The lists change whenever anyone shoots, so only the handles are copied, under the
+		// manager's own lock (the one it takes to add a projectile), and looked up after.
+		std::vector<RE::ProjectileHandle> handles;
+		{
+			RE::BSSpinLockGuard guard(manager->projectileLock);
+			handles.reserve(manager->limited.size() + manager->unlimited.size());
+			handles.insert(handles.end(), manager->limited.begin(), manager->limited.end());
+			handles.insert(handles.end(), manager->unlimited.begin(), manager->unlimited.end());
+		}
+		for (const auto& handle : handles) {
+			auto projectile = handle.get();
+			if (!projectile) {
+				continue;
 			}
-		};
-		collect(manager->limited);
-		collect(manager->unlimited);
+			auto&      data = projectile->GetProjectileRuntimeData();
+			const auto velocity = data.linearVelocity;
+			if (velocity.SqrLength() < 300.0f * 300.0f) {
+				continue;  // landed, or stuck in something
+			}
+			auto  from = data.shooter.get();
+			auto* shooter = from ? from->As<RE::Actor>() : nullptr;
+			if (!shooter || !Enemies::Find(shooter->GetFormID())) {
+				continue;  // not an enemy's
+			}
+			auto aimed = data.desiredTarget.get();
+			flying.push_back({ projectile->GetPosition(), velocity, aimed ? aimed->As<RE::Actor>() : nullptr, shooter });
+		}
 
 		for (auto& member : Party::Members()) {
 			member.blockHold = std::max(member.blockHold - a_dt, 0.0f);
 			auto tank = member.handle.get();
 			const auto* orders = Party::FindOrders(member.id);
 			if (!tank || !orders || orders->role != Role::kTank || member.summon || !Game::Usable(tank.get()) || !HasShield(tank.get())) {
+				DropBlock(member, tank.get());
 				continue;
 			}
 			// Will one reach them in the next second? Aimed at them, it only has to come close;
@@ -985,7 +989,8 @@ namespace FWM::Abilities
 				}
 			}
 			auto* state = tank->AsActorState();
-			const bool able = !tank->IsAttacking() && !state->IsStaggered() && !state->IsBleedingOut() && !tank->IsInKillMove();
+			const bool able = tank->IsInCombat() && state->IsWeaponDrawn() && !tank->IsAttacking() && !state->IsStaggered() && !state->IsBleedingOut() &&
+			                  !tank->IsInRagdollState();
 			if (incoming && able) {
 				member.blockHold = 0.8f;
 				if (!tank->IsBlocking() && member.blockTries < 3) {
@@ -1006,11 +1011,7 @@ namespace FWM::Abilities
 					}
 				}
 			} else if (member.blockRaised && (member.blockHold <= 0.0f || !able)) {
-				// Down again unless the shield wall is holding it up on purpose.
-				if (!member.shielding) {
-					tank->NotifyAnimationGraph("blockStop");
-				}
-				member.blockRaised = false;
+				DropBlock(member, tank.get());  // down again, unless the shield wall holds it up on purpose
 			}
 			if (tank->IsBlocking() || !member.blockRaised) {
 				member.blockTries = 0;
@@ -1021,6 +1022,19 @@ namespace FWM::Abilities
 	void Clear()
 	{
 		holds.clear();
+		Unbrace();
+		for (auto& member : Party::Members()) {
+			auto actor = member.handle.get();
+			LowerShield(member, actor.get());
+			DropBlock(member, actor.get());
+			member.tauntPending = false;
+			if (member.tauntRequested || member.healRequested || member.rejuvenateRequested) {
+				member.tauntRequested = false;
+				member.healRequested = false;
+				member.rejuvenateRequested = false;
+				Answer(member, "The fight is over.");
+			}
+		}
 	}
 
 	const std::vector<Hold>& Holds()
@@ -1043,21 +1057,180 @@ namespace FWM::Abilities
 		const auto&  tuning = Settings::Get().tuning;
 		TauntPreview p;
 		const int    level = a_tank->GetLevel();
+		const auto*  orders = Party::FindOrders(a_tank->GetFormID());
+		const auto   kit = PathsLink::KitOf(a_tank->GetFormID(), orders ? orders->role : Role::kTank);
+		const auto   numbers = NumbersFor(a_tank, kit);
 		p.radius = Rules::TauntRadius(Game::Current(a_tank, RE::ActorValue::kBlock), Game::Current(a_tank, RE::ActorValue::kHeavyArmor), tuning);
 		p.certainUpTo = level + Rules::TauntReach(level, tuning);
 		p.noChanceFrom = p.certainUpTo + tuning.tauntFalloffLevels + 1;
-		p.hold = Rules::HoldSeconds(level, level, tuning);
-		p.cooldown = Rules::TauntCooldown(level, tuning);
+		p.hold = numbers.hold;
+		p.cooldown = numbers.cooldown;
 		p.stamina = tuning.tauntStamina;
+		p.armorSeconds = p.hold;
+		p.armor = numbers.armor;
 		return p;
 	}
 
-	std::optional<HealPreview> PreviewHeal(RE::Actor* a_healer)
+	void AddHold(const RE::ActorHandle& a_enemy, const RE::ActorHandle& a_tank, float a_seconds)
 	{
-		const auto cast = ChooseHeal(a_healer, RE::PlayerCharacter::GetSingleton(), 0.0f);
-		if (!cast) {
-			return std::nullopt;
+		for (auto& hold : holds) {
+			if (hold.enemy == a_enemy) {
+				hold.tank = a_tank;
+				hold.remaining = std::max(hold.remaining, a_seconds);
+				return;
+			}
 		}
-		return HealPreview{ cast->spell->GetName(), cast->borrowed, cast->amount, cast->cost };
+		holds.push_back({ a_enemy, a_tank, a_seconds });
+	}
+
+	void Lift(RE::FormID a_id, RE::ActorValue a_value, float a_amount, float a_seconds, std::uint16_t a_source)
+	{
+		const auto it = std::find_if(boosts.begin(), boosts.end(),
+			[&](const Boost& a_boost) { return a_boost.id == a_id && a_boost.value == a_value && a_boost.source == a_source; });
+		if (it == boosts.end()) {
+			Mod(a_id, a_value, a_amount);
+			boosts.push_back({ a_id, a_value, a_amount, a_seconds, a_seconds, a_source });
+		} else {
+			Mod(a_id, a_value, a_amount - it->amount);
+			it->amount = a_amount;
+			it->left = a_seconds;
+			it->length = a_seconds;
+		}
+	}
+
+	void Keep(RE::FormID a_id, RE::ActorValue a_value, float a_amount, float a_seconds, std::uint16_t a_source)
+	{
+		if (a_amount != 0.0f) {
+			const auto it = std::find_if(boosts.begin(), boosts.end(),
+				[&](const Boost& a_boost) { return a_boost.id == a_id && a_boost.value == a_value && a_boost.source == a_source; });
+			if (it != boosts.end() && it->amount == a_amount) {
+				it->left = std::max(it->left, a_seconds);  // the same lift kept up: no need to touch the value
+				return;
+			}
+			Lift(a_id, a_value, a_amount, a_seconds, a_source);
+			return;
+		}
+		DropSource(a_source, a_id, a_value);
+	}
+
+	void DropSource(std::uint16_t a_source, std::optional<RE::FormID> a_id, std::optional<RE::ActorValue> a_value)
+	{
+		std::erase_if(boosts, [&](const Boost& a_boost) {
+			if (a_boost.source != a_source || (a_id && a_boost.id != *a_id) || (a_value && a_boost.value != *a_value)) {
+				return false;
+			}
+			Mod(a_boost.id, a_boost.value, -a_boost.amount);
+			return true;
+		});
+	}
+
+	std::optional<BoostTime> BoostOn(RE::FormID a_id, RE::ActorValue a_value, std::uint16_t a_source)
+	{
+		for (const auto& boost : boosts) {
+			if (boost.id == a_id && boost.value == a_value && boost.source == a_source) {
+				return BoostTime{ boost.amount, boost.left, boost.length };
+			}
+		}
+		return std::nullopt;
+	}
+
+	std::vector<SavedBoost> Boosts()
+	{
+		std::vector<SavedBoost> out;
+		for (const auto& boost : boosts) {
+			out.push_back({ boost.id, static_cast<std::uint32_t>(boost.value), boost.amount });
+		}
+		return out;
+	}
+
+	void LoadBoosts(const std::vector<SavedBoost>& a_saved)
+	{
+		for (const auto& saved : a_saved) {
+			fromSave.push_back({ saved.id, static_cast<RE::ActorValue>(saved.value), saved.amount, 0.0f, 0.0f, 0 });
+		}
+	}
+
+	void UpdateBoosts(float a_dt)
+	{
+		for (const auto& boost : fromSave) {
+			Mod(boost.id, boost.value, -boost.amount);
+			if (boost.value == RE::ActorValue::kDamageResist) {
+				Log::Info("[Taunt] {:08X}: {:+.0f} armor from an ability still on when the game was saved is off again."sv, boost.id, boost.amount);
+			} else if (boost.value == RE::ActorValue::kMagickaRateMult) {
+				Log::Info("[Heal] {:08X}: magicka quickened by an ability when the game was saved is back to normal."sv, boost.id);
+			} else {
+				Log::Info("[Paths] {:08X}: {:+.2f} to actor value {} from an ability still on when the game was saved is off again."sv, boost.id, boost.amount,
+					static_cast<int>(boost.value));
+			}
+		}
+		fromSave.clear();
+		std::erase_if(boosts, [&](Boost& a_boost) {
+			a_boost.left -= a_dt;
+			if (a_boost.left > 0.0f) {
+				return false;
+			}
+			Mod(a_boost.id, a_boost.value, -a_boost.amount);
+			return true;
+		});
+	}
+
+	void Unbrace()
+	{
+		Drop(RE::ActorValue::kDamageResist);
+	}
+
+	void EndBoosts()
+	{
+		Drop(std::nullopt);
+		fromSave.clear();
+	}
+
+	std::vector<std::pair<std::uint32_t, float>> Braced()
+	{
+		return Listed(RE::ActorValue::kDamageResist, false);
+	}
+
+	std::vector<std::pair<std::uint32_t, float>> BraceTimes()
+	{
+		return Listed(RE::ActorValue::kDamageResist, true);
+	}
+
+	std::vector<std::pair<std::uint32_t, float>> Rejuvenated()
+	{
+		return Listed(RE::ActorValue::kMagickaRateMult, false);
+	}
+
+	std::optional<BoostTime> BoostOn(RE::FormID a_id, RE::ActorValue a_value)
+	{
+		for (const auto& boost : boosts) {
+			if (boost.id == a_id && boost.value == a_value) {
+				return BoostTime{ boost.amount, boost.left, boost.length };
+			}
+		}
+		return std::nullopt;
+	}
+
+	float RejuvenatedFor(RE::FormID a_id)
+	{
+		for (const auto& boost : boosts) {
+			if (boost.id == a_id && boost.value == RE::ActorValue::kMagickaRateMult) {
+				return boost.left;
+			}
+		}
+		return 0.0f;
+	}
+
+	void LoadBraced(const std::vector<std::pair<std::uint32_t, float>>& a_saved)
+	{
+		for (const auto& [id, amount] : a_saved) {
+			fromSave.push_back({ id, RE::ActorValue::kDamageResist, amount, 0.0f, 0.0f });
+		}
+	}
+
+	void LoadRejuvenated(const std::vector<std::pair<std::uint32_t, float>>& a_saved)
+	{
+		for (const auto& [id, amount] : a_saved) {
+			fromSave.push_back({ id, RE::ActorValue::kMagickaRateMult, amount, 0.0f, 0.0f });
+		}
 	}
 }

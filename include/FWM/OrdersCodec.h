@@ -21,4 +21,12 @@ namespace FWM::Codec
 	// Unknown enum values are clamped to defaults rather than dropping the entry,
 	// so a save made by a newer version still loads what it can.
 	[[nodiscard]] std::vector<Entry> Decode(std::span<const std::uint8_t> a_bytes, std::uint32_t a_version);
+
+	// The spells chosen for each hand: (follower, left, right), all form ids.
+	inline constexpr std::uint32_t kHandsVersion = 1;
+
+	using HandsEntry = std::pair<std::uint32_t, Hands>;
+
+	[[nodiscard]] std::vector<std::uint8_t> EncodeHands(std::span<const HandsEntry> a_entries);
+	[[nodiscard]] std::vector<HandsEntry>   DecodeHands(std::span<const std::uint8_t> a_bytes, std::uint32_t a_version);
 }

@@ -1,6 +1,7 @@
 #include "FWM/Settings.h"
 
 #include "FWM/Log.h"
+#include "FWM/UITheme.h"
 
 namespace FWM::Settings
 {
@@ -12,7 +13,9 @@ namespace FWM::Settings
 		std::mutex                         versionsLock;
 		std::vector<std::unique_ptr<Data>> versions;
 		std::atomic<const Data*>           current{ &defaults };
+		std::atomic<const Data*>           chosen{ &defaults };   // the player's own, before the paths' lock
 		std::atomic<const Data*>           shipped{ &defaults };  // FightWithMe.ini alone
+		std::atomic<bool>                  rolesLocked{ false };
 
 		std::mutex                                     submitLock;
 		std::optional<std::pair<std::uint64_t, Data>>  pending;
@@ -170,6 +173,10 @@ namespace FWM::Settings
 			v.Bool(L"General", L"bLeaveEmptyFights", d.leaveEmptyFights);
 			v.Float(L"General", L"fLeaveAfter", d.leaveAfter, 0.5f, 15.0f);
 
+			v.Bool(L"Sight", L"bDrawWeapons", d.drawOnSight);
+			v.Bool(L"Sight", L"bAutoBattle", d.autoBattle);
+			v.Float(L"Sight", L"fRange", d.sightRange, 500.0f, 6000.0f);
+
 			v.Key(L"BattlePlan", L"iKey", d.planKey.key);
 			v.Key(L"BattlePlan", L"iKeyModifier", d.planKey.modifier);
 			v.Key(L"BattlePlan", L"iGamepadKey", d.planGamepadKey);
@@ -213,30 +220,38 @@ namespace FWM::Settings
 			v.Int(L"Taunt", L"iBossLevelBonus", t.bossLevelBonus, 0, 50);
 			v.Int(L"Taunt", L"iCowedLevelGap", t.cowedLevelGap, 1, 100);
 			v.Float(L"Taunt", L"fCowedHoldMult", t.cowedHoldMult, 1.0f, 5.0f);
-			v.Float(L"Taunt", L"fHoldBase", t.holdBase, 0.5f, 60.0f);
-			v.Float(L"Taunt", L"fHoldPerLevel", t.holdPerLevel, 0.0f, 1.0f);
+			v.Float(L"Taunt", L"fHoldSeconds", t.holdSeconds, 1.0f, 120.0f);
+			v.Float(L"Taunt", L"fHoldSecondsLevel30", t.holdSecondsAt30, 1.0f, 120.0f);
+			v.Float(L"Taunt", L"fHoldSecondsLevel60", t.holdSecondsAt60, 1.0f, 120.0f);
 			v.Float(L"Taunt", L"fCooldownBase", t.cooldownBase, 1.0f, 120.0f);
 			v.Float(L"Taunt", L"fCooldownPerLevel", t.cooldownPerLevel, 0.0f, 2.0f);
 			v.Float(L"Taunt", L"fCooldownMin", t.cooldownMin, 0.5f, 120.0f);
 			v.Float(L"Taunt", L"fStaminaCost", t.tauntStamina, 0.0f, 500.0f);
 			v.Float(L"Taunt", L"fHoldBreakDistance", t.holdBreakDistance, 500.0f, 10000.0f);
 			v.Float(L"Taunt", L"fRangedReach", t.tauntRangedReach, 500.0f, 8000.0f);
+			v.Float(L"Taunt", L"fArmorBase", t.tauntArmorBase, 0.0f, 500.0f);
+			v.Float(L"Taunt", L"fArmorPerLevel", t.tauntArmorPerLevel, 0.0f, 20.0f);
+			v.Float(L"Taunt", L"fArmorMax", t.tauntArmorMax, 0.0f, 1000.0f);
+			v.Bool(L"Taunt", L"bBrace", d.brace);
 			v.Float(L"Taunt", L"fGlowSeconds", d.glowSeconds, 0.0f, 10.0f);
-			v.String(L"Taunt", L"sGlowShader", d.glowShader);
 			v.String(L"Taunt", L"sSound", d.tauntSound);
 			v.String(L"Taunt", L"sIdleShield", d.idleShield);
 			v.String(L"Taunt", L"sIdleWeapon", d.idleWeapon);
 			v.String(L"Taunt", L"sIdleCry", d.idleCry);
 
 			v.Bool(L"Heal", L"bEnabled", d.heal);
-			v.Bool(L"Heal", L"bFallback", d.healFallback);
-			v.String(L"Heal", L"sFallbackSpell", d.fallbackSpell);
-			v.Float(L"Heal", L"fSelfThreshold", t.healSelfThreshold, 0.05f, 0.95f);
-			v.Float(L"Heal", L"fCooldown", t.healCooldown, 10.0f, 120.0f);
-			v.Float(L"Heal", L"fRange", t.healRange, 200.0f, 6000.0f);
-			v.Float(L"Heal", L"fReviveReach", t.reviveReach, 300.0f, 8000.0f);
-			v.Float(L"Heal", L"fReviveDistance", t.reviveDistance, 120.0f, 600.0f);
-			v.Float(L"Heal", L"fConcentrationSeconds", d.concentrationSeconds, 0.5f, 10.0f);
+			v.Float(L"Heal", L"fCooldown", t.healCooldown, 10.0f, 600.0f);
+			v.Float(L"Heal", L"fAmountBase", t.healAmountBase, 0.0f, 2000.0f);
+			v.Float(L"Heal", L"fAmountPerLevel", t.healAmountPerLevel, 0.0f, 50.0f);
+			v.Float(L"Heal", L"fAmountMax", t.healAmountMax, 0.0f, 5000.0f);
+			v.Float(L"Heal", L"fReach", t.healReach, 500.0f, 10000.0f);
+			v.Bool(L"Heal", L"bAnySpell", d.healersAnySpell);
+
+			v.Bool(L"Rejuvenate", L"bEnabled", d.rejuvenate);
+			v.Float(L"Rejuvenate", L"fSeconds", t.rejuvenateSeconds, 5.0f, 600.0f);
+			v.Float(L"Rejuvenate", L"fSecondsLevel30", t.rejuvenateSecondsAt30, 5.0f, 600.0f);
+			v.Float(L"Rejuvenate", L"fSecondsLevel60", t.rejuvenateSecondsAt60, 5.0f, 900.0f);
+			v.Float(L"Rejuvenate", L"fRegenBonus", t.rejuvenateBonus, 10.0f, 500.0f);
 
 			v.Float(L"Targeting", L"fEngageRange", t.engageRange, 500.0f, 10000.0f);
 			v.Float(L"Targeting", L"fGuardRadius", t.guardRadius, 100.0f, 5000.0f);
@@ -253,23 +268,30 @@ namespace FWM::Settings
 
 			v.Bool(L"Specials", L"bEnabled", d.specials);
 
-			v.Bool(L"Potions", L"bDrink", d.drinkPotions);
-			v.Float(L"Potions", L"fDrinkBelow", d.drinkBelow, 0.1f, 0.9f);
-			v.Bool(L"Potions", L"bBrew", d.brewPotions);
-			v.Bool(L"Potions", L"bBrewAnimation", d.brewAnimation);
+			v.Bool(L"Effects", L"bEnabled", d.abilityEffects);
+
+			v.Float(L"PathBonus", L"fFighterAttackSpeed", t.bonusAttackSpeed, 0.0f, 10.0f);
+			v.Float(L"PathBonus", L"fTankDamageTaken", t.bonusDamageTaken, 0.0f, 10.0f);
+			v.Float(L"PathBonus", L"fHealerHealing", t.bonusHealing, 0.0f, 10.0f);
+			v.Float(L"PathBonus", L"fBruiserDamage", t.bonusDamage, 0.0f, 10.0f);
+			v.Float(L"PathBonus", L"fArcherArrowsKept", t.bonusArrowsKept, 0.0f, 10.0f);
+			v.Float(L"PathBonus", L"fMageMagickaCost", t.bonusMagickaCost, 0.0f, 10.0f);
 
 			v.String(L"TimeEffect", L"sIntro", d.imodIntro);
 			v.String(L"TimeEffect", L"sHold", d.imodHold);
 
+			v.Int(L"Interface", L"iTheme", d.uiTheme, 0, UITheme::kCount - 1);
 			v.Bool(L"Interface", L"bNotices", d.notices);
 			v.Bool(L"Interface", L"bSounds", d.sounds);
 			v.Bool(L"Interface", L"bTooltips", d.tooltips);
+			v.Bool(L"Interface", L"bPathsGuideSeen", d.pathsGuideSeen);
 
 			v.Bool(L"Debug", L"bLogDecisions", d.logDecisions);
 		}
 
 		void Sanitize(Data& a_data)
 		{
+			a_data.uiTheme = UITheme::Normalize(a_data.uiTheme);
 			auto& t = a_data.tuning;
 			t.tauntRadiusMax = std::max(t.tauntRadiusMax, t.tauntRadiusBase);
 			t.cooldownMin = std::min(t.cooldownMin, t.cooldownBase);
@@ -318,11 +340,66 @@ namespace FWM::Settings
 			return static_cast<bool>(out);
 		}
 
+		// The Tanks and Healers pages: with the paths in charge of those roles, FightWithMe.ini's.
+		void ShippedRoles(Data& a_data, const Data& a_shipped)
+		{
+			a_data.taunt = a_shipped.taunt;
+			a_data.tauntOpener = a_shipped.tauntOpener;
+			a_data.shieldWall = a_shipped.shieldWall;
+			a_data.tauntChance = a_shipped.tauntChance;
+			a_data.tauntCheckSeconds = a_shipped.tauntCheckSeconds;
+			a_data.brace = a_shipped.brace;
+			a_data.glowSeconds = a_shipped.glowSeconds;
+			a_data.heal = a_shipped.heal;
+			a_data.healersAnySpell = a_shipped.healersAnySpell;
+			a_data.rejuvenate = a_shipped.rejuvenate;
+			auto&       t = a_data.tuning;
+			const auto& s = a_shipped.tuning;
+			t.tauntRadiusBase = s.tauntRadiusBase;
+			t.tauntRadiusPerSkill = s.tauntRadiusPerSkill;
+			t.tauntRadiusMax = s.tauntRadiusMax;
+			t.tauntReachDivisor = s.tauntReachDivisor;
+			t.tauntFalloffPerLevel = s.tauntFalloffPerLevel;
+			t.tauntFalloffLevels = s.tauntFalloffLevels;
+			t.bossLevelBonus = s.bossLevelBonus;
+			t.cowedLevelGap = s.cowedLevelGap;
+			t.cowedHoldMult = s.cowedHoldMult;
+			t.holdSeconds = s.holdSeconds;
+			t.holdSecondsAt30 = s.holdSecondsAt30;
+			t.holdSecondsAt60 = s.holdSecondsAt60;
+			t.cooldownBase = s.cooldownBase;
+			t.cooldownPerLevel = s.cooldownPerLevel;
+			t.cooldownMin = s.cooldownMin;
+			t.tauntStamina = s.tauntStamina;
+			t.holdBreakDistance = s.holdBreakDistance;
+			t.tauntRangedReach = s.tauntRangedReach;
+			t.tauntArmorBase = s.tauntArmorBase;
+			t.tauntArmorPerLevel = s.tauntArmorPerLevel;
+			t.tauntArmorMax = s.tauntArmorMax;
+			t.healCooldown = s.healCooldown;
+			t.healAmountBase = s.healAmountBase;
+			t.healAmountPerLevel = s.healAmountPerLevel;
+			t.healAmountMax = s.healAmountMax;
+			t.healReach = s.healReach;
+			t.rejuvenateSeconds = s.rejuvenateSeconds;
+			t.rejuvenateSecondsAt30 = s.rejuvenateSecondsAt30;
+			t.rejuvenateSecondsAt60 = s.rejuvenateSecondsAt60;
+			t.rejuvenateBonus = s.rejuvenateBonus;
+		}
+
+		// a_data is the player's own; what is live is the same, unless the paths hold the roles.
 		void Publish(Data a_data)
 		{
 			Sanitize(a_data);
 			const std::scoped_lock guard(versionsLock);
 			versions.push_back(std::make_unique<Data>(std::move(a_data)));
+			const Data* own = versions.back().get();
+			chosen.store(own, std::memory_order_release);
+			if (rolesLocked.load()) {
+				auto live = std::make_unique<Data>(*own);
+				ShippedRoles(*live, *shipped.load(std::memory_order_acquire));
+				versions.push_back(std::move(live));
+			}
 			current.store(versions.back().get(), std::memory_order_release);
 		}
 	}
@@ -357,6 +434,30 @@ namespace FWM::Settings
 		return *current.load(std::memory_order_acquire);
 	}
 
+	const Data& Chosen() noexcept
+	{
+		return *chosen.load(std::memory_order_acquire);
+	}
+
+	void LockRoles(bool a_locked)
+	{
+		if (rolesLocked.exchange(a_locked) == a_locked) {
+			return;
+		}
+		Publish(Chosen());
+		Data mine = Chosen();
+		ShippedRoles(mine, Defaults());
+		const int kept = Differences(mine, Chosen());
+		Log::Info("[Settings] {}"sv, a_locked ? std::format("Paths is installed: the Tanks and Healers settings follow FightWithMe.ini{}.",
+													kept ? std::format("; your {} change(s) there are kept for when it is removed", kept) : std::string()) :
+												  std::string("The Tanks and Healers settings are yours again."));
+	}
+
+	bool RolesLocked() noexcept
+	{
+		return rolesLocked.load();
+	}
+
 	Data Defaults()
 	{
 		return *shipped.load(std::memory_order_acquire);
@@ -365,7 +466,7 @@ namespace FWM::Settings
 	bool Apply(const Data& a_data)
 	{
 		Publish(a_data);
-		const auto   want = Written(Get());
+		const auto   want = Written(Chosen());
 		const auto   base = Written(Defaults());
 		const auto   path = UserIniPath();
 		const Reader user{ path };

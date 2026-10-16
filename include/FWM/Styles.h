@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FWM/Orders.h"
+#include "FWM/StyleLayer.h"
 
 // One runtime combat style per follower: their own style with the role layered on
 // top, pointed to from their combat controller while they fight.
@@ -13,7 +14,10 @@ namespace FWM::Styles
 	// Point the follower's controller at their layered style, rebuilding it when
 	// the orders or the underlying style changed. Cheap when nothing did. Committed:
 	// sent after one enemy, so no circling or hanging back (see StyleLayer).
-	void Apply(RE::Actor* a_follower, const Orders& a_orders, Position a_resolved, bool a_committed = false);
+	// a_spells: a mage or healer with spells chosen for their hands leans away from a bow.
+	// a_tweaks: what their path and the abilities running on them change (see StyleLayer).
+	void Apply(RE::Actor* a_follower, const Orders& a_orders, Position a_resolved, bool a_committed = false, bool a_spells = false,
+		const StyleTweaks& a_tweaks = {});
 
 	// Put the follower's own style back if ours is still in place.
 	void Release(RE::Actor* a_follower);

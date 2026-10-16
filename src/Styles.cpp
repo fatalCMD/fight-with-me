@@ -18,6 +18,8 @@ namespace FWM::Styles
 			Position            position{ Position::kCount };
 			float               weight{ -1.0f };
 			bool                committed{ false };
+			bool                spells{ false };  // a mage or healer with spells chosen for their hands
+			StyleTweaks         tweaks;
 		};
 
 		std::unordered_map<RE::FormID, Layered> styles;
@@ -134,7 +136,7 @@ namespace FWM::Styles
 		}
 	}
 
-	void Apply(RE::Actor* a_follower, const Orders& a_orders, Position a_resolved, bool a_committed)
+	void Apply(RE::Actor* a_follower, const Orders& a_orders, Position a_resolved, bool a_committed, bool a_spells, const StyleTweaks& a_tweaks)
 	{
 		auto* controller = Game::Controller(a_follower);
 		if (!controller) {
@@ -163,13 +165,21 @@ namespace FWM::Styles
 				return;
 			}
 		}
-		if (layered.role != a_orders.role || layered.position != a_resolved || layered.weight != weight || layered.committed != a_committed) {
-			const auto data = Layer(Read(layered.original), a_orders.role, a_resolved, weight);
+		if (layered.role != a_orders.role || layered.position != a_resolved || layered.weight != weight || layered.committed != a_committed ||
+			layered.spells != a_spells || !(layered.tweaks == a_tweaks)) {
+			auto data = Layer(Read(layered.original), a_orders.role, a_resolved, weight);
+			if (a_spells) {
+				// The chosen spells come first; a bow is for when they cannot be cast.
+				data.rangedScore *= 0.1f;
+			}
+			data = Tweaked(data, a_tweaks);
 			Write(layered.ours, layered.original, a_committed ? Committed(data) : data);
 			layered.role = a_orders.role;
 			layered.position = a_resolved;
 			layered.weight = weight;
 			layered.committed = a_committed;
+			layered.spells = a_spells;
+			layered.tweaks = a_tweaks;
 			if (Settings::Get().logDecisions) {
 				Log::Info("[Style] {} fights as {} ({}), over {:08X}."sv, Game::Name(a_follower), Info(a_orders.role).name,
 					Info(a_resolved).name, layered.original ? layered.original->GetFormID() : 0);

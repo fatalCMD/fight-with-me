@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FWM/Orders.h"
+#include "FWM/Paths.h"
 #include "FWM/Rules.h"
 
 // What the battle plan draws: a copy of the fight taken on the main thread, so the
@@ -13,6 +14,43 @@ namespace FWM::View
 		float x{ 0.0f };
 		float y{ 0.0f };
 		bool  on{ false };  // in front of the camera and on screen
+	};
+
+	// A spell a mage or healer may hold: one of theirs, or one of yours they would be taught.
+	struct Spell
+	{
+		RE::FormID        id{ 0 };
+		std::string       name;
+		Rules::School     school{ Rules::School::kOther };
+		Rules::SpellTier  tier{ Rules::SpellTier::kNovice };
+		float             cost{ 0.0f };
+		bool              known{ true };
+		bool              healing{ false };
+		bool              left{ true };   // fits the left hand
+		bool              right{ true };  // fits the right hand
+		bool              twoHanded{ false };  // takes both hands at once
+	};
+
+	// Something one of the party's abilities has put on a companion for a while, good or bad: a
+	// taunt's armor, Rejuvenate, a bodyguard run, running out of magicka. A small icon on their
+	// crest, its ring running down.
+	struct Status
+	{
+		enum class Tint : std::uint8_t
+		{
+			kBuff,
+			kDebuff,
+			kArmor,
+			kMagicka
+		};
+
+		std::string   name;
+		std::string   detail;  // what it does
+		std::uint32_t glyph{ 0 };
+		Tint          tint{ Tint::kBuff };
+		float         left{ -1.0f };      // seconds; below zero it has no clock
+		float         length{ 0.0f };     // all of it, for the ring
+		float         progress{ -1.0f };  // without a clock: how far along, 0..1, for the ring
 	};
 
 	struct Member
@@ -31,6 +69,7 @@ namespace FWM::View
 		float       stamina{ 1.0f };
 		bool        inCombat{ false };
 		bool        down{ false };  // bleeding out
+		bool        drained{ false };  // out of magicka: fighting with a weapon or a bow until it comes back
 		RE::FormID  target{ 0 };
 		std::string targetName;
 		RE::FormID  marked{ 0 };
@@ -43,21 +82,44 @@ namespace FWM::View
 		int   tauntNever{ 0 };
 		float tauntHold{ 0.0f };
 		float tauntStamina{ 0.0f };
+		float tauntArmor{ 0.0f };  // braced with after each taunt
+		float tauntArmorSeconds{ 0.0f };
 
-		bool        canHeal{ false };
-		std::string healSpell;
-		bool        healBorrowed{ false };
-		float       healAmount{ 0.0f };
-		float       healCost{ 0.0f };
+		// Mages and healers: the spell chosen for each hand (id 0: their own choice), and
+		// what they may choose from. The list is filled only out of a fight.
+		std::array<Spell, 2> hands{};
+		std::vector<Spell>   spellOptions;
+
+		float       healAmount{ 0.0f };  // a healer's heal: health for everyone it reaches
 		float       healReady{ 0.0f };
+		float       rejuvenateReady{ 0.0f };
+		float       rejuvenateCooldown{ 0.0f };
+		float       rejuvenateSeconds{ 0.0f };  // how long theirs would last
+		float       rejuvenated{ 0.0f };        // seconds left on a Rejuvenate on them, 0 for none
+		std::vector<Status> statuses;  // buffs and debuffs from the party's abilities
 
 		Special     special{ Special::kNone };  // the role's special, and how soon it is ready
 		float       specialReady{ 0.0f };
 		float       specialCooldown{ 0.0f };
 		bool        guarding{ false };          // a bodyguard at your side
 
-		int  potionHealing{ 0 }, potionMagicka{ 0 }, potionStamina{ 0 }, potionOther{ 0 };
-		bool brewing{ false };
+		// With the Paths add-on: every path's ranks and slots, the points, and the two
+		// abilities carried, each with its own clock.
+		struct Carried
+		{
+			Paths::Ability ability{ Paths::Ability::kNone };
+			float          ready{ 0.0f };
+			float          cooldown{ 0.0f };
+		};
+		bool                                 paths{ false };
+		Paths::Record                        record;
+		int                                  pointsEarned{ 0 };
+		int                                  pointsSpent{ 0 };
+		int                                  pointsAbove{ 10 };
+		bool                                 respec{ false };
+		bool                                 unlimited{ false };         // unlimited points are on: a cheater
+		bool                                 unlimitedAllowed{ false };  // the button is offered
+		std::array<Carried, Paths::kSlots>   carried{};
 
 		bool        asked{ false };      // a taunt or heal the player asked for, not yet answered
 		std::string answer;              // what came of the last one
@@ -91,6 +153,11 @@ namespace FWM::View
 		std::string name;
 		int         level{ 1 };
 		float       health{ 1.0f };
+		float       magicka{ 1.0f };
+		float       stamina{ 1.0f };
+		float       healthNow{ 0.0f }, healthMax{ 0.0f };
+		float       magickaNow{ 0.0f }, magickaMax{ 0.0f };
+		float       staminaNow{ 0.0f }, staminaMax{ 0.0f };
 		bool        caster{ false };
 		bool        healer{ false };
 		bool        archer{ false };
@@ -115,7 +182,9 @@ namespace FWM::View
 		Point               playerFoot;
 		std::vector<Point>  playerRing;
 		bool                walkWithMe{ false };
-		bool                lendHeal{ false };  // companions with no heal may still be Healers
+		bool                autoBattle{ false };    // companions start fights with enemies they see
+		bool                drawOnSight{ true };    // and bring weapons out at the sight of one
+		bool                paths{ false };         // Paths - Follower Ability Skilltree is loaded and agrees on the trees
 		Formation           formation{ Formation::kUnknown };
 		int                 playerLevel{ 1 };
 		std::vector<Member> party;  // companions first, then summons

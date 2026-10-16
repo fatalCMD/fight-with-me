@@ -2,11 +2,14 @@
 
 #include "FWM/Battle.h"
 #include "FWM/Camera.h"
+#include "FWM/Effects.h"
 #include "FWM/Forms.h"
 #include "FWM/Log.h"
 #include "FWM/Menu.h"
 #include "FWM/Overrides.h"
 #include "FWM/Party.h"
+#include "FWM/PathBonus.h"
+#include "FWM/PathsLink.h"
 #include "FWM/Save.h"
 #include "FWM/Settings.h"
 #include "FWM/TimeBend.h"
@@ -58,12 +61,15 @@ namespace
 		switch (a_message->type) {
 		case SKSE::MessagingInterface::kPostLoad:
 			FWM::WalkWithMe::Connect();
+			FWM::PathsLink::Connect();
 			FWM::Camera::RegisterSmoothCam();
 			break;
 		case SKSE::MessagingInterface::kDataLoaded:
 			FWM::Forms::Resolve();
+			FWM::Effects::Install();
 			FWM::TimeBend::Register();
 			FWM::Overrides::Install();
+			FWM::PathBonus::Install();
 			PlayerUpdate::Install();
 			FWM::Camera::Install();
 			FWM::Camera::RequestSmoothCam();

@@ -23,6 +23,12 @@ namespace FWM::TimeBend
 			static RE::IMenu* Create() { return new PauseMenu(); }
 		};
 
+		// What KeepClear lifted, to give back on close; and whether the log has said so.
+		bool unfroze{ false };
+		bool unblurred{ false };
+		bool toldFreeze{ false };
+		bool toldBlur{ false };
+
 		bool  wanted{ false };
 		bool  active{ false };
 		bool  paused{ false };
@@ -145,6 +151,48 @@ namespace FWM::TimeBend
 			active = false;
 			lastSet = -1.0f;
 			StopEffect();
+		}
+	}
+
+	void KeepClear()
+	{
+		// Menu Framework sets this once when its lock starts and clears it when the lock ends,
+		// so clearing it here holds until then.
+		if (auto* main = RE::Main::GetSingleton(); main && main->GetRuntimeData().freezeTime) {
+			main->GetRuntimeData().freezeTime = false;
+			unfroze = true;
+			if (!toldFreeze) {
+				toldFreeze = true;
+				Log::Info("[Time] The world was frozen under the battle plan (Menu Framework's FreezeTimeOnMenu); lifted while the plan is open."sv);
+			}
+		}
+		// The menu blur is one image-space effect shared by everyone who counts on it. The count
+		// is left alone; only the effect is stopped, and restarted on close if still wanted.
+		if (auto* blur = RE::UIBlurManager::GetSingleton(); blur && blur->blurCount > 0 && blur->blurEffect) {
+			RE::ImageSpaceModifierInstanceForm::Stop(blur->blurEffect);
+			unblurred = true;
+			if (!toldBlur) {
+				toldBlur = true;
+				Log::Info("[Time] The menu blur was on under the battle plan (Menu Framework's BlurBackgroundOnMenu or another menu); kept off while the plan is open."sv);
+			}
+		}
+	}
+
+	void HandBack(bool a_menuStillOpen)
+	{
+		if (unblurred) {
+			unblurred = false;
+			if (auto* blur = RE::UIBlurManager::GetSingleton(); blur && blur->blurCount > 0 && blur->blurEffect) {
+				RE::ImageSpaceModifierInstanceForm::Trigger(blur->blurEffect, 1.0f, nullptr);  // the strength the game turns it on with
+			}
+		}
+		if (unfroze) {
+			unfroze = false;
+			if (a_menuStillOpen) {
+				if (auto* main = RE::Main::GetSingleton()) {
+					main->GetRuntimeData().freezeTime = true;
+				}
+			}
 		}
 	}
 

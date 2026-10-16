@@ -112,6 +112,19 @@ namespace FWM::Game
 		return a_actor ? a_actor->GetActorRuntimeData().currentCombatTarget.get() : nullptr;
 	}
 
+	bool Stagger(RE::Actor* a_target, float a_magnitude, RE::Actor* a_aggressor)
+	{
+		if (!a_target) {
+			return false;
+		}
+		// What StaggerEffect and DisarmEffect call (SE 36700): target, magnitude, aggressor,
+		// which may be null and only sets the direction.
+		using func_t = void(RE::Actor*, float, RE::Actor*);
+		static REL::Relocation<func_t> stagger{ RELOCATION_ID(36700, 37710) };
+		stagger(a_target, std::clamp(a_magnitude, 0.0f, 1.0f), a_aggressor);
+		return a_target->AsActorState()->IsStaggered();
+	}
+
 	Loadout LoadoutOf(RE::Actor* a_actor)
 	{
 		auto* left = a_actor->GetEquippedObject(true);
@@ -213,20 +226,6 @@ namespace FWM::Game
 		return false;
 	}
 
-	float HealAmount(const RE::SpellItem* a_spell, float a_concentrationSeconds)
-	{
-		float amount = 0.0f;
-		for (const auto* effect : a_spell->effects) {
-			if (Restores(effect)) {
-				amount = std::max(amount, effect->effectItem.magnitude);
-			}
-		}
-		if (a_spell->GetCastingType() == RE::MagicSystem::CastingType::kConcentration) {
-			amount *= a_concentrationSeconds;
-		}
-		return amount;
-	}
-
 	Magic MagicOf(RE::Actor* a_actor, RE::Actor* a_patient)
 	{
 		Magic magic;
@@ -255,10 +254,49 @@ namespace FWM::Game
 		return magic;
 	}
 
+	std::vector<RE::SpellItem*> SpellsOf(RE::Actor* a_actor)
+	{
+		std::vector<RE::SpellItem*> out;
+		if (a_actor) {
+			ForEachSpell(a_actor, [&](RE::SpellItem* a_spell) { out.push_back(a_spell); });
+		}
+		return out;
+	}
+
+	bool IsHeal(const RE::SpellItem* a_spell)
+	{
+		return a_spell && std::any_of(a_spell->effects.begin(), a_spell->effects.end(), [](const RE::Effect* a_effect) { return Restores(a_effect); });
+	}
+
 	bool HealsParty(RE::Actor* a_actor)
 	{
 		// A vampire player can be out of Heal Other's reach; the other companions still count.
 		return MagicOf(a_actor, RE::PlayerCharacter::GetSingleton()).healOther || MagicOf(a_actor, a_actor).healOther;
+	}
+
+	float CheapestCast(RE::Actor* a_actor)
+	{
+		float cheapest = 0.0f;
+		if (!a_actor) {
+			return cheapest;
+		}
+		ForEachSpell(a_actor, [&](RE::SpellItem* a_spell) {
+			if (a_spell->GetSpellType() != RE::MagicSystem::SpellType::kSpell ||
+				a_spell->GetCastingType() == RE::MagicSystem::CastingType::kConstantEffect) {
+				return;
+			}
+			auto hostile = [](const RE::Effect* a_effect) { return a_effect && a_effect->baseEffect && a_effect->baseEffect->IsHostile(); };
+			const bool aimed = a_spell->GetDelivery() != RE::MagicSystem::Delivery::kSelf &&
+			                   std::any_of(a_spell->effects.begin(), a_spell->effects.end(), hostile);
+			if (!aimed && !IsHeal(a_spell)) {
+				return;
+			}
+			const float cost = a_spell->CalculateMagickaCost(a_actor);
+			if (cost > 0.0f && (cheapest <= 0.0f || cost < cheapest)) {
+				cheapest = cost;
+			}
+		});
+		return cheapest;
 	}
 
 	Arsenal ArsenalOf(RE::Actor* a_actor)
@@ -285,7 +323,7 @@ namespace FWM::Game
 				arsenal.ranged = crossbow = true;
 				break;
 			case RE::WEAPON_TYPE::kStaff:
-				arsenal.casts = true;
+				arsenal.casts = arsenal.staff = true;
 				break;
 			default:
 				break;
@@ -312,6 +350,7 @@ namespace FWM::Game
 		arsenal.ammo = !arsenal.ranged || (bow && arrows) || (crossbow && bolts);
 		arsenal.casts = arsenal.casts || MagicOf(a_actor).offensive;
 		arsenal.heals = HealsParty(a_actor);
+		arsenal.castCost = CheapestCast(a_actor);
 		return arsenal;
 	}
 

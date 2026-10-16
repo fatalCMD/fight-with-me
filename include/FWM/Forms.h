@@ -7,13 +7,11 @@ namespace FWM::Forms
 {
 	struct Set
 	{
-		RE::TESEffectShader*        glow{ nullptr };
 		RE::TESEffectShader*        markGlow{ nullptr };
 		RE::BGSSoundDescriptorForm* tauntSound{ nullptr };
 		RE::TESIdleForm*            idleShield{ nullptr };
 		RE::TESIdleForm*            idleWeapon{ nullptr };
 		RE::TESIdleForm*            idleCry{ nullptr };
-		RE::SpellItem*              fallbackHeal{ nullptr };
 		RE::TESImageSpaceModifier*  imodIntro{ nullptr };
 		RE::TESImageSpaceModifier*  imodHold{ nullptr };
 
@@ -25,19 +23,27 @@ namespace FWM::Forms
 
 		RE::TESFaction* nffRole{ nullptr };  // nwsFF_RoleFac: 0 Standard, 1 Healer, 2 Tank
 
+		// A healer's or mage's ability: a gesture with magic in hand, the absorb spells' green or
+		// blue glow in both hands, and the restoration or ward sound.
+		RE::TESIdleForm*            idleMagic{ nullptr };        // IdleMagic_01
+		RE::BGSArtObject*           handsGreen{ nullptr };       // AbsorbGreenHandFX01
+		RE::BGSArtObject*           handsBlue{ nullptr };        // AbsorbBlueHandFX01
+		RE::BGSSoundDescriptorForm* healSound{ nullptr };        // MAGRestorationFFFireSD
+		RE::BGSSoundDescriptorForm* rejuvenateSound{ nullptr };  // MAGWardTestCastSD
+
+		// Paths abilities
+		RE::BGSKeyword*               undead{ nullptr };  // ActorTypeUndead: Sun's Bane burns them
+		// Elemental Burst: [element][tier], fire, frost, shock by Apprentice, Adept, Expert
+		std::array<std::array<RE::SpellItem*, 3>, 3> bursts{};
+		RE::SpellItem*                flameCloak{ nullptr };
+		RE::TESAmmo*                  ironArrow{ nullptr };  // what a fletcher makes with nothing else to copy
+		RE::BGSSoundDescriptorForm*   quakeSound{ nullptr };  // a giant's club on dirt: Earthshaker
+		RE::BGSSoundDescriptorForm*   cleaveSound{ nullptr };  // a two-handed blow landing: Cleave, Sunder
+		std::array<RE::BGSSoundDescriptorForm*, 2> chicken{};  // a cluck and a squawk, for companions with unlimited points
+
 		// Specials
 		std::array<RE::SpellItem*, 4> flesh{};   // Oakflesh, Stoneflesh, Ironflesh, Ebonyflesh
 		std::array<RE::TESEffectShader*, 4> fleshShaders{};  // the bark, stone, iron and ebony skins they show
-		std::array<RE::SpellItem*, 3> disarm{};  // VoiceDisarm1-3
-
-		// Potions, weakest first. Restore: Minor to Ultimate; resist: 25 to 100%;
-		// fortify: 01 to 05.
-		std::array<RE::AlchemyItem*, 6> healingPotions{}, magickaPotions{}, staminaPotions{};
-		std::array<RE::AlchemyItem*, 4> resistFire{}, resistFrost{}, resistShock{}, resistMagic{};
-		std::array<RE::AlchemyItem*, 5> fortifyHealth{}, fortifyMagicka{}, fortifyStamina{}, fortifyHealRate{};
-		RE::TESIdleForm*                idleDrink{ nullptr };
-		RE::TESIdleForm*                idleBrew{ nullptr };      // IdleAlchemyEnter
-		RE::TESIdleForm*                idleBrewDone{ nullptr };  // IdleAlchemyExit
 	};
 
 	void Resolve();

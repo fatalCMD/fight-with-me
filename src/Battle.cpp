@@ -1,8 +1,10 @@
 #include "FWM/Battle.h"
 
 #include "FWM/Abilities.h"
+#include "FWM/Arts.h"
 #include "FWM/Enemies.h"
 #include "FWM/Camera.h"
+#include "FWM/Effects.h"
 #include "FWM/Forms.h"
 #include "FWM/Game.h"
 #include "FWM/Hud.h"
@@ -10,11 +12,14 @@
 #include "FWM/Log.h"
 #include "FWM/Notices.h"
 #include "FWM/Overrides.h"
-#include "FWM/Potions.h"
 #include "FWM/Specials.h"
 #include "FWM/Party.h"
+#include "FWM/PathBonus.h"
+#include "FWM/PathsLink.h"
 #include "FWM/Rules.h"
 #include "FWM/Settings.h"
+#include "FWM/Sight.h"
+#include "FWM/Spells.h"
 #include "FWM/Styles.h"
 #include "FWM/TimeBend.h"
 #include "FWM/WalkWithMe.h"
@@ -27,6 +32,7 @@ namespace FWM::Battle
 		float decideIn{ 0.0f };
 		float pendingDt{ 0.0f };
 		float statsIn{ 30.0f };
+		float glowIn{ 0.0f };  // until the ability glows are brought up to date
 		bool  fighting{ false };
 		float emptyFor{ 0.0f };  // seconds the fight has had nobody left to fight
 
@@ -103,6 +109,12 @@ namespace FWM::Battle
 			return false;
 		}
 
+		bool InAFight()
+		{
+			auto* player = RE::PlayerCharacter::GetSingleton();
+			return fighting || (player && AnyoneFighting(player));
+		}
+
 		int standDowns{ 0 };  // tries this fight at letting companions out of an empty fight
 
 		bool SetOrders(RE::FormID a_id, const Orders& a_orders);
@@ -115,6 +127,7 @@ namespace FWM::Battle
 			a_member.marked = {};
 			a_member.markFor = 0.0f;
 			a_member.markEngageIn = 0.0f;
+			a_member.markAway = 0.0f;
 			a_member.markAsks = 0;
 			a_member.markTaken = false;
 			a_member.markWarned = false;
@@ -214,6 +227,8 @@ namespace FWM::Battle
 			Styles::Press({});
 			StopMarkGlows();
 			Specials::Clear();
+			Arts::Clear();
+			PathBonus::StandDown();
 			Game::ForgetHeads();
 			emptyFor = 0.0f;
 			standDowns = 0;
@@ -231,7 +246,34 @@ namespace FWM::Battle
 				member.armed = false;
 				member.warnedAmmo = false;
 				member.rightHand = nullptr;
+				member.drained = false;
+				member.drainedTold = false;
+				member.handsChecked = false;
+				member.spellIdle = 0.0f;
+				member.spellReady = {};
+				member.spellTold = {};
+				if (member.spellsDriven > 0) {
+					Log::Info("[Spells] {}: {} chosen spell(s) cast for them this fight; the combat AI {} one itself."sv, member.name, member.spellsDriven,
+						member.spellsByAi ? "also cast"sv : "never cast"sv);
+				}
+				member.spellsByAi = false;
+				member.spellsDriven = 0;
 			}
+		}
+
+		// Mages' and healers' chosen spells, by actor, for the combat AI hooks: kept up out of a
+		// fight too, so the AI's first pick when one starts already holds to them.
+		void PublishHands()
+		{
+			std::vector<Overrides::HandsEntry> chosen;
+			for (const auto& member : Party::Members()) {
+				const auto* orders = member.summon ? nullptr : Party::FindOrders(member.id);
+				const auto  hands = orders && ChoosesSpells(orders->role) ? Party::HandsOf(member.id) : Hands{};
+				if (hands != Hands{}) {
+					chosen.push_back({ Game::Native(member.handle), member.handle.get().get(), hands });
+				}
+			}
+			Overrides::PublishHands(std::move(chosen));
 		}
 
 		// The best bow or crossbow someone carries, and arrows (or bolts) for it.
@@ -281,6 +323,119 @@ namespace FWM::Battle
 			return kit;
 		}
 
+		// The best blade they carry: two-handed first for a bruiser, one-handed first for anyone
+		// else (a tank wants the shield hand free), then by damage.
+		RE::TESObjectWEAP* BestBlade(RE::Actor* a_actor, Role a_role)
+		{
+			RE::TESObjectWEAP* best = nullptr;
+			float              bestRank = -1.0f;
+			const auto         items = a_actor->GetInventory([](RE::TESBoundObject& a_object) { return a_object.IsWeapon(); });
+			for (const auto& [object, entry] : items) {
+				auto* weapon = object && entry.first > 0 ? object->As<RE::TESObjectWEAP>() : nullptr;
+				if (!weapon || !weapon->IsMelee() || weapon->IsBound()) {
+					continue;
+				}
+				const bool  twoHanded = weapon->IsTwoHandedSword() || weapon->IsTwoHandedAxe();
+				const bool  preferred = a_role == Role::kBruiser ? twoHanded : !twoHanded;
+				const float rank = (preferred ? 1000.0f : 0.0f) + static_cast<float>(weapon->GetAttackDamage());
+				if (rank > bestRank) {
+					best = weapon;
+					bestRank = rank;
+				}
+			}
+			return best;
+		}
+
+		RE::TESObjectARMO* BestShield(RE::Actor* a_actor)
+		{
+			RE::TESObjectARMO* best = nullptr;
+			const auto         items = a_actor->GetInventory([](RE::TESBoundObject& a_object) { return a_object.IsArmor(); });
+			for (const auto& [object, entry] : items) {
+				auto* armor = object && entry.first > 0 ? object->As<RE::TESObjectARMO>() : nullptr;
+				if (armor && armor->IsShield() && (!best || armor->GetArmorRating() > best->GetArmorRating())) {
+					best = armor;
+				}
+			}
+			return best;
+		}
+
+		std::string KitText(const RangedKit& a_kit);
+
+		// What their role fights with, in their hands: when the player gives them the role, and
+		// when a fight opens with something else there. A blade for a fighter, bruiser or tank (and
+		// a shield for a tank's free hand), a bow and arrows for an archer, the chosen spells for
+		// a mage or healer with any weapon put away. Only what they carry; nothing if it is already
+		// right. Returns what went into their hands, for the log.
+		std::string ArmFor(RE::Actor* a_actor, Role a_role)
+		{
+			auto* equip = RE::ActorEquipManager::GetSingleton();
+			if (!equip || !a_actor) {
+				return {};
+			}
+			auto*       right = a_actor->GetEquippedObject(false);
+			const auto* held = right ? right->As<RE::TESObjectWEAP>() : nullptr;
+			switch (a_role) {
+			case Role::kFighter:
+			case Role::kBruiser:
+			case Role::kTank:
+				{
+					if (held && held->IsMelee()) {
+						return {};
+					}
+					auto* blade = BestBlade(a_actor, a_role);
+					if (!blade) {
+						return {};
+					}
+					equip->EquipObject(a_actor, blade);
+					std::string what = blade->GetName();
+					const bool  twoHanded = blade->IsTwoHandedSword() || blade->IsTwoHandedAxe();
+					if (a_role == Role::kTank && !twoHanded) {
+						if (auto* shield = BestShield(a_actor)) {
+							equip->EquipObject(a_actor, shield);
+							what += std::format(" and {}", shield->GetName());
+						}
+					}
+					return what;
+				}
+			case Role::kArcher:
+				{
+					if (held && (held->IsBow() || held->IsCrossbow())) {
+						return {};
+					}
+					const auto kit = KitOf(a_actor);
+					if (!kit.weapon || !kit.ammo) {
+						return {};
+					}
+					if (a_actor->GetCurrentAmmo() != kit.ammo) {
+						equip->EquipObject(a_actor, kit.ammo);
+					}
+					equip->EquipObject(a_actor, kit.weapon);
+					return KitText(kit);
+				}
+			case Role::kMage:
+			case Role::kHealer:
+				{
+					std::string away;
+					for (const bool left : { false, true }) {
+						auto* form = a_actor->GetEquippedObject(left);
+						if (auto* weapon = form ? form->As<RE::TESObjectWEAP>() : nullptr; weapon && !weapon->IsBound()) {
+							equip->UnequipObject(a_actor, weapon);
+							away = weapon->GetName();
+						}
+					}
+					auto spells = Spells::EquipChosen(a_actor);
+					if (away.empty() && spells.empty()) {
+						return {};
+					}
+					return spells.empty() ? std::format("hands free ({} put away)", away) :
+					       away.empty()   ? spells :
+					                        std::format("{} ({} put away)", spells, away);
+				}
+			default:
+				return {};
+			}
+		}
+
 		std::string KitText(const RangedKit& a_kit)
 		{
 			if (!a_kit.weapon) {
@@ -312,6 +467,15 @@ namespace FWM::Battle
 			const bool  steel = weapon && weapon->IsMelee();
 			if (!a_member.armed) {
 				a_member.armed = true;
+				// Into the fight holding what the last role used (a bow on a fighter, a dagger on a
+				// mage): what this role fights with goes into their hands now, once.
+				if (a_orders.role != Role::kArcher) {  // archers have their own check below
+					if (const auto armed = ArmFor(a_actor, a_orders.role); !armed.empty()) {
+						Log::Info("[Style] {} came into the fight holding {}; as a {}, {} instead."sv, a_member.name, right ? right->GetName() : "nothing",
+							Info(a_orders.role).name, armed);
+						right = a_actor->GetEquippedObject(false);
+					}
+				}
 				if (a_orders.role == Role::kArcher) {
 					const auto kit = KitOf(a_actor);
 					auto*      equip = RE::ActorEquipManager::GetSingleton();
@@ -349,6 +513,46 @@ namespace FWM::Battle
 			if (a_orders.role == Role::kArcher && !kit.ammo) {
 				OutOfArrows(a_member, kit);
 			}
+		}
+
+		// Once a fight, a few seconds in: what the combat AI made of a mage's or healer's chosen
+		// spells. One it never took up, or took up for something other than an attack, is still
+		// theirs to cast; Spells::Drive casts it for them when the AI will not.
+		void ReportHands(Party::Member& a_member, RE::Actor* a_actor, RE::CombatController* a_controller, const Orders& a_orders)
+		{
+			if (a_member.handsChecked || !ChoosesSpells(a_orders.role) || a_member.inCombatFor < 4.0f) {
+				return;
+			}
+			a_member.handsChecked = true;
+			// What the combat AI has to choose from and what it holds: whether chosen spells are even in it.
+			auto held = [&](bool a_left) {
+				auto* form = a_actor->GetEquippedObject(a_left);
+				return form && form->GetName() && *form->GetName() ? std::string(form->GetName()) : "nothing"s;
+			};
+			Log::Info("[Spells] {} holds {} (left) and {} (right); the combat AI's inventory: {}."sv, a_member.name, held(true), held(false),
+				Overrides::DescribeInventory(a_controller));
+			const auto hands = Party::HandsOf(a_member.id);
+			const auto seen = Overrides::SeenHands(Game::Native(a_member.handle));
+			if (hands == Hands{} || !seen) {
+				return;
+			}
+			std::string detail;
+			for (const auto hand : { kLeftHand, kRightHand }) {
+				if (!hands[hand] || (hand == kRightHand && hands[kRightHand] == hands[kLeftHand])) {
+					continue;
+				}
+				const auto  bits = (*seen)[hand];
+				auto*       spell = RE::TESForm::LookupByID<RE::SpellItem>(hands[hand]);
+				std::string as;
+				for (std::size_t c = 0; c < static_cast<std::size_t>(Overrides::Caster::kCount); ++c) {
+					if (bits & (1u << c)) {
+						as += std::format("{}{}", as.empty() ? "" : ", ", Overrides::CasterName(static_cast<Overrides::Caster>(c)));
+					}
+				}
+				detail += std::format("{}{}: {}", detail.empty() ? "" : "; ", spell && spell->GetName() ? spell->GetName() : "?",
+					as.empty() ? "never taken up"s : "taken up as " + as);
+			}
+			Log::Info("[Spells] {}'s chosen spells as the combat AI sees them: {}."sv, a_member.name, detail);
 		}
 
 		// Weapons out with nobody left to fight: let companions out of combat so they fall
@@ -439,7 +643,7 @@ namespace FWM::Battle
 			const auto target = Game::Name(a_target);
 			if (a_member.arsenal.ranged && a_member.arsenal.ammo) {
 				a_member.markRanged = Role::kArcher;
-			} else if (a_member.arsenal.casts) {
+			} else if (a_member.arsenal.casts && !a_member.drained) {
 				a_member.markRanged = Role::kMage;
 			}
 			if (a_member.markRanged != Role::kCount) {
@@ -552,10 +756,24 @@ namespace FWM::Battle
 			}
 		}
 
+		// A mark ends this long after its enemy left the fight (fled, yielded, or was left
+		// behind), and after this many refusals to add it to the companion's fight. Otherwise
+		// the companion is pushed into a new fight with them every two seconds, for ever.
+		constexpr float kMarkAwaySeconds = 4.0f;
+		constexpr int   kMarkAsks = 5;
+
+		void DropMark(Party::Member& a_member, std::string_view a_why)
+		{
+			if (auto marked = a_member.marked.get()) {
+				Notices::Push(std::format("{} lets {} go: {}.", a_member.name, Game::Name(marked.get()), a_why), Notices::Kind::kWarning);
+			}
+			EndMark(a_member, a_why);
+		}
+
 		// The combat AI only takes a target its combat group already knows, so an enemy that
 		// has not fought this companion yet (or a companion not fighting at all) would be
 		// refused over and over. StartCombat adds the enemy to their fight, as a script's
-		// StartCombat does; asked again every two seconds until it holds.
+		// StartCombat does; asked again every two seconds until it holds, a few times at most.
 		void Engage(Party::Member& a_member, RE::Actor* a_actor, RE::CombatController* a_controller, float a_dt)
 		{
 			auto marked = a_member.marked.get();
@@ -566,6 +784,7 @@ namespace FWM::Battle
 			a_member.markEngageIn -= a_dt;
 			const bool inFight = a_actor->IsInCombat() && a_controller;
 			if (inFight && Overrides::Takes(a_controller, a_member.marked)) {
+				a_member.markAsks = 0;
 				if (a_controller->targetHandle == a_member.marked) {
 					if (!a_member.markTaken) {
 						a_member.markTaken = true;
@@ -575,23 +794,124 @@ namespace FWM::Battle
 				} else if (!a_member.markWarned && a_member.markFor > 4.0f) {
 					a_member.markWarned = true;
 					auto other = a_controller->targetHandle.get();
-					Log::Info("[Target] {} was sent after {} {:.0f} s ago but fights {}{}."sv, a_member.name, Game::Name(marked.get()), a_member.markFor,
-						other ? Game::Name(other.get()) : "nobody"s, a_member.reviving ? " (on the way to heal someone)" : "");
+					Log::Info("[Target] {} was sent after {} {:.0f} s ago but fights {}."sv, a_member.name, Game::Name(marked.get()), a_member.markFor,
+						other ? Game::Name(other.get()) : "nobody"s);
 				}
 				return;
 			}
 			if (a_member.markEngageIn > 0.0f) {
 				return;
 			}
+			if (a_member.markAsks >= kMarkAsks) {
+				Log::Info("[Target] {}: the combat AI would not take on {} after {} tries."sv, a_member.name, Game::Name(marked.get()), a_member.markAsks);
+				DropMark(a_member, "the combat AI would not take them on"sv);
+				return;
+			}
 			a_member.markEngageIn = 2.0f;
 			const bool taken = a_actor->StartCombat(marked.get());
-			if (++a_member.markAsks == 1 || a_member.markAsks == 5) {
-				const auto refused = taken ? ""s : std::format("; refused (try {})", a_member.markAsks);
+			if (++a_member.markAsks == 1 && !a_member.markTaken) {
+				const auto refused = taken ? ""s : "; refused"s;
 				if (inFight) {
 					Log::Info("[Target] {}'s fight did not include {}; asked the combat AI to add them{}."sv, a_member.name, Game::Name(marked.get()), refused);
 				} else {
 					Log::Info("[Target] {} was out of combat; asked the combat AI to start a fight with {}{}."sv, a_member.name, Game::Name(marked.get()), refused);
 				}
+			}
+		}
+
+		// The glows that last as long as an ability does: red on every enemy a taunt holds, gold
+		// on a tank while the taunt's armor is on, orange on a volley's target. Each goes out the
+		// moment its hold, brace or volley ends.
+		void ShowAbilities()
+		{
+			std::vector<RE::NiPointer<RE::Actor>>     alive;  // kept for the length of the call
+			std::vector<std::pair<RE::Actor*, float>> on;
+			auto show = [&](Effects::Look a_look) {
+				Effects::Keep(a_look, on);
+				on.clear();
+			};
+			auto add = [&](RE::NiPointer<RE::Actor> a_actor, float a_seconds) {
+				if (a_actor) {
+					on.emplace_back(a_actor.get(), a_seconds);
+					alive.push_back(std::move(a_actor));
+				}
+			};
+			// The tank glows while braced or holding anyone, whichever lasts longer.
+			std::vector<std::pair<RE::FormID, float>> tanks;
+			auto tankFor = [&](RE::FormID a_id, float a_seconds) {
+				const auto it = std::find_if(tanks.begin(), tanks.end(), [&](const auto& a_tank) { return a_tank.first == a_id; });
+				if (it == tanks.end()) {
+					tanks.emplace_back(a_id, a_seconds);
+				} else {
+					it->second = std::max(it->second, a_seconds);
+				}
+			};
+			for (const auto& hold : Abilities::Holds()) {
+				add(hold.enemy.get(), hold.remaining);
+				if (auto tank = hold.tank.get()) {
+					tankFor(tank->GetFormID(), hold.remaining);
+				}
+			}
+			show(Effects::Look::kHeld);
+			for (const auto& [id, left] : Abilities::BraceTimes()) {
+				tankFor(id, left);
+			}
+			for (const auto& [id, seconds] : tanks) {
+				add(RE::NiPointer<RE::Actor>(RE::TESForm::LookupByID<RE::Actor>(id)), seconds);
+			}
+			show(Effects::Look::kBraced);
+			add(Specials::VolleyTarget().get(), Specials::VolleyLeft());
+			show(Effects::Look::kQuarry);
+			Arts::Show();
+		}
+
+		// The magicka the cheapest spell they would cast takes: of the two chosen for their hands
+		// when both are chosen, else of anything they know that hurts or heals.
+		float CastCost(const Party::Member& a_member, RE::Actor* a_actor)
+		{
+			const auto hands = Party::HandsOf(a_member.id);
+			if (!hands[kLeftHand] || !hands[kRightHand]) {
+				return a_member.arsenal.castCost;
+			}
+			float cheapest = 0.0f;
+			for (const auto id : hands) {
+				if (auto* spell = RE::TESForm::LookupByID<RE::SpellItem>(id)) {
+					const float cost = spell->CalculateMagickaCost(a_actor);
+					if (cost > 0.0f && (cheapest <= 0.0f || cost < cheapest)) {
+						cheapest = cost;
+					}
+				}
+			}
+			return cheapest;
+		}
+
+		// A caster out of magicka has nothing to fight with but what their style is not built
+		// for. Dry, a mage or healer falls back and lets it come back (a healer's Rejuvenate
+		// speeds that), then returns to where they were told to stand. A staff needs no
+		// magicka, so whoever carries one never runs dry.
+		void Drain(Party::Member& a_member, RE::Actor* a_actor, const Orders& a_orders)
+		{
+			const bool  caster = ChoosesSpells(a_orders.role) || a_member.arsenal.casts;
+			const float cost = caster && !a_member.arsenal.staff ? CastCost(a_member, a_actor) : 0.0f;
+			const float magicka = Game::Current(a_actor, RE::ActorValue::kMagicka);
+			const float most = Game::Maximum(a_actor, RE::ActorValue::kMagicka);
+			const bool  drained = Rules::OutOfMagicka(magicka, most, cost, a_member.drained);
+			if (drained == a_member.drained) {
+				return;
+			}
+			a_member.drained = drained;
+			if (!ChoosesSpells(a_orders.role)) {
+				return;  // a fighter who also casts: only casting at what they cannot reach stops
+			}
+			if (!drained) {
+				Log::Info("[Style] {} has magicka again ({:.0f} of {:.0f}); back to their place."sv, a_member.name, magicka, most);
+				return;
+			}
+			Log::Info("[Style] {} is out of magicka ({:.0f} of {:.0f}; the cheapest spell takes {:.0f}); falls back until it comes back."sv, a_member.name,
+				magicka, most, cost);
+			if (!a_member.drainedTold) {
+				a_member.drainedTold = true;
+				Notices::Push(std::format("{} is out of magicka and falls back to recover.", a_member.name), Notices::Kind::kWarning);
 			}
 		}
 
@@ -624,10 +944,17 @@ namespace FWM::Battle
 				auto actor = member.handle.get();
 				auto* controller = actor ? Game::Controller(actor.get()) : nullptr;
 				if (member.marked) {
+					// Still in the fight: among the enemies the player or someone in the party is
+					// fighting. Only then is the companion pushed into a fight with them.
 					auto marked = member.marked.get();
+					member.markAway = marked && Enemies::Find(member.marked) ? 0.0f : member.markAway + a_dt;
 					if (!marked || marked->IsDead() || marked->IsDisabled()) {
 						EndMark(member, marked && marked->IsDead() ? "they are dead"sv : "they are gone"sv);
-					} else if (actor && Game::Usable(actor.get()) && !actor->AsActorState()->IsBleedingOut()) {
+					} else if (!marked->Is3DLoaded()) {
+						DropMark(member, "they are too far away"sv);
+					} else if (member.markAway > kMarkAwaySeconds) {
+						DropMark(member, "they left the fight"sv);
+					} else if (member.markAway == 0.0f && actor && Game::Usable(actor.get()) && !actor->AsActorState()->IsBleedingOut()) {
 						Engage(member, actor.get(), controller, a_dt);
 						controller = Game::Controller(actor.get());  // StartCombat may have made one
 					}
@@ -637,6 +964,7 @@ namespace FWM::Battle
 					member.armed = false;
 					member.warnedAmmo = false;
 					member.rightHand = nullptr;
+					member.drained = false;
 					continue;
 				}
 				const auto* own = Party::FindOrders(member.id);
@@ -644,7 +972,7 @@ namespace FWM::Battle
 					continue;
 				}
 				const auto orders = *own;
-				const auto resolved = Resolve(orders.position, formation);
+				auto       resolved = Resolve(orders.position, formation);
 				const bool down = actor->AsActorState()->IsBleedingOut();
 				if (member.down && !down) {
 					Log::Info("[Battle] {} is back up: {}, {}."sv, member.name, Info(orders.role).name, Info(resolved).name);
@@ -656,6 +984,13 @@ namespace FWM::Battle
 				auto fightAs = orders;
 				if (orders.role == Role::kArcher && member.arsenalKnown && !member.arsenal.ammo) {
 					fightAs.role = Role::kFighter;
+				}
+				// Out of magicka, a mage or healer falls back and lets it come back, wherever they were
+				// told to stand.
+				Drain(member, actor.get(), orders);
+				const bool recovering = member.drained && ChoosesSpells(orders.role);
+				if (recovering) {
+					resolved = Position::kHoldBack;
 				}
 				// Who they cannot get to on foot: forget those they reached after all, and note the
 				// one they are on if the combat AI has already found there is no way.
@@ -676,7 +1011,7 @@ namespace FWM::Battle
 					}
 					markLive = member.marked && Party::FindOrders(member.id) && Party::FindOrders(member.id)->focus == Focus::kMarked;
 				}
-				if (markLive && member.markRanged != Role::kCount) {
+				if (markLive && member.markRanged != Role::kCount && !(member.markRanged == Role::kMage && member.drained)) {
 					fightAs.role = member.markRanged;
 				} else if (!Rules::IsRanged(fightAs.role)) {
 					// Nobody left that they can get to: a bow or spells, if they have them, beat
@@ -688,7 +1023,7 @@ namespace FWM::Battle
 					Role instead = Role::kCount;
 					if (nobody && member.arsenal.ranged && member.arsenal.ammo) {
 						instead = Role::kArcher;
-					} else if (nobody && member.arsenal.casts) {
+					} else if (nobody && member.arsenal.casts && !member.drained) {
 						instead = Role::kMage;
 					}
 					if (instead != member.reachRole) {
@@ -703,27 +1038,27 @@ namespace FWM::Battle
 						fightAs.role = instead;
 					}
 				}
-				const bool charge = markLive && !Rules::IsRanged(fightAs.role);
-				Styles::Apply(actor.get(), fightAs, charge ? Position::kFrontLine : resolved, charge);
-				if (auto patient = member.reviving.get()) {
-					// A little inside arm's reach, so they arrive close enough to heal.
-					Leash::Apply(actor.get(), std::max(settings.tuning.reviveDistance - 60.0f, 100.0f), patient.get());
-					member.leashOnPatient = true;
-				} else if (member.guardFor > 0.0f) {
+				const bool charge = markLive && !recovering && !Rules::IsRanged(fightAs.role);
+				const bool spellsChosen = ChoosesSpells(fightAs.role) && Party::HandsOf(member.id) != Hands{};
+				Styles::Apply(actor.get(), fightAs, charge ? Position::kFrontLine : resolved, charge, spellsChosen,
+					Arts::TweaksFor(member.id, PathsLink::KitOf(member.id, orders.role)));
+				if (member.guardFor > 0.0f) {
 					// Bodyguard: at your side, whatever their position.
 					Leash::Apply(actor.get(), 220.0f, a_player);
-					member.leashOnPatient = true;
-				} else if (settings.guardLeash || member.leashOnPatient) {
-					member.leashOnPatient = false;
+					member.leashMoved = true;
+				} else if (settings.guardLeash || member.leashMoved) {
+					member.leashMoved = false;
 					float leash = 0.0f;
-					if (markLive) {
+					if (markLive && !recovering) {
 						leash = 0.0f;
 					} else if (resolved == Position::kGuard) {
 						leash = settings.tuning.guardRadius;
 					} else if (resolved == Position::kHoldBack) {
 						leash = settings.holdBackLeash;
 					} else if (resolved == Position::kWithMe) {
-						leash = settings.tuning.withMeRadius + 150.0f;  // room to fight what reaches you
+						// Within the distance set and no further: a blade at the edge still reaches
+						// an enemy just past it, and a bow or a spell reaches anyone.
+						leash = settings.tuning.withMeRadius;
 					}
 					Leash::Apply(actor.get(), settings.guardLeash ? leash : 0.0f);
 				}
@@ -765,6 +1100,7 @@ namespace FWM::Battle
 				}
 
 				WatchHands(member, actor.get(), orders, resolved, controller);
+				ReportHands(member, actor.get(), controller, orders);
 
 				auto focus = orders.focus;
 				if (focus == Focus::kMarked && !member.marked) {
@@ -772,17 +1108,18 @@ namespace FWM::Battle
 				}
 				const auto pick = Rules::PickTarget(views, focus, resolved, Rules::IsRanged(fightAs.role), settings.tuning);
 				auto desired = pick.index >= 0 ? profiles[static_cast<std::size_t>(pick.index)].handle : RE::ActorHandle{};
-				// On the way to a downed companion: the engine's own pick, which keeps to the
-				// small area around them, not someone across the field.
-				if (member.reviving) {
-					desired = {};
-				}
 				// Shield up against archers: turned to the nearest of them, closing under it.
 				if (member.shielding && member.shieldFacing && !markLive && !OutOfReach(member, member.shieldFacing)) {
 					desired = member.shieldFacing;
 				}
-				// Closing on someone in melee, shield up or not: if it never happens, they are out of reach.
-				if (!Rules::IsRanged(fightAs.role) && (resolved == Position::kFree || resolved == Position::kFrontLine || markLive || member.shielding)) {
+				// Closing on someone in melee, shield up or not: if it never happens, they are out of
+				// reach. Down, staggered or thrown about, nobody closes on anyone, so the clock waits:
+				// counted, it left them sure they could reach no one once back on their feet.
+				const bool reeling = down || actor->IsInRagdollState() || actor->AsActorState()->IsStaggered() || actor->IsInKillMove();
+				if (reeling) {
+					member.chasing = {};
+				} else if (!Rules::IsRanged(fightAs.role) &&
+						   (resolved == Position::kFree || resolved == Position::kFrontLine || markLive || member.shielding)) {
 					Chase(member, actor.get(), controller, desired ? desired : controller->targetHandle, a_dt);
 				} else {
 					member.chasing = {};
@@ -816,8 +1153,17 @@ namespace FWM::Battle
 					desired = volley;
 				}
 				member.desired = desired;
+				// A bound weapon chosen for a mage's or healer's hand is theirs to conjure, whatever
+				// their role usually allows.
+				const auto hands = ChoosesSpells(orders.role) ? Party::HandsOf(member.id) : Hands{};
+				const bool conjures = std::any_of(hands.begin(), hands.end(), [](std::uint32_t a_id) { return a_id && Spells::Conjures(a_id); });
 				entries.emplace_back(reinterpret_cast<std::uintptr_t>(controller), Game::Native(member.handle), Game::Native(desired),
-					Rules::IsRanged(orders.role));
+					Rules::IsRanged(orders.role) && !conjures, recovering, ChoosesSpells(fightAs.role));
+				// Their chosen spells in use, whatever kind they are: cast for them when the combat AI will not.
+				if (!recovering && ChoosesSpells(fightAs.role)) {
+					auto on = desired ? desired.get() : controller->targetHandle.get();
+					Spells::Drive(member, actor.get(), on.get(), a_dt);
+				}
 			}
 
 			// Enemies held by a taunt want the tank, whatever their own AI thinks, and press them
@@ -876,8 +1222,18 @@ namespace FWM::Battle
 			if (before && *before == a_orders) {
 				return false;
 			}
+			const bool newRole = !before || before->role != a_orders.role;
 			Party::SetOrders(a_id, a_orders);
 			const auto* member = Party::Find(a_id);
+			if (auto actor = member ? member->handle.get() : nullptr; actor && newRole) {
+				Spells::Recheck(actor.get(), a_orders.role);  // a mage turned healer keeps only what a healer may hold
+				// A new role changes what they hold, there and then, not when a fight next asks.
+				if (!InAFight()) {
+					if (const auto armed = ArmFor(actor.get(), a_orders.role); !armed.empty()) {
+						Log::Info("[Style] {} is a {} now: {} in hand."sv, member->name, Info(a_orders.role).name, armed);
+					}
+				}
+			}
 			std::string position{ Info(a_orders.position).name };
 			if (a_orders.position == Position::kFormation) {
 				position += std::format(" (for now {})", Info(Resolve(a_orders.position, WalkWithMe::CurrentFormation())).name);
@@ -934,6 +1290,14 @@ namespace FWM::Battle
 						Log::Info("[Party] {} refused for {:08X}: {}"sv, Info(command.orders.role).name, command.member, Why(lack));
 						break;
 					}
+					// Roles are settled before a fight; in one, only focus, position and the switches change.
+					if (const auto* own = Party::FindOrders(command.member); own && own->role != command.orders.role && InAFight()) {
+						Log::Info("[Party] {} refused for {:08X}: roles are set out of a fight."sv, Info(command.orders.role).name, command.member);
+						if (member) {
+							Party::Answer(*member, "Roles are set out of a fight.");
+						}
+						break;
+					}
 					SetOrders(command.member, command.orders);
 					shout = Shout::kNone;  // someone was told something else
 					break;
@@ -951,6 +1315,7 @@ namespace FWM::Battle
 						member->marked = profile->handle;
 						member->markFor = 0.0f;
 						member->markEngageIn = 0.0f;
+						member->markAway = 0.0f;
 						member->markAsks = 0;
 						member->markTaken = false;
 						member->markWarned = false;
@@ -986,8 +1351,122 @@ namespace FWM::Battle
 						member->askedAt = ::GetTickCount64();
 					}
 					break;
+				case Command::Type::kRejuvenateNow:
+					if (member) {
+						member->rejuvenateRequested = true;
+						member->askedAt = ::GetTickCount64();
+					}
+					break;
 				case Command::Type::kShout:
 					GiveOrder(command.shout);
+					break;
+				case Command::Type::kSetSpell:
+					if (member) {
+						auto        actor = member->handle.get();
+						const auto* own = Party::FindOrders(command.member);
+						if (!actor || !own || !ChoosesSpells(own->role)) {
+							Party::Answer(*member, "Only mages and healers have spells chosen for them.");
+						} else if (fighting || actor->IsInCombat()) {
+							Party::Answer(*member, "Spells can only be changed out of a fight.");
+						} else {
+							const auto outcome = Spells::Choose(actor.get(), own->role, command.hand, command.spell);
+							Party::Answer(*member, outcome.text, outcome.done);
+							slowParts.erase(command.member);  // the sheet shows it at once
+						}
+					}
+					break;
+				case Command::Type::kAbilityNow:
+					if (member) {
+						member->askedAt = ::GetTickCount64();
+						switch (command.ability) {
+						case Paths::Ability::kTaunt:
+							member->tauntRequested = true;
+							break;
+						case Paths::Ability::kHeal:
+							member->healRequested = true;
+							break;
+						case Paths::Ability::kRejuvenate:
+							member->rejuvenateRequested = true;
+							break;
+						default:
+							if (Paths::SpecialFor(command.ability) != Special::kNone) {
+								member->specialRequested = true;
+							} else {
+								Arts::Request(member->id, command.ability);
+							}
+							break;
+						}
+					}
+					break;
+				case Command::Type::kLearn:
+				case Command::Type::kForget:
+				case Command::Type::kResetPath:
+				case Command::Type::kEquip:
+				case Command::Type::kInvest:
+				case Command::Type::kDivest:
+					if (member) {
+						// Ranks and bonus points can be bought in a fight; carrying and giving back wait
+						// for it to end, as roles and spells do.
+						const bool buying = command.type == Command::Type::kLearn || command.type == Command::Type::kInvest;
+						if (!buying && (fighting || InAFight())) {
+							Party::Answer(*member, "Paths are changed out of a fight.");
+							break;
+						}
+						PathsLink::Outcome outcome;
+						switch (command.type) {
+						case Command::Type::kLearn:
+							outcome = PathsLink::Learn(member->id, command.path, command.node);
+							break;
+						case Command::Type::kForget:
+							outcome = PathsLink::Forget(member->id, command.path, command.node);
+							break;
+						case Command::Type::kResetPath:
+							outcome = PathsLink::Reset(member->id, command.path);
+							break;
+						case Command::Type::kInvest:
+							{
+								// What a point is worth is ours to say: the add-on is told how many more still count.
+								const auto* progress = PathsLink::Find(member->id);
+								const int   on = progress ? Paths::Spent(progress->record, command.path) : 0;
+								outcome = PathsLink::Invest(member->id, command.path, Rules::PathBonusRoom(command.path, on, Settings::Get().tuning));
+							}
+							break;
+						case Command::Type::kDivest:
+							outcome = PathsLink::Divest(member->id, command.path);
+							break;
+						default:
+							outcome = PathsLink::Equip(member->id, command.path, command.slot, command.ability);
+							break;
+						}
+						Party::Answer(*member, outcome.text, outcome.done);
+						slowParts.erase(command.member);
+					}
+					break;
+				case Command::Type::kUnlimited:
+					if (member) {
+						// Taking them back changes what they carry, so that waits for the fight to end.
+						if (!command.on && (fighting || InAFight())) {
+							Party::Answer(*member, "Unlimited points are taken back out of a fight.");
+							break;
+						}
+						const auto outcome = PathsLink::SetUnlimited(member->id, command.on);
+						Party::Answer(*member, outcome.text, outcome.done);
+						if (outcome.done) {
+							Notices::Push(outcome.text, command.on ? Notices::Kind::kWarning : Notices::Kind::kInfo);
+							Log::Info("[Paths] {} {}."sv, member->name, command.on ? "has unlimited points" : "is back to earned points");
+						}
+						slowParts.erase(command.member);
+					}
+					break;
+				case Command::Type::kAutoBattle:
+					if (Settings::Get().autoBattle != command.on) {
+						auto data = Settings::Chosen();
+						data.autoBattle = command.on;
+						Settings::Apply(data);
+						Log::Info("[Orders] Auto battle {}."sv, command.on ? "on: a companion who sees an enemy starts the fight" : "off: they wait for the fight to come to them");
+						Notices::Push(command.on ? "Auto battle on: whoever sees an enemy starts the fight." : "Auto battle off: they wait for the fight to come to them.",
+							Notices::Kind::kOrder);
+					}
 					break;
 				case Command::Type::kPreset:
 					for (auto& each : Party::Members()) {
@@ -1099,18 +1578,14 @@ namespace FWM::Battle
 			if (cached.at == 0 || a_now - cached.at >= kSlowMs) {
 				View::Member fresh;
 				Sheet(fresh, a_actor);
-				const auto stock = Potions::StockOf(a_actor);
-				fresh.potionHealing = stock.healing;
-				fresh.potionMagicka = stock.magicka;
-				fresh.potionStamina = stock.stamina;
-				fresh.potionOther = stock.other;
-				if (!a_member.summon) {
-					if (const auto heal = Abilities::PreviewHeal(a_actor)) {
-						fresh.canHeal = true;
-						fresh.healSpell = heal->spell;
-						fresh.healBorrowed = heal->borrowed;
-						fresh.healAmount = heal->amount;
-						fresh.healCost = heal->cost;
+				// Spells for the hands: what is chosen, and, out of a fight, what could be.
+				if (ChoosesSpells(a_member.orders.role)) {
+					const auto hands = Party::HandsOf(a_member.id);
+					for (const auto hand : { kLeftHand, kRightHand }) {
+						fresh.hands[hand] = Spells::Describe(hands[hand], a_actor);
+					}
+					if (!fighting) {
+						fresh.spellOptions = Spells::OptionsFor(a_actor, a_member.orders.role);
 					}
 				}
 				cached.view = std::move(fresh);
@@ -1134,29 +1609,64 @@ namespace FWM::Battle
 			a_member.ammoCount = s.ammoCount;
 			a_member.skills = s.skills;
 			a_member.resist = s.resist;
-			a_member.canHeal = s.canHeal;
-			a_member.healSpell = s.healSpell;
-			a_member.healBorrowed = s.healBorrowed;
-			a_member.healAmount = s.healAmount;
-			a_member.healCost = s.healCost;
-			a_member.potionHealing = s.potionHealing;
-			a_member.potionMagicka = s.potionMagicka;
-			a_member.potionStamina = s.potionStamina;
-			a_member.potionOther = s.potionOther;
+			a_member.hands = s.hands;
+			a_member.spellOptions = s.spellOptions;
+		}
+
+		// What the party's own abilities have put on a companion for a while, good or bad. Only
+		// these: the game's own effects (scripted mod effects, skill fortifies and the like) are
+		// too many and mostly noise in a fight.
+		void Statuses(View::Member& a_view, const Party::Member& a_member, RE::Actor* a_actor)
+		{
+			using Tint = View::Status::Tint;
+			auto& out = a_view.statuses;
+			// A taunt's armor and Rejuvenate, given with or without a path (paths tag theirs).
+			auto either = [&](RE::ActorValue a_value, Paths::Perk a_perk) {
+				auto on = Abilities::BoostOn(a_member.id, a_value, 0);
+				return on ? on : Abilities::BoostOn(a_member.id, a_value, static_cast<std::uint16_t>(a_perk));
+			};
+			if (const auto brace = either(RE::ActorValue::kDamageResist, Paths::Perk::kTauntBrace)) {
+				out.push_back({ "Braced", std::format("+{:.0f} armor from their taunt", brace->amount), 0xF3ED, Tint::kArmor, brace->left, brace->length });
+			}
+			if (const auto quick = either(RE::ActorValue::kMagickaRateMult, Paths::Perk::kRejuvenate)) {
+				out.push_back(
+					{ "Rejuvenated", std::format("Magicka comes back {:.0f}% faster", quick->amount), 0xF5BB, Tint::kMagicka, quick->left, quick->length });
+			}
+			if (a_member.guardFor > 0.0f) {
+				const auto* orders = Party::FindOrders(a_member.id);
+				const auto  kit = PathsLink::KitOf(a_member.id, orders ? orders->role : Role::kTank);
+				const float length = kit.tree ? Paths::Value(Paths::Perk::kBodyguard, std::max(kit.Rank(Paths::Ability::kBodyguard), 1)) : Specials::kGuardSeconds;
+				out.push_back({ "Guarding you", "At your side, taking on whoever is on you", 0xF132, Tint::kArmor, a_member.guardFor, length });
+			}
+			Arts::Statuses(a_member.id, out);
+			if (a_member.drained) {
+				// The ring fills as the magicka comes back, full when they return to their place.
+				const float cost = CastCost(a_member, a_actor);
+				const float most = Game::Maximum(a_actor, RE::ActorValue::kMagicka);
+				const float back = std::min(std::max(cost * 2.0f, most / 3.0f), most);
+				View::Status dry{ "Out of magicka", "Falling back until it comes back", 0xF5C7, Tint::kDebuff };
+				dry.progress = back > 0.0f ? std::clamp(Game::Current(a_actor, RE::ActorValue::kMagicka) / back, 0.0f, 1.0f) : 0.0f;
+				out.push_back(std::move(dry));
+			}
 		}
 
 		void BuildView()
 		{
 			ApplyCommands();
+			if (planOpen.load()) {
+				TimeBend::KeepClear();  // the plan asks for a view every frame, so this runs even with the world frozen
+			}
 
 			auto  snapshot = std::make_shared<View::Snapshot>();
 			auto* player = RE::PlayerCharacter::GetSingleton();
 			snapshot->serial = ++viewSerial;
 			snapshot->tuning = Settings::Get().tuning;
 			snapshot->walkWithMe = WalkWithMe::Connected();
-			snapshot->lendHeal = Settings::Get().healFallback;
 			snapshot->formation = WalkWithMe::CurrentFormation();
 			snapshot->shout = shout;
+			snapshot->autoBattle = Settings::Get().autoBattle;
+			snapshot->drawOnSight = Settings::Get().drawOnSight;
+			snapshot->paths = PathsLink::Active();
 			snapshot->inGame = player && player->Is3DLoaded();
 			if (!snapshot->inGame) {
 				const std::scoped_lock guard(viewLock);
@@ -1209,8 +1719,7 @@ namespace FWM::Battle
 				}
 				m.tauntReady = member.tauntReady;
 				m.tauntCooldown = member.tauntCooldown;
-				m.asked = member.tauntRequested || member.healRequested || member.specialRequested;
-				m.brewing = member.brewing >= 0.0f;
+				m.asked = member.tauntRequested || member.healRequested || member.rejuvenateRequested || member.specialRequested;
 				if (member.answerAt && now - member.answerAt < 6000) {
 					m.answer = member.answer;
 					m.answerDone = member.answerDone;
@@ -1224,7 +1733,13 @@ namespace FWM::Battle
 					m.tauntNever = taunt.noChanceFrom;
 					m.tauntHold = taunt.hold;
 					m.tauntStamina = taunt.stamina;
+					m.tauntArmor = taunt.armor;
+					m.tauntArmorSeconds = taunt.armorSeconds;
 					m.healReady = member.healReady;
+					m.healAmount = Rules::TeamHealAmount(m.level, snapshot->tuning);
+					m.rejuvenateReady = member.rejuvenateReady;
+					m.rejuvenateCooldown = member.rejuvenateCooldown;
+					m.rejuvenateSeconds = Rules::RejuvenateSeconds(m.level, snapshot->tuning);
 					m.special = SpecialOf(m.orders.role);
 					m.specialReady = member.specialReady;
 					m.specialCooldown = member.specialCooldown;
@@ -1232,12 +1747,66 @@ namespace FWM::Battle
 					if (m.orders.role == Role::kTank) {
 						m.ring = GroundRing(actor->GetPosition(), taunt.radius, 40);
 					}
+					// The Paths add-on: every path, and the two abilities carried on this one.
+					if (const auto* progress = PathsLink::Find(member.id)) {
+						m.paths = true;
+						m.record = progress->record;
+						m.pointsEarned = progress->earned;
+						m.pointsSpent = progress->spent;
+						m.pointsAbove = PathsLink::PointsAboveLevel();
+						m.respec = PathsLink::RespecAllowed();
+						m.unlimited = progress->unlimited;
+						m.unlimitedAllowed = PathsLink::UnlimitedAllowed();
+						const auto kit = PathsLink::KitOf(member.id, m.orders.role);
+						for (std::size_t s = 0; s < Paths::kSlots; ++s) {
+							auto&      carried = m.carried[s];
+							const auto ability = kit.slots[s];
+							carried.ability = ability;
+							switch (ability) {
+							case Paths::Ability::kTaunt:
+								carried.ready = member.tauntReady;
+								carried.cooldown = member.tauntCooldown > 0.0f ? member.tauntCooldown : kit.Cooldown(ability);
+								break;
+							case Paths::Ability::kHeal:
+								carried.ready = member.healReady;
+								carried.cooldown = kit.Cooldown(ability);
+								break;
+							case Paths::Ability::kRejuvenate:
+								carried.ready = member.rejuvenateReady;
+								carried.cooldown = member.rejuvenateCooldown > 0.0f ? member.rejuvenateCooldown : kit.Cooldown(ability);
+								break;
+							default:
+								if (Paths::SpecialFor(ability) != Special::kNone) {
+									carried.ready = member.specialReady;
+									carried.cooldown = member.specialCooldown > 0.0f ? member.specialCooldown : kit.Cooldown(ability);
+								} else {
+									const auto clock = Arts::ClockOf(member.id, ability);
+									carried.ready = clock.ready;
+									carried.cooldown = clock.cooldown > 0.0f ? clock.cooldown : kit.Cooldown(ability);
+								}
+								break;
+							}
+						}
+					}
+					m.asked = m.asked || Arts::Asked(member.id);
 				}
 				m.head = Screen(Game::HeadPosition(actor.get()) + RE::NiPoint3{ 0.0f, 0.0f, 22.0f });
 				if (snapshot->overhead) {
 					Footprint(actor.get(), m.foot, m.footRing);
 				}
 				FillSlowParts(m, actor.get(), now);
+				// The vitals as they stand this frame, not as the sheet last read them.
+				m.healthNow = Game::Current(actor.get(), RE::ActorValue::kHealth);
+				m.healthMax = Game::Maximum(actor.get(), RE::ActorValue::kHealth);
+				m.magickaNow = Game::Current(actor.get(), RE::ActorValue::kMagicka);
+				m.magickaMax = Game::Maximum(actor.get(), RE::ActorValue::kMagicka);
+				m.staminaNow = Game::Current(actor.get(), RE::ActorValue::kStamina);
+				m.staminaMax = Game::Maximum(actor.get(), RE::ActorValue::kStamina);
+				m.drained = member.drained;
+				m.rejuvenated = Abilities::RejuvenatedFor(member.id);
+				if (!member.summon) {
+					Statuses(m, member, actor.get());
+				}
 				snapshot->party.push_back(std::move(m));
 			}
 
@@ -1251,7 +1820,16 @@ namespace FWM::Battle
 				e.id = profile.id;
 				e.name = profile.name;
 				e.level = profile.level;
-				e.health = profile.health;
+				// Read now, not on the planner's last tick: with time slowed that tick is seconds apart.
+				e.healthNow = Game::Current(actor.get(), RE::ActorValue::kHealth);
+				e.healthMax = Game::Maximum(actor.get(), RE::ActorValue::kHealth);
+				e.magickaNow = Game::Current(actor.get(), RE::ActorValue::kMagicka);
+				e.magickaMax = Game::Maximum(actor.get(), RE::ActorValue::kMagicka);
+				e.staminaNow = Game::Current(actor.get(), RE::ActorValue::kStamina);
+				e.staminaMax = Game::Maximum(actor.get(), RE::ActorValue::kStamina);
+				e.health = Game::Fraction(actor.get(), RE::ActorValue::kHealth);
+				e.magicka = Game::Fraction(actor.get(), RE::ActorValue::kMagicka);
+				e.stamina = Game::Fraction(actor.get(), RE::ActorValue::kStamina);
 				e.caster = profile.caster;
 				e.healer = profile.healer;
 				e.archer = profile.archer;
@@ -1283,7 +1861,17 @@ namespace FWM::Battle
 		}
 		TimeBend::Update();
 		ApplyCommands();
+		Arts::Cool(Party::Cool(a_dt));  // cooldowns run on world time, fight or not
+		Abilities::UpdateBoosts(a_dt);  // a taunt's armor and Rejuvenate run out on time, fight or not
+		glowIn -= a_dt;
+		if (glowIn <= 0.0f) {
+			glowIn = 0.2f;
+			Effects::Update();
+			ShowAbilities();
+		}
 		if (!Settings::Get().enabled) {
+			Overrides::PublishHands({});
+			PathBonus::Clear();
 			// Switched off mid-fight: let go of every target and style at once.
 			if (fighting) {
 				StandDown();
@@ -1297,21 +1885,26 @@ namespace FWM::Battle
 		rosterIn -= a_dt;
 		if (rosterIn <= 0.0f) {
 			Party::Refresh(0.5f - rosterIn);
+			PathsLink::Refresh();
+			PathBonus::Publish();
 			ForgetStaleMarks();
 			rosterIn = 0.5f;
 		}
+		PublishHands();  // cheap when nothing changed
 
-		Potions::Rest(a_dt);
+		Arts::Rest(a_dt);
 		if (!AnyoneFighting(player)) {
 			if (fighting) {
 				StandDown();
 				fighting = false;
 				Log::Info("[Battle] Combat over."sv);
 			}
+			Sight::Update(a_dt);
 			return;
 		}
 		if (!fighting) {
 			fighting = true;
+			Sight::FightStarted();
 			decideIn = 0.0f;
 			Party::Refresh();
 			Log::Info("[Battle] Combat with {} companion(s)."sv, Party::Members().size());
@@ -1320,6 +1913,7 @@ namespace FWM::Battle
 		// Arrows cross a room in under a second: the shield is checked every frame, not on the planner's tick.
 		Abilities::BlockIncoming(a_dt);
 		Specials::Tick(a_dt);
+		Arts::Tick(a_dt);
 
 		pendingDt += a_dt;
 		decideIn -= a_dt;
@@ -1327,27 +1921,44 @@ namespace FWM::Battle
 			Enemies::Update(pendingDt);
 			Abilities::Update(pendingDt);
 			Specials::Update(pendingDt);
-			Potions::Fight(pendingDt);
+			Arts::Update();
+			PathBonus::Fight();
 			Decide(player, pendingDt);
 			GlowMarks(pendingDt);
 			LeaveIfEmpty(pendingDt);
 			pendingDt = 0.0f;
 			decideIn = Settings::Get().planInterval;
 		}
+		// After the enemy list is fresh: whoever the combat AI has left out joins in.
+		Sight::Join(a_dt);
 
 		statsIn -= a_dt;
 		if (statsIn <= 0.0f) {
 			statsIn = 30.0f;
 			const auto stats = Overrides::TakeStats();
-			Log::Info("[Hook] {} selector calls, {} ours, {} redirected, {} refused by the engine's test{}."sv,
+			const auto bonus = PathBonus::TakeStats();
+			Log::Info("[Hook] {} selector calls, {} ours, {} redirected, {} refused by the engine's test{}{}{}{}{}{}{}{}."sv,
 				stats.calls, stats.matched, stats.overridden, stats.rejected,
-				stats.bound ? std::format("; bound weapons refused {} times", stats.bound) : std::string());
+				stats.bound ? std::format("; bound weapons refused {} times", stats.bound) : std::string(),
+				stats.spells ? std::format("; other magic kept out of chosen hands {} times", stats.spells) : std::string(),
+				stats.rested ? std::format("; weapons kept from resting casters {} times", stats.rested) : std::string(),
+				stats.melee ? std::format("; weapons kept from mages and healers {} times", stats.melee) : std::string(),
+				stats.skill ? std::format("; chosen spells let past the skill check {} times", stats.skill) : std::string(),
+				bonus.heals ? std::format("; healers' healing strengthened {} times", bonus.heals) : std::string(),
+				bonus.costs ? std::format("; mages' spell costs cut {} times", bonus.costs) : std::string(),
+				bonus.blows || bonus.harms ? std::format("; damage to tanks cut on {} blows and {} harmful spells", bonus.blows, bonus.harms) : std::string());
 		}
 	}
 
 	void Reset()
 	{
 		StandDown();
+		Abilities::EndBoosts();
+		Effects::Clear();
+		Sight::Reset();
+		Arts::Reset();
+		PathBonus::Clear();
+		PathsLink::Clear();
 		fighting = false;
 		shout = Shout::kNone;
 		Party::ResetRuntime();
@@ -1365,6 +1976,7 @@ namespace FWM::Battle
 		if (auto* events = RE::ScriptEventSourceHolder::GetSingleton()) {
 			events->AddEventSink<RE::TESHitEvent>(&hitSink);
 		}
+		Arts::InstallEvents();
 	}
 
 	void RequestOpen()
@@ -1410,6 +2022,13 @@ namespace FWM::Battle
 	bool PlanOpen() noexcept
 	{
 		return planOpen.load();
+	}
+
+	void PlanWindowClosed(bool a_menuStillOpen)
+	{
+		if (auto* tasks = SKSE::GetTaskInterface()) {
+			tasks->AddTask([a_menuStillOpen] { TimeBend::HandBack(a_menuStillOpen); });
+		}
 	}
 
 	void Queue(const Command& a_command)

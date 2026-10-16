@@ -16,7 +16,7 @@
 #>
 [CmdletBinding()]
 param(
-	[string]$Version = '0.1.5',
+	[string]$Version = '0.3.0',
 	[string]$VcpkgRoot = $env:VCPKG_ROOT,
 	[string]$CMake = '',
 	[switch]$SkipBuild
