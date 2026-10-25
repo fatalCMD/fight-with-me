@@ -21,3 +21,9 @@ docs/
 tools/Deploy.ps1
 tools/preview/
 paths/
+
+# The wolf preview's converted game, Bellyaches and Fluffworks textures: never committed.
+tools/wolfhead/preview/out/
+
+# Upload packaged downloads as release assets, not source commits.
+release/

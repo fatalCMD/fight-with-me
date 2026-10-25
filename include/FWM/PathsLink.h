@@ -33,6 +33,19 @@ namespace FWM::PathsLink
 	};
 
 	[[nodiscard]] Kit KitOf(RE::FormID a_id, Role a_role);
+	// Main-thread, synchronous ability test; never changes the saved role or progression.
+	class ScopedDebugCast {
+	public:
+		ScopedDebugCast(RE::FormID id, const Kit& kit);
+		~ScopedDebugCast();
+		ScopedDebugCast(const ScopedDebugCast&) = delete;
+		ScopedDebugCast& operator=(const ScopedDebugCast&) = delete;
+	private:
+		RE::FormID previousID;
+		const Kit* previousKit;
+	};
+	[[nodiscard]] bool DebugCasting(RE::FormID id);
+	[[nodiscard]] RE::NiPoint3 DebugAim(RE::Actor* actor);
 
 	// Whether they use an ability without being told. On a path, each ability has its own
 	// switch (Orders::manual); without one, the role's switches as before.
@@ -48,11 +61,14 @@ namespace FWM::PathsLink
 		int           earned{ 0 };
 		int           spent{ 0 };
 		bool          unlimited{ false };  // unlimited points are on
-		[[nodiscard]] int Unspent() const { return std::max(earned - spent, 0); }
+		[[nodiscard]] int Unspent() const { return unlimited ? Paths::kUnlimited : std::max(earned - spent, 0); }
 	};
 
 	// The latest copy for a companion, read from the add-on when missing or stale.
 	[[nodiscard]] const Progress* Find(RE::FormID a_id);
+
+	// Read from the add-on now, never the copy: right after a level the copy is a level behind.
+	[[nodiscard]] const Progress* ReadNow(RE::FormID a_id);
 
 	// Reads everyone in the party again (every roster refresh), and tells the player when
 	// someone has new points to spend.

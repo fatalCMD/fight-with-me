@@ -99,4 +99,16 @@ namespace FWM::Game
 	// Screen position (0..1, origin top left) of a world point, if it is in front
 	// of the camera and on screen.
 	[[nodiscard]] std::optional<std::pair<float, float>> Project(const RE::NiPoint3& a_point);
+
+	// One step of following an arrow in flight, a_flown seconds after it was loosed: where it is now
+	// and which way it flies (kept as they were once the game is done with it), and whether it has
+	// landed: struck something, been done with, stopped moving, or flown too long to still be up.
+	// What it struck directly, if anyone, goes to a_struck.
+	struct Arrow
+	{
+		RE::ProjectileHandle handle;
+		RE::NiPoint3         at;
+		RE::NiPoint3         velocity;
+	};
+	[[nodiscard]] bool Landed(Arrow& a_arrow, float a_flown, float a_dt, RE::ObjectRefHandle* a_struck = nullptr);
 }

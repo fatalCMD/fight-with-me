@@ -16,6 +16,7 @@ namespace FWM::Abilities
 
 	// Runs taunts, heals and Rejuvenate for everyone in the party and ages the holds.
 	void Update(float a_dt);
+	void DebugActivate(Party::Member& member, Role role, Paths::Ability ability, int rank);
 
 	// Every frame of a fight: a tank with a shield raises it against arrows and spells about
 	// to reach them, whatever else they are doing.
@@ -44,6 +45,7 @@ namespace FWM::Abilities
 	};
 	[[nodiscard]] std::optional<BoostTime> BoostOn(RE::FormID a_id, RE::ActorValue a_value);  // kDamageResist: braced, kMagickaRateMult: rejuvenated
 	[[nodiscard]] std::optional<BoostTime> BoostOn(RE::FormID a_id, RE::ActorValue a_value, std::uint16_t a_source);
+	[[nodiscard]] std::vector<std::pair<std::uint32_t, float>> BoostTimes(RE::ActorValue a_value, std::uint16_t a_source);
 	void LoadBraced(const std::vector<std::pair<std::uint32_t, float>>& a_saved);
 	void LoadRejuvenated(const std::vector<std::pair<std::uint32_t, float>>& a_saved);
 
@@ -68,8 +70,9 @@ namespace FWM::Abilities
 
 	[[nodiscard]] const std::vector<Hold>& Holds();
 
-	// An enemy on a tank for a while, as a taunt that took would hold them (Challenge).
+	// An enemy on a tank for a while, as a taunt that took would hold them.
 	void AddHold(const RE::ActorHandle& a_enemy, const RE::ActorHandle& a_tank, float a_seconds);
+	void DropHoldsOn(const RE::ActorHandle& target);
 
 	// The tank currently holding this enemy, if any.
 	[[nodiscard]] RE::ActorHandle HolderOf(const RE::ActorHandle& a_enemy);
@@ -101,6 +104,8 @@ namespace FWM::Abilities
 	// A healer's or mage's ability: the gesture of someone working magic with it in hand.
 	bool               CastGesture(RE::Actor* a_caster);
 	void               HandGlow(RE::Actor* a_caster, RE::SpellItem* a_spell, float a_seconds, std::size_t a_hand = kLeftHand);  // the spell's casting art on a hand
-	// An ability that worked. A companion with unlimited points sometimes clucks as they use it.
-	void               Used(RE::FormID a_member, RE::Actor* a_actor);
+	// An ability that worked: resource cost, pacing and activation effects.
+    [[nodiscard]] float ResourceCost(RE::Actor* a_actor, Paths::Ability a_ability);
+    [[nodiscard]] std::string ResourceBlock(RE::Actor* a_actor, Paths::Ability a_ability);
+	void Used(RE::FormID a_member, RE::Actor* a_actor, Paths::Ability a_ability, bool a_ordered);
 }

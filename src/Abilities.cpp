@@ -1,15 +1,31 @@
+#include "FWM/AbilityAuto.h"
+#include "FWM/AbilityPolicy.h"
 #include "FWM/Abilities.h"
+#include "FWM/Ripostes.h"
+#include "FWM/Arts.h"
+#include "FWM/Specials.h"
+#include "FWM/DragonBreaths.h"
+#include "FWM/AbilityResource.h"
+#include "FWM/EffectAudio.h"
+#include "FWM/TauntBears.h"
 
+#include "FWM/Circles.h"
+#include "FWM/ChaosDown.h"
 #include "FWM/Effects.h"
 #include "FWM/Enemies.h"
 #include "FWM/Forms.h"
 #include "FWM/Game.h"
+#include "FWM/HealCircle.h"
+#include "FWM/Rejuvenations.h"
+#include "FWM/RejuvenateField.h"
+#include "FWM/RejuvenatePolicy.h"
 #include "FWM/Leash.h"
 #include "FWM/Log.h"
 #include "FWM/Notices.h"
 #include "FWM/PathBonus.h"
 #include "FWM/Rules.h"
 #include "FWM/Settings.h"
+#include "FWM/Text.h"
 
 #ifdef GetObject
 #	undef GetObject  // the Windows macro, not the default object lookup
@@ -93,17 +109,68 @@ namespace FWM::Abilities
 		return ready && !idle->animEventName.empty() && a_caster->NotifyAnimationGraph(idle->animEventName);
 	}
 
-	void Used(RE::FormID a_member, RE::Actor* a_actor)
+    float ResourceCost(RE::Actor* actor, Paths::Ability ability) {
+        if (!actor || PathsLink::DebugCasting(actor->GetFormID())) return 0;
+        const auto* orders=Party::FindOrders(actor->GetFormID());
+        if (!orders) return 0;
+        const auto kit=PathsLink::KitOf(actor->GetFormID(),orders->role);
+        const int rank=kit.tree?std::max(1,kit.Rank(ability)):(actor->GetLevel()>=60?3:actor->GetLevel()>=30?2:1);
+        return AbilityResource::Cost(Game::Maximum(actor,ChoosesSpells(orders->role)?RE::ActorValue::kMagicka:RE::ActorValue::kStamina),rank);
+    }
+    std::string ResourceBlock(RE::Actor* actor, Paths::Ability ability) {
+        if (!actor) return std::string(Tr("Companion unavailable."));
+        if (PathsLink::DebugCasting(actor->GetFormID())) return {};
+        const auto* orders=Party::FindOrders(actor->GetFormID());
+        if (!orders) return std::string(Tr("No role selected."));
+        if (orders->role==Role::kBruiser && !Game::ArsenalOf(actor).twoHanded) return std::string(Tr("Requires a two-handed melee weapon in inventory."));
+        const bool magic=ChoosesSpells(orders->role);
+        const float maximum=Game::Maximum(actor,magic?RE::ActorValue::kMagicka:RE::ActorValue::kStamina),cost=ResourceCost(actor,ability);
+        if (!std::isfinite(maximum) || maximum<=0 || !std::isfinite(Game::Current(actor,magic?RE::ActorValue::kMagicka:RE::ActorValue::kStamina)) || Game::Current(actor,magic?RE::ActorValue::kMagicka:RE::ActorValue::kStamina)<cost)
+            return Trf("Not enough {}: requires {:.0f}.",magic?Tr("magicka"):Tr("stamina"),cost);
+        return {};
+    }
+	void Used(RE::FormID a_member, RE::Actor* a_actor, Paths::Ability a_ability, bool a_ordered)
 	{
-		if (!a_actor || !PathsLink::Unlimited(a_member)) {
-			return;
+        if (const auto* orders=Party::FindOrders(a_member); orders && a_actor) {
+            const auto value=ChoosesSpells(orders->role)?RE::ActorValue::kMagicka:RE::ActorValue::kStamina;
+            const float cost=ResourceCost(a_actor,a_ability);
+            a_actor->AsActorValueOwner()->DamageActorValue(value,cost);
+            Log::Info("[AbilityCost] {} uses {}: {:.1f} {} spent, {:.1f} remaining."sv,Game::Name(a_actor),Paths::Info(a_ability).name,cost,ChoosesSpells(orders->role)?"magicka":"stamina",Game::Current(a_actor,value));
+        }
+		if (!PathsLink::DebugCasting(a_member)) AbilityAuto::Used(a_member, a_actor, a_ability, a_ordered);
+		// Only activation cues here. Timed impacts and persistent effects own their audio.
+		Soundscape::Kind sound=Soundscape::Kind::Count;
+		switch(a_ability){
+		case Paths::Ability::kSecondWind:sound=Soundscape::Kind::SecondWind;break;
+		case Paths::Ability::kRiposte:break; // clang belongs to the intercepted hit
+		case Paths::Ability::kDeadeye:break; // impact owns its sound
+		case Paths::Ability::kVolley:break; // each real shot owns its gust
+		case Paths::Ability::kSurge:sound=Soundscape::Kind::Surge;break;
+		case Paths::Ability::kBerserk:sound=Soundscape::Kind::Berserk;break;
+		case Paths::Ability::kWard:sound=Soundscape::Kind::Ward;break;
+		case Paths::Ability::kDisarm:sound=Soundscape::Kind::Disarm;break;
+		default:break;
 		}
-		static std::mt19937 dice{ std::random_device{}() };
-		if (std::uniform_real_distribution<float>(0.0f, 1.0f)(dice) >= 0.35f) {
-			return;
+		int rank = 1;
+		if (const auto* orders = Party::FindOrders(a_member)) rank = std::max(1, PathsLink::KitOf(a_member, orders->role).Rank(a_ability));
+		if(a_actor&&sound!=Soundscape::Kind::Count)EffectAudio::Begin(sound,a_actor,a_actor->GetPosition(),2.5f,rank,true);
+		if (rank >= 3 && a_actor) {
+			Effects::Look look = Effects::Look::kCount;
+			switch (a_ability) {
+			// Second Wind supplies its own layered rank III burst.
+			case Paths::Ability::kRiposte: break; // authored counter and impact
+			case Paths::Ability::kDeadeye: break; // spinning rune and explosion
+			case Paths::Ability::kVolley: look=Effects::Look::kVolley; break;
+			case Paths::Ability::kSurge: look=Effects::Look::kSurge; break;
+			// Berserk's own mantle supplies its rank III reveal.
+			case Paths::Ability::kWarCry: look=Effects::Look::kWarCry; break;
+			// Disarm supplies its own rank III weapon flash and crossed slashes.
+			case Paths::Ability::kPinningShot: break; // Windstep supplies its own echoes and gust
+			default: break;
+			}
+			if (look != Effects::Look::kCount) Effects::FinalRank(a_actor, look);
 		}
-		const auto& sounds = Forms::Get().chicken;
-		Play(sounds[std::uniform_int_distribution<std::size_t>(0, sounds.size() - 1)(dice)], a_actor);
+
 	}
 
 	void HandGlow(RE::Actor* a_caster, RE::SpellItem* a_spell, float a_seconds, std::size_t a_hand)
@@ -151,10 +218,23 @@ namespace FWM::Abilities
 		std::vector<Boost> boosts;
 		std::vector<Boost> fromSave;  // on in a save just loaded; taken off at the next update
 
-		void Mod(RE::FormID a_id, RE::ActorValue a_value, float a_amount)
+		void Mod(RE::FormID a_id, RE::ActorValue a_value, float a_amount, bool a_removing = false)
 		{
 			if (auto* actor = RE::TESForm::LookupByID<RE::Actor>(a_id); actor && a_amount != 0.0f) {
 				actor->AsActorValueOwner()->ModActorValue(RE::ACTOR_VALUE_MODIFIER::kTemporary, a_value, a_amount);
+				if (a_removing && (a_value == RE::ActorValue::kWeaponSpeedMult || a_value == RE::ActorValue::kLeftWeaponSpeedMultiply)) {
+					// Skyrim's unset zero means ordinary attack speed. A tiny positive rounding
+					// remnant would instead mean almost no attacks. Leave substantive modifiers alone.
+					const float correction = ChaosDown::AttackUnsetCorrection(Game::Current(actor, a_value));
+					if (correction != 0.0f) actor->AsActorValueOwner()->ModActorValue(RE::ACTOR_VALUE_MODIFIER::kTemporary, a_value, correction);
+				}
+				if (a_value == RE::ActorValue::kSpeedMult) {
+					// Skyrim can cache movement until encumbrance changes. Invalidate it both
+					// when slowing and when restoring, without leaving any carry-weight change.
+					auto* values = actor->AsActorValueOwner();
+					values->ModActorValue(RE::ACTOR_VALUE_MODIFIER::kTemporary, RE::ActorValue::kCarryWeight, 0.1f);
+					values->ModActorValue(RE::ACTOR_VALUE_MODIFIER::kTemporary, RE::ActorValue::kCarryWeight, -0.1f);
+				}
 			}
 		}
 
@@ -165,7 +245,7 @@ namespace FWM::Abilities
 				if (a_value && a_boost.value != *a_value) {
 					return false;
 				}
-				Mod(a_boost.id, a_boost.value, -a_boost.amount);
+				Mod(a_boost.id, a_boost.value, -a_boost.amount, true);
 				return true;
 			});
 		}
@@ -233,6 +313,12 @@ namespace FWM::Abilities
 			return a_numbers.armor;
 		}
 
+		// For the player: a number and the noun, so a translation needs only its two forms.
+		std::string CountSaid(int a_count)
+		{
+			return a_count == 0 ? std::string(Tr("no enemy")) : Trn(a_count, "{} enemy", "{} enemies");
+		}
+
 		std::string Count(int a_count)
 		{
 			static constexpr std::array<std::string_view, 7> words{ "no enemy", "one enemy", "two enemies", "three enemies", "four enemies", "five enemies", "six enemies" };
@@ -259,7 +345,7 @@ namespace FWM::Abilities
 			a_member.shielding = false;
 			a_member.shieldFacing = {};
 			a_member.shieldRest = std::max(a_member.shieldRest, kShieldRest);
-			if (a_tank) {
+			if (a_tank && !Ripostes::Guarding(a_tank->GetFormID())) {
 				a_tank->NotifyAnimationGraph("blockStop");
 			}
 			if (!a_why.empty()) {
@@ -270,7 +356,7 @@ namespace FWM::Abilities
 		// The block raised against an arrow in flight (BlockIncoming), let go of.
 		void DropBlock(Party::Member& a_member, RE::Actor* a_tank)
 		{
-			if (a_member.blockRaised && a_tank && !a_member.shielding) {
+			if (a_member.blockRaised && a_tank && !a_member.shielding && !Ripostes::Guarding(a_tank->GetFormID())) {
 				a_tank->NotifyAnimationGraph("blockStop");
 			}
 			a_member.blockRaised = false;
@@ -368,30 +454,30 @@ namespace FWM::Abilities
 			const auto& settings = Settings::Get();
 			const auto& tuning = settings.tuning;
 			a_member.inCombatFor += a_dt;
-			auto refuse = [&](std::string a_why) {
+			auto refuse = [&](std::string_view a_why) {
 				if (a_member.tauntRequested) {
 					a_member.tauntRequested = false;
 					Answer(a_member, std::move(a_why));
 				}
 			};
-			if (!settings.taunt) {
-				refuse("Taunts are switched off (Tanks settings).");
+			if (!settings.taunt && !PathsLink::DebugCasting(a_member.id)) {
+				refuse(Tr("Taunts are switched off (Tanks settings)."));
 				return;
 			}
-			if (a_member.tauntReady > 0.0f) {
-				refuse(std::format("Not yet: ready in {:.0f} s.", std::ceil(a_member.tauntReady)));
+			if (a_member.tauntReady > 0.0f && !PathsLink::DebugCasting(a_member.id)) {
+				refuse(Trf("Not yet: ready in {:.0f} s.", std::ceil(a_member.tauntReady)));
 				return;
 			}
 			if (Busy(a_tank)) {
 				if (a_member.tauntRequested && WaitedTooLong(a_member)) {
-					refuse("Could not break off to taunt.");
+					refuse(Tr("Could not break off to taunt."));
 				}
 				return;
 			}
-			if (Game::Current(a_tank, RE::ActorValue::kStamina) < tuning.tauntStamina) {
-				refuse(std::format("Too tired: a taunt takes {:.0f} stamina.", tuning.tauntStamina));
-				return;
-			}
+
+
+            if (const auto block=ResourceBlock(a_tank,Paths::Ability::kTaunt); !block.empty()) { refuse(block); return; }
+			if (!a_member.tauntRequested && !AbilityAuto::Allow(a_member, a_tank, Paths::Ability::kTaunt)) return;
 
 			const auto preview = PreviewTaunt(a_tank);
 			const auto numbers = NumbersFor(a_tank, a_kit);
@@ -412,7 +498,7 @@ namespace FWM::Abilities
 				// An archer or caster on the player is drawn from much further: their fire goes to
 				// the tank, whose style is built to block it, instead of the player.
 				const bool  shootingPlayer = (profile.archer || profile.caster) && profile.target == playerHandle;
-				const float reach = shootingPlayer ? std::max(preview.radius, tuning.tauntRangedReach) : preview.radius;
+				const float reach = a_member.tauntRequested ? (shootingPlayer ? std::max(preview.radius, tuning.tauntRangedReach) : preview.radius) : std::min(preview.radius, 900.0f);
 				if (!enemy || !Game::Usable(enemy.get()) || Game::Distance(a_tank, enemy.get()) > reach) {
 					continue;
 				}
@@ -442,9 +528,9 @@ namespace FWM::Abilities
 				candidates.push_back({ enemy, &profile });
 				drawn += shootingPlayer ? 1 : 0;
 			}
-			if (candidates.empty()) {
+			if (candidates.empty() && !PathsLink::DebugCasting(a_member.id)) {
 				a_member.tauntPending = false;
-				refuse(std::format("No enemy in sight within {:.0f}.", preview.radius));
+				refuse(Trf("No enemy in sight within {:.0f}.", preview.radius));
 				return;
 			}
 
@@ -472,7 +558,7 @@ namespace FWM::Abilities
 			// The challenge lands with its animation: tried again for a moment if the game
 			// refuses it, and only taken without one once that moment has passed.
 			const bool animated = Challenge(a_tank);
-			if (!animated && a_member.tauntPendingFor < kTauntWait) {
+			if (!animated && a_member.tauntPendingFor < kTauntWait && !PathsLink::DebugCasting(a_member.id)) {
 				return;
 			}
 			a_member.tauntPending = false;
@@ -480,9 +566,10 @@ namespace FWM::Abilities
 			if (settings.glowSeconds > 0.0f) {
 				Effects::Flash(a_tank, Effects::Look::kTaunt, settings.glowSeconds);
 			}
-			Play(forms.tauntSound, a_tank);
-			Used(a_member.id, a_tank);
-			a_tank->AsActorValueOwner()->DamageActorValue(RE::ActorValue::kStamina, tuning.tauntStamina);
+			if (!TauntBears::Call(a_tank, a_kit.Rank(Paths::Ability::kTaunt) >= 3)) {
+				Play(forms.tauntSound, a_tank);
+			}
+			Used(a_member.id, a_tank, Paths::Ability::kTaunt, a_member.tauntRequested);
 			const float braced = BraceTank(a_tank, numbers, a_kit);
 
 			int         heldCount = 0;
@@ -517,8 +604,8 @@ namespace FWM::Abilities
 
 			const bool ordered = a_member.tauntRequested;
 			if (ordered) {
-				Answer(a_member, heldCount > 0 ? std::format("Taunted: {} turned on them.", Count(heldCount)) :
-				                                 std::format("Taunted, but {} shrugged it off.", shrugged.empty() ? "everyone"s : shrugged),
+				Answer(a_member, heldCount > 0 ? Trf("Taunted: {} turned on them.", CountSaid(heldCount)) :
+				                                 Trf("Taunted, but {} shrugged it off.", shrugged.empty() ? std::string(Tr("everyone")) : shrugged),
 					heldCount > 0);
 			}
 			a_member.tauntCooldown = numbers.cooldown;
@@ -526,17 +613,18 @@ namespace FWM::Abilities
 			a_member.opened = true;
 			a_member.tauntRequested = false;
 
-			std::string line = std::format("{} taunts: {} {}.", a_member.name, Count(heldCount), heldCount == 1 ? "turns on them" : "turn on them");
+			const auto  turned = Trn(heldCount, "{} enemy turns on them", "{} enemies turn on them");
+			std::string line = Trf("{} taunts: {}.", a_member.name, turned);
 			if (drawn > 0 && heldCount > 0) {
-				line = std::format("{} draws the fire: {} {}.", a_member.name, Count(heldCount), heldCount == 1 ? "turns on them" : "turn on them");
+				line = Trf("{} draws the fire: {}.", a_member.name, turned);
 			}
 			if (!shrugged.empty()) {
-				line += std::format(" {} shrugs it off.", shrugged);
+				line += Trf(" {} shrugs it off.", shrugged);
 			}
 			if (braced > 0.0f) {
-				line += std::format(" Braced: +{:.0f} armor.", braced);
+				line += Trf(" Braced: +{:.0f} armor.", braced);
 			}
-			Notices::Push(std::move(line), Notices::Kind::kTaunt);
+			Notices::Used(line, Paths::Ability::kTaunt, Notices::Kind::kTaunt);
 			Log::Info("[Taunt] {} (Lv {}) radius {:.0f}: held {} of {}, idle {}, why {}, braced +{:.0f} armor for {:.0f} s."sv, a_member.name, tankLevel,
 				preview.radius, heldCount, candidates.size(), animated ? "played"sv : "refused"sv,
 				ordered ? "ordered"sv : (peel ? "peel"sv : "opener"sv), braced, braced > 0.0f ? numbers.hold : 0.0f);
@@ -569,7 +657,7 @@ namespace FWM::Abilities
 			}
 		}
 
-		// --- Heal: the whole party at once ---------------------------------
+		// --- Heal: a circle of healing light on the ground --------------------
 
 		// Knocked about too badly to do anything: staggered, thrown, or in a kill move.
 		bool Reeling(RE::Actor* a_actor)
@@ -617,7 +705,7 @@ namespace FWM::Abilities
 		{
 			std::vector<RE::NiPointer<RE::Actor>> team;
 			auto add = [&](RE::NiPointer<RE::Actor> a_actor) {
-				if (a_actor && !a_actor->IsDead() && a_actor->Is3DLoaded() && Game::Distance(a_healer, a_actor.get()) <= a_reach) {
+				if (AbilityAuto::Visible(a_healer, a_actor.get(), a_reach)) {
 					team.push_back(std::move(a_actor));
 				}
 			};
@@ -628,153 +716,143 @@ namespace FWM::Abilities
 			return team;
 		}
 
-		// Sun's Bane: undead the heal reaches lose a share of their health to it.
-		int SunsBane(RE::Actor* a_healer, float a_share)
-		{
-			const auto* undead = Forms::Get().undead;
-			if (a_share <= 0.0f || !undead) {
-				return 0;
-			}
-			int burned = 0;
-			for (const auto& profile : Enemies::All()) {
-				auto enemy = profile.handle.get();
-				if (!enemy || !Game::Usable(enemy.get()) || Game::Distance(a_healer, enemy.get()) > Settings::Get().tuning.healReach || !enemy->HasKeyword(undead)) {
-					continue;
-				}
-				const float share = profile.boss ? a_share * 0.5f : a_share;
-				enemy->AsActorValueOwner()->DamageActorValue(RE::ActorValue::kHealth, Game::Maximum(enemy.get(), RE::ActorValue::kHealth) * share);
-				Effects::Flash(enemy.get(), Effects::Look::kShaken);
-				++burned;
-			}
-			return burned;
-		}
-
-		// Not a spell: the healer's own gift, no magicka spent, so a healer gone dry still has
-		// it. Without a path, everyone within reach is healed by the same amount, more as the
-		// healer rises in level; on one, by a share of each one's own health, more with each
-		// rank. On their own, they use it once anyone is down or under their line.
+		// The healer's circle spends the shared ranked magicka cost on activation. A
+		// circle of light raised on the ground where it helps most (Circles): everyone of the party
+		// in it heals a little every moment, the undead in it burn, and hurt companions walk into it.
+		// Without a path it gives a set amount over its life, more as the healer rises in level; on
+		// one, a share of each one's own health a second, more with each rank. On their own, they
+		// raise it once anyone is down or under their line.
 		void Heal(Party::Member& a_member, RE::Actor* a_healer, const Orders& a_orders, const PathsLink::Kit& a_kit)
 		{
 			const auto& settings = Settings::Get();
 			const auto& tuning = settings.tuning;
-			auto        refuse = [&](std::string a_why) {
+			auto        refuse = [&](std::string_view a_why) {
                 if (a_member.healRequested) {
                     a_member.healRequested = false;
                     Answer(a_member, std::move(a_why));
                 }
 			};
-			if (!settings.heal) {
-				refuse("Healing is switched off (Healers settings).");
+			if (!settings.heal && !PathsLink::DebugCasting(a_member.id)) {
+				refuse(Tr("Healing is switched off (Healers settings)."));
 				return;
 			}
-			if (a_member.healReady > 0.0f) {
-				refuse(std::format("Not yet: ready in {:.0f} s.", std::ceil(a_member.healReady)));
+			if (a_member.healReady > 0.0f && !PathsLink::DebugCasting(a_member.id)) {
+				refuse(Trf("Not yet: ready in {:.0f} s.", std::ceil(a_member.healReady)));
 				return;
 			}
 			if (a_healer->AsActorState()->IsBleedingOut()) {
-				refuse("Down themselves.");
+				refuse(Tr("Down themselves."));
 				return;
 			}
 			if (Reeling(a_healer)) {
 				if (a_member.healRequested && WaitedTooLong(a_member)) {
-					refuse("Knocked about; could not.");
+					refuse(Tr("Knocked about; could not."));
 				}
 				return;
 			}
 			if (!PathsLink::AutoOn(a_orders, a_kit, Paths::Ability::kHeal) && !a_member.healRequested) {
 				return;
 			}
+			if (Circles::Standing(a_member.id)) {
+				refuse(Tr("Their circle still stands."));
+				return;
+			}
 
-			const auto  team = Team(a_healer, tuning.healReach);
+            if (const auto block=ResourceBlock(a_healer,Paths::Ability::kHeal); !block.empty()) { refuse(block); return; }
+			if (!a_member.healRequested && !AbilityAuto::Allow(a_member, a_healer, Paths::Ability::kHeal)) return;
+			const auto team = Team(a_healer, a_member.healRequested ? tuning.healReach : std::min(tuning.healReach, AbilityPolicy::kSupportReach));
 			const float line = static_cast<float>(a_orders.healThreshold) / 100.0f;
 			float       lowest = 1.0f;
 			RE::Actor*  worst = nullptr;
 			int         down = 0;
 			int         hurt = 0;
+			std::vector<HealCircle::Ally> allies;
+			allies.reserve(team.size());
 			for (const auto& actor : team) {
 				const float health = Game::Fraction(actor.get(), RE::ActorValue::kHealth);
-				down += actor->AsActorState()->IsBleedingOut() ? 1 : 0;
+				const bool  bleeding = actor->AsActorState()->IsBleedingOut();
+				down += bleeding ? 1 : 0;
 				hurt += health < 0.95f ? 1 : 0;
 				if (health < lowest) {
 					lowest = health;
 					worst = actor.get();
 				}
+				const auto at = actor->GetPosition();
+				allies.push_back({ at.x, at.y, health, actor->IsPlayerRef(), bleeding });
 			}
 			if (!a_member.healRequested && down == 0 && lowest >= line) {
 				return;
 			}
-			if (down == 0 && hurt == 0) {
-				refuse(std::format("Nobody within {:.0f} needs healing.", tuning.healReach));
+			if (down == 0 && hurt == 0 && !PathsLink::DebugCasting(a_member.id)) {
+				refuse(Trf("Nobody within {:.0f} needs healing.", tuning.healReach));
 				return;
 			}
 
-			float       amount = Rules::TeamHealAmount(a_healer->GetLevel(), tuning);
-			const float bonus = PathBonus::Healing(a_member.id);
+			Circles::Strength strength;
+			strength.seconds = HealCircle::kSeconds;
+			strength.radius = HealCircle::kRadius;
+			strength.bonus = PathBonus::Healing(a_member.id);
 			if (a_kit.tree) {
-				// A share of each one's own health; Triage gives more to the badly hurt.
-				const float share = Paths::Value(Paths::Perk::kHeal, std::max(a_kit.Rank(Paths::Ability::kHeal), 1)) / 100.0f;
-				const float triage = a_kit.Value(Paths::Perk::kTriage) / 100.0f;
-				float       most = 0.0f;
-				for (const auto& actor : team) {
-					const bool  badly = Game::Fraction(actor.get(), RE::ActorValue::kHealth) < Paths::kTriageLine;
-					const float give = Game::Maximum(actor.get(), RE::ActorValue::kHealth) * share * (badly ? 1.0f + triage : 1.0f) * bonus;
-					actor->AsActorValueOwner()->RestoreActorValue(RE::ActorValue::kHealth, give);
-					most = std::max(most, give);
-				}
-				amount = most;
-				if (const int burned = SunsBane(a_healer, a_kit.Value(Paths::Perk::kHealSunsBane) / 100.0f); burned > 0) {
-					Log::Info("[Heal] {}'s heal burns {} undead."sv, a_member.name, burned);
-				}
+				const int rank = std::max(a_kit.Rank(Paths::Ability::kHeal), 1);
+				strength.healShare = Paths::Value(Paths::Perk::kHeal, rank) / 100.0f;
+				strength.burnShare = (0.005f + 0.005f * static_cast<float>(rank));
+				strength.staminaShare = a_kit.Value(Paths::Perk::kHealInvigorate) / 100.0f;
+				strength.radius += a_kit.Value(Paths::Perk::kHealWide);
+				strength.grand = rank >= 3 || a_kit.Rank(Paths::Perk::kHealWide) >= 3;
+				strength.triage = a_kit.Value(Paths::Perk::kTriage) / 100.0f;
 			} else {
-				for (const auto& actor : team) {
-					actor->AsActorValueOwner()->RestoreActorValue(RE::ActorValue::kHealth, amount);
-				}
+				strength.healFlat = Rules::TeamHealAmount(a_healer->GetLevel(), tuning) / HealCircle::kSeconds;
+				strength.burnFlat = strength.healFlat * 0.4f;
 			}
-			ShowCast(a_healer, team, Forms::Get().handsGreen, Forms::Get().healSound, Effects::Look::kHealAura);
-			Used(a_member.id, a_healer);
+			const int at = HealCircle::Place(allies, strength.radius);
+			auto*     on = at >= 0 ? team[static_cast<std::size_t>(at)].get() : a_healer;
+			if (!Circles::Raise(a_member.id, a_member.name, on, strength)) {
+				refuse(Tr("Could not raise the circle here."));
+				return;
+			}
+			ShowCast(a_healer, {}, Forms::Get().handsGreen, Forms::Get().healSound, Effects::Look::kHealAura);
+			Used(a_member.id, a_healer, Paths::Ability::kHeal, a_member.healRequested);
 			a_member.healReady = a_kit.tree ? a_kit.Cooldown(Paths::Ability::kHeal) : tuning.healCooldown;
-			const auto who = team.size() == 1 ? std::string(team.front()->IsPlayerRef() ? "you" : "themselves") : std::format("{} of the party", team.size());
-			const auto gift = a_kit.tree ? std::format("{:.0f}% of their health", Paths::Value(Paths::Perk::kHeal, std::max(a_kit.Rank(Paths::Ability::kHeal), 1)) * bonus) :
-			                               std::format("+{:.0f} health", amount);
-			Notices::Push(std::format("{} heals {}: {}.", a_member.name, team.size() == 1 ? who : "the party"s, gift), Notices::Kind::kHeal);
-			Log::Info("[Heal] {} heals {} for {:.0f} each ({} down; lowest {} at {:.0f}%){}."sv, a_member.name, who, amount, down,
+			const auto where = on->IsPlayerRef() ? std::string(Tr("you")) : (on == a_healer ? std::string(Tr("themselves")) : Game::Name(on));
+			Notices::Used(Trf("{} raises a healing circle under {}.", a_member.name, where), Paths::Ability::kHeal, Notices::Kind::kHeal);
+			Log::Info("[Heal] {} raises the circle ({} down; lowest {} at {:.0f}%){}."sv, a_member.name, down,
 				worst ? (worst->IsPlayerRef() ? "you"s : Game::Name(worst)) : "nobody"s, lowest * 100.0f, a_member.healRequested ? ", as ordered" : "");
 			if (a_member.healRequested) {
 				a_member.healRequested = false;
-				Answer(a_member, std::format("Healed {}: {} each.", who, gift), true);
+				Answer(a_member, Trf("Healing circle under {}.", where), true);
 			}
 		}
 
-		// --- Rejuvenate: everyone's magicka back faster ----------------------
+		// --- Rejuvenate: bounded restoration inside an anchored circle ------
 
-		// Your magicka and every companion's comes back faster for a while: rejuvenateBonus percent,
-		// for longer as the healer rises in level. On their own, they use it once you or a caster in
+		// Direct magicka restoration works even while casting. Allies must stay in the circle,
+		// which lasts longer with rank. On their own, they use it once you or a caster in
 		// the party has run dry or is close to it.
 		void Rejuvenate(Party::Member& a_member, RE::Actor* a_healer, const Orders& a_orders, const PathsLink::Kit& a_kit)
 		{
 			const auto& settings = Settings::Get();
 			const auto& tuning = settings.tuning;
-			auto        refuse = [&](std::string a_why) {
+			auto        refuse = [&](std::string_view a_why) {
                 if (a_member.rejuvenateRequested) {
                     a_member.rejuvenateRequested = false;
                     Answer(a_member, std::move(a_why));
                 }
 			};
-			if (!settings.rejuvenate) {
-				refuse("Rejuvenate is switched off (Healers settings).");
+			if (!settings.rejuvenate && !PathsLink::DebugCasting(a_member.id)) {
+				refuse(Tr("Rejuvenate is switched off (Healers settings)."));
 				return;
 			}
-			if (a_member.rejuvenateReady > 0.0f) {
-				refuse(std::format("Not yet: ready in {:.0f} s.", std::ceil(a_member.rejuvenateReady)));
+			if (a_member.rejuvenateReady > 0.0f && !PathsLink::DebugCasting(a_member.id)) {
+				refuse(Trf("Not yet: ready in {:.0f} s.", std::ceil(a_member.rejuvenateReady)));
 				return;
 			}
 			if (a_healer->AsActorState()->IsBleedingOut()) {
-				refuse("Down themselves.");
+				refuse(Tr("Down themselves."));
 				return;
 			}
 			if (Reeling(a_healer)) {
 				if (a_member.rejuvenateRequested && WaitedTooLong(a_member)) {
-					refuse("Knocked about; could not.");
+					refuse(Tr("Knocked about; could not."));
 				}
 				return;
 			}
@@ -782,12 +860,16 @@ namespace FWM::Abilities
 				return;
 			}
 
+            if (const auto block=ResourceBlock(a_healer,Paths::Ability::kRejuvenate); !block.empty()) { refuse(block); return; }
+			if (!a_member.rejuvenateRequested && !AbilityAuto::Allow(a_member, a_healer, Paths::Ability::kRejuvenate)) return;
+			const int lookRank = a_kit.tree ? std::max(a_kit.Rank(Paths::Ability::kRejuvenate), 1) : (a_healer->GetLevel() >= 60 ? 3 : a_healer->GetLevel() >= 30 ? 2 : 1);
+			const float reach = RejuvenatePolicy::Radius(lookRank);
 			std::vector<RE::NiPointer<RE::Actor>> reached;
 			bool                                  needed = false;
 			bool                                  anyShort = false;
 			std::string                           dry;
 			// You first: low on magicka yourself is as good a reason as a companion running dry.
-			if (auto* player = RE::PlayerCharacter::GetSingleton()) {
+			if (auto* player = RE::PlayerCharacter::GetSingleton(); AbilityAuto::Visible(a_healer, player, reach)) {
 				const float yours = Game::Fraction(player, RE::ActorValue::kMagicka);
 				anyShort = yours < 0.95f;
 				if (yours < 0.3f && RejuvenatedFor(player->GetFormID()) <= 0.0f) {
@@ -797,8 +879,8 @@ namespace FWM::Abilities
 				reached.emplace_back(player);
 			}
 			for (const auto& member : Party::Members()) {
-				auto actor = member.summon ? RE::NiPointer<RE::Actor>{} : member.handle.get();
-				if (!actor || actor->IsDead() || !actor->Is3DLoaded()) {
+				auto actor = !member.CanTakeRole() ? RE::NiPointer<RE::Actor>{} : member.handle.get();
+				if (!AbilityAuto::Visible(a_healer, actor.get(), reach)) {
 					continue;
 				}
 				const auto* orders = Party::FindOrders(member.id);
@@ -816,8 +898,8 @@ namespace FWM::Abilities
 			if (!a_member.rejuvenateRequested && !needed) {
 				return;
 			}
-			if (!anyShort) {
-				refuse("Everyone's magicka is full.");
+			if (!anyShort && !PathsLink::DebugCasting(a_member.id)) {
+				refuse(Tr("Everyone's magicka is full."));
 				return;
 			}
 
@@ -825,31 +907,60 @@ namespace FWM::Abilities
 			const float seconds = a_kit.tree ? Paths::Value(Paths::Perk::kRejuvenate, std::max(a_kit.Rank(Paths::Ability::kRejuvenate), 1)) :
 			                                   Rules::RejuvenateSeconds(level, tuning);
 			const float wellspring = a_kit.Value(Paths::Perk::kRejuvenateWellspring) / 100.0f;
-			const float vigor = a_kit.Value(Paths::Perk::kRejuvenateVigor);
+			const float vigor = a_kit.Value(Paths::Perk::kRejuvenateVigor) / 100.0f;
 			for (const auto& actor : reached) {
-				Lift(actor->GetFormID(), RE::ActorValue::kMagickaRateMult, tuning.rejuvenateBonus, seconds,
-					a_kit.tree ? static_cast<std::uint16_t>(Paths::Perk::kRejuvenate) : 0);
-				if (wellspring > 0.0f) {
-					actor->AsActorValueOwner()->RestoreActorValue(RE::ActorValue::kMagicka, Game::Maximum(actor.get(), RE::ActorValue::kMagicka) * wellspring);
-				}
-				if (vigor > 0.0f) {
-					Lift(actor->GetFormID(), RE::ActorValue::kStaminaRateMult, vigor, seconds, static_cast<std::uint16_t>(Paths::Perk::kRejuvenateVigor));
+				if (wellspring > 0.0f && RejuvenateField::On(actor.get()).left <= 0) {
+					const float give = RejuvenatePolicy::Restore(Game::Maximum(actor.get(), RE::ActorValue::kMagicka), Game::Current(actor.get(), RE::ActorValue::kMagicka), wellspring, 1.0f, 30.0f);
+					actor->AsActorValueOwner()->RestoreActorValue(RE::ActorValue::kMagicka, give);
 				}
 			}
+			RejuvenateField::Begin(a_healer, lookRank, seconds, vigor);
 			ShowCast(a_healer, reached, Forms::Get().handsBlue, Forms::Get().rejuvenateSound, Effects::Look::kRejuvenateAura);
-			Used(a_member.id, a_healer);
+			Rejuvenations::Begin(a_healer, lookRank, seconds);
+			Used(a_member.id, a_healer, Paths::Ability::kRejuvenate, a_member.rejuvenateRequested);
 			a_member.rejuvenateCooldown = a_kit.tree ? a_kit.Cooldown(Paths::Ability::kRejuvenate) : Rules::RejuvenateCooldown(level, tuning);
 			a_member.rejuvenateReady = a_member.rejuvenateCooldown;
-			Notices::Push(std::format("{} rejuvenates you and the party: magicka {:.0f}% faster for {:.0f} s.", a_member.name, tuning.rejuvenateBonus, seconds),
-				Notices::Kind::kHeal);
-			Log::Info("[Heal] {} rejuvenates you and {} companion(s): magicka {:.0f}% faster for {:.0f} s, ready again in {:.0f} s{}."sv, a_member.name, reached.size() - 1,
-				tuning.rejuvenateBonus, seconds, a_member.rejuvenateCooldown,
+			Notices::Used(Trf("{} raises Rejuvenate: {:g}% magicka per second for {:.0f} s.", a_member.name, RejuvenatePolicy::Rate(lookRank)*100, seconds),
+				Paths::Ability::kRejuvenate, Notices::Kind::kHeal);
+			Log::Info("[Rejuvenate] {} raises rank {} circle: ranked magicka restoration, radius {:.0f}, {:.0f} s, cooldown {:.0f} s{}."sv, a_member.name, lookRank, reach,
+				seconds, a_member.rejuvenateCooldown,
 				a_member.rejuvenateRequested ? ", as ordered"s : (dry.empty() ? ""s : std::format(" ({} ran low)", dry)));
 			if (a_member.rejuvenateRequested) {
 				a_member.rejuvenateRequested = false;
-				Answer(a_member, std::format("Rejuvenated: magicka {:.0f}% faster for {:.0f} s.", tuning.rejuvenateBonus, seconds), true);
+				Answer(a_member, Trf("Rejuvenate: {:g}% magicka per second inside the circle for {:.0f} s.", RejuvenatePolicy::Rate(lookRank)*100, seconds), true);
 			}
 		}
+	}
+
+	void DebugActivate(Party::Member& member, Role role, Paths::Ability ability, int rank)
+	{
+		if (!member.CanTakeRole() || !PathsLink::Unlimited(member.id)) { Party::Answer(member, Tr("Enable Debug Mode first.")); return; }
+		const int index=static_cast<std::size_t>(role)<Paths::kRoles ? Paths::IndexOf(role,ability) : -1;
+		if (index<0 || rank<1 || rank>3 || ability==Paths::Ability::kNone) { Party::Answer(member,Tr("Invalid ability rank.")); return; }
+		auto actor=member.handle.get();
+		if (!actor || !Game::Usable(actor.get()) || !actor->Get3D()) { Party::Answer(member,Tr("Companion unavailable.")); return; }
+		if (Busy(actor.get()) || DragonBreaths::Channeling(actor.get())) { Party::Answer(member,Tr("Companion is busy.")); return; }
+		auto record=Paths::Fresh();
+		record.ranks[static_cast<std::size_t>(role)][static_cast<std::size_t>(index)]=static_cast<std::uint8_t>(rank);
+		PathsLink::Kit kit; kit.role=role; kit.tree=true; kit.record=&record; kit.slots[0]=ability;
+		const PathsLink::ScopedDebugCast debug(member.id,kit);
+		Orders orders; if (const auto* saved=Party::FindOrders(member.id)) orders=*saved; orders.role=role;
+		// Test requests and cooldowns never replace the player's queued orders or cooldowns.
+		const auto before=member;
+		switch(ability) {
+		case Paths::Ability::kTaunt: member.tauntRequested=true; Taunt(member,actor.get(),orders,kit,0); break;
+		case Paths::Ability::kHeal: member.healRequested=true; Heal(member,actor.get(),orders,kit); break;
+		case Paths::Ability::kRejuvenate: member.rejuvenateRequested=true; Rejuvenate(member,actor.get(),orders,kit); break;
+		default:
+			if (Paths::SpecialFor(ability)!=Special::kNone) Specials::DebugActivate(member,actor.get(),kit,ability);
+			else Arts::DebugActivate(member,actor.get(),kit,ability);
+			break;
+		}
+		member.tauntRequested=before.tauntRequested; member.healRequested=before.healRequested; member.rejuvenateRequested=before.rejuvenateRequested;
+		member.tauntReady=before.tauntReady; member.healReady=before.healReady; member.rejuvenateReady=before.rejuvenateReady;
+		member.tauntPending=before.tauntPending; member.tauntPendingFor=before.tauntPendingFor;
+		member.rejuvenateCooldown=before.rejuvenateCooldown;
+		Log::Info("[Debug] {} requested {} rank {}."sv,member.name,Paths::Info(ability).name,rank);
 	}
 
 	void Update(float a_dt)
@@ -861,7 +972,7 @@ namespace FWM::Abilities
 			if (member.tauntPending) {
 				member.tauntPendingFor += a_dt;
 			}
-			if (member.summon) {
+			if (!member.CanTakeRole()) {
 				continue;
 			}
 			auto actor = member.handle.get();
@@ -886,7 +997,7 @@ namespace FWM::Abilities
 			auto       notCarried = [&](bool& a_requested, Paths::Ability a_ability) {
                 if (a_requested && !kit.Carries(a_ability)) {
                     a_requested = false;
-                    Answer(member, std::format("{} is not one of the abilities they carry.", Paths::Info(a_ability).name));
+                    Answer(member, Trf("{} is not one of the abilities they carry.", Paths::Info(a_ability).name));
                 }
 			};
 			notCarried(member.tauntRequested, Paths::Ability::kTaunt);
@@ -930,7 +1041,7 @@ namespace FWM::Abilities
 		bool watching = false;
 		for (const auto& member : Party::Members()) {
 			const auto* orders = Party::FindOrders(member.id);
-			watching = watching || member.blockRaised || (orders && orders->role == Role::kTank && !member.summon);
+			watching = watching || member.blockRaised || (orders && orders->role == Role::kTank && member.CanTakeRole());
 		}
 		if (!watching) {
 			return;
@@ -967,7 +1078,7 @@ namespace FWM::Abilities
 			member.blockHold = std::max(member.blockHold - a_dt, 0.0f);
 			auto tank = member.handle.get();
 			const auto* orders = Party::FindOrders(member.id);
-			if (!tank || !orders || orders->role != Role::kTank || member.summon || !Game::Usable(tank.get()) || !HasShield(tank.get())) {
+			if (!tank || !orders || orders->role != Role::kTank || !member.CanTakeRole() || !Game::Usable(tank.get()) || !HasShield(tank.get())) {
 				DropBlock(member, tank.get());
 				continue;
 			}
@@ -1032,7 +1143,7 @@ namespace FWM::Abilities
 				member.tauntRequested = false;
 				member.healRequested = false;
 				member.rejuvenateRequested = false;
-				Answer(member, "The fight is over.");
+				Answer(member, Tr("The fight is over."));
 			}
 		}
 	}
@@ -1065,7 +1176,7 @@ namespace FWM::Abilities
 		p.noChanceFrom = p.certainUpTo + tuning.tauntFalloffLevels + 1;
 		p.hold = numbers.hold;
 		p.cooldown = numbers.cooldown;
-		p.stamina = tuning.tauntStamina;
+		p.stamina = ResourceCost(a_tank, Paths::Ability::kTaunt);
 		p.armorSeconds = p.hold;
 		p.armor = numbers.armor;
 		return p;
@@ -1081,6 +1192,11 @@ namespace FWM::Abilities
 			}
 		}
 		holds.push_back({ a_enemy, a_tank, a_seconds });
+	}
+
+	void DropHoldsOn(const RE::ActorHandle& target)
+	{
+		std::erase_if(holds,[&](const Hold& hold){return hold.tank==target;});
 	}
 
 	void Lift(RE::FormID a_id, RE::ActorValue a_value, float a_amount, float a_seconds, std::uint16_t a_source)
@@ -1119,7 +1235,7 @@ namespace FWM::Abilities
 			if (a_boost.source != a_source || (a_id && a_boost.id != *a_id) || (a_value && a_boost.value != *a_value)) {
 				return false;
 			}
-			Mod(a_boost.id, a_boost.value, -a_boost.amount);
+			Mod(a_boost.id, a_boost.value, -a_boost.amount, true);
 			return true;
 		});
 	}
@@ -1143,6 +1259,15 @@ namespace FWM::Abilities
 		return out;
 	}
 
+	std::vector<std::pair<std::uint32_t, float>> BoostTimes(RE::ActorValue a_value, std::uint16_t a_source)
+	{
+		std::vector<std::pair<std::uint32_t, float>> out;
+		for (const auto& boost : boosts) {
+			if (boost.value == a_value && boost.source == a_source) out.emplace_back(boost.id, boost.left);
+		}
+		return out;
+	}
+
 	void LoadBoosts(const std::vector<SavedBoost>& a_saved)
 	{
 		for (const auto& saved : a_saved) {
@@ -1152,8 +1277,9 @@ namespace FWM::Abilities
 
 	void UpdateBoosts(float a_dt)
 	{
+		RejuvenateField::Tick(a_dt);
 		for (const auto& boost : fromSave) {
-			Mod(boost.id, boost.value, -boost.amount);
+			Mod(boost.id, boost.value, -boost.amount, true);
 			if (boost.value == RE::ActorValue::kDamageResist) {
 				Log::Info("[Taunt] {:08X}: {:+.0f} armor from an ability still on when the game was saved is off again."sv, boost.id, boost.amount);
 			} else if (boost.value == RE::ActorValue::kMagickaRateMult) {
@@ -1169,7 +1295,7 @@ namespace FWM::Abilities
 			if (a_boost.left > 0.0f) {
 				return false;
 			}
-			Mod(a_boost.id, a_boost.value, -a_boost.amount);
+			Mod(a_boost.id, a_boost.value, -a_boost.amount, true);
 			return true;
 		});
 	}
@@ -1181,6 +1307,7 @@ namespace FWM::Abilities
 
 	void EndBoosts()
 	{
+		RejuvenateField::Clear();
 		Drop(std::nullopt);
 		fromSave.clear();
 	}
@@ -1212,6 +1339,7 @@ namespace FWM::Abilities
 
 	float RejuvenatedFor(RE::FormID a_id)
 	{
+		if (const auto field = RejuvenateField::On(RE::TESForm::LookupByID<RE::Actor>(a_id)); field.left > 0) return field.left;
 		for (const auto& boost : boosts) {
 			if (boost.id == a_id && boost.value == RE::ActorValue::kMagickaRateMult) {
 				return boost.left;

@@ -17,7 +17,7 @@ namespace FWM::Log
 		}
 	}
 
-	void Setup()
+	void Setup(std::wstring_view a_name)
 	{
 		const std::scoped_lock guard(lock);
 		try {
@@ -28,9 +28,9 @@ namespace FWM::Log
 			std::error_code ec;
 			std::filesystem::create_directories(*directory, ec);
 
-			const auto current = *directory / L"FightWithMe.log";
+			const auto current = *directory / (std::wstring(a_name) + L".log");
 			if (std::filesystem::exists(current, ec)) {
-				std::filesystem::rename(current, *directory / L"FightWithMe.previous.log", ec);
+				std::filesystem::rename(current, *directory / (std::wstring(a_name) + L".previous.log"), ec);
 			}
 			file.open(current, std::ios::out | std::ios::trunc);
 		} catch (...) {

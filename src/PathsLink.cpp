@@ -1,9 +1,12 @@
 #include "FWM/PathsLink.h"
+#include "FWM/DebugAbility.h"
 
+#include "FWM/Host.h"
 #include "FWM/Log.h"
 #include "FWM/Notices.h"
 #include "FWM/Party.h"
 #include "FWM/Settings.h"
+#include "FWM/Text.h"
 
 #include "FightWithMePathsAPI.h"
 
@@ -11,6 +14,8 @@ namespace FWM::PathsLink
 {
 	namespace
 	{
+		RE::FormID debugID = 0;
+		const Kit* debugKit = nullptr;
 		FightWithMePathsAPI::IPaths* api{ nullptr };
 		bool                         mismatched{ false };  // the add-on is here but built for other trees: said once, after a load
 
@@ -45,7 +50,7 @@ namespace FWM::PathsLink
 
 		Copy* Read(RE::FormID a_id)
 		{
-			if (!api || !a_id) {
+			if (!api || !a_id || !Party::CanHaveRole(a_id)) {
 				return nullptr;
 			}
 			FightWithMePathsAPI::Record raw{};
@@ -68,7 +73,7 @@ namespace FWM::PathsLink
 			}
 			auto*       actor = RE::TESForm::LookupByID<RE::Actor>(a_id);
 			const char* name = actor ? actor->GetDisplayFullName() : nullptr;
-			return name && *name ? std::string(name) : "A companion"s;
+			return name && *name ? std::string(name) : std::string(Tr("A companion"));
 		}
 
 		Outcome Answered(int a_result, std::string a_done)
@@ -102,10 +107,8 @@ namespace FWM::PathsLink
 			return;
 		}
 		api = found;
-		Log::Info("[Paths] Connected to the Paths add-on: a point for every level past {}, giving points back {}."sv, api->PointsAboveLevel(),
+		Log::Info("[Paths] The paths are open: a point for every level past {}, giving points back {}."sv, api->PointsAboveLevel(),
 			api->RespecAllowed() ? "allowed" : "off");
-		// The paths guide the roles now: the Tanks and Healers settings stop being the player's to change.
-		Settings::LockRoles(true);
 	}
 
 	bool Active()
@@ -183,10 +186,21 @@ namespace FWM::PathsLink
 		}
 	}
 
+	ScopedDebugCast::ScopedDebugCast(RE::FormID id, const Kit& kit) : previousID(debugID), previousKit(debugKit) { debugID=id; debugKit=&kit; }
+	ScopedDebugCast::~ScopedDebugCast() { debugID=previousID; debugKit=previousKit; }
+	RE::NiPoint3 DebugAim(RE::Actor* actor) {
+		const auto p=actor->GetPosition(); const auto aim=DebugAbility::Aim(p.x,p.y,p.z,actor->GetAngleZ());
+		return {aim[0],aim[1],aim[2]};
+	}
+	bool DebugCasting(RE::FormID id) { return debugKit && debugID==id; }
 	Kit KitOf(RE::FormID a_id, Role a_role)
 	{
+		if (DebugCasting(a_id)) return *debugKit;
 		Kit kit;
 		kit.role = a_role;
+        const auto* member=Party::Find(a_id);
+        const bool bruiserMissing=a_role==Role::kBruiser && (member && member->arsenalKnown ? !member->arsenal.twoHanded : Party::LackFor(a_id,a_role)!=Lack::kNothing);
+        if (!Party::CanHaveRole(a_id) || bruiserMissing) { kit.tree = true; return kit; }
 		if (!api) {
 			return kit;
 		}
@@ -202,7 +216,7 @@ namespace FWM::PathsLink
 
 	const Progress* Find(RE::FormID a_id)
 	{
-		if (!api) {
+		if (!api || !Party::CanHaveRole(a_id)) {
 			return nullptr;
 		}
 		const auto it = copies.find(a_id);
@@ -213,18 +227,24 @@ namespace FWM::PathsLink
 		return copy ? &copy->progress : nullptr;
 	}
 
+	const Progress* ReadNow(RE::FormID a_id)
+	{
+		const auto* copy = Read(a_id);
+		return copy ? &copy->progress : nullptr;
+	}
+
 	void Refresh()
 	{
 		if (mismatched) {
 			mismatched = false;
-			Notices::Push("Paths - Follower Ability Skilltree does not match this version of Fight With Me. Update both.", Notices::Kind::kWarning);
+			Notices::Push(Tr("Path of the Companions does not match this version of Fight With Me. Update both."), Notices::Kind::kWarning);
 		}
 		if (!api) {
 			return;
 		}
 		std::vector<std::pair<std::string, int>> news;
 		for (const auto& member : Party::Members()) {
-			if (member.summon) {
+			if (!member.CanTakeRole()) {
 				continue;
 			}
 			auto* copy = Read(member.id);
@@ -243,9 +263,9 @@ namespace FWM::PathsLink
 		}
 		if (news.size() == 1) {
 			const auto& [name, points] = news.front();
-			Notices::Push(std::format("{} has {} perk point{} to spend: Battle plan, Path.", name, points, points == 1 ? "" : "s"), Notices::Kind::kOrder);
+			Notices::Push(Trf("{} has {} to spend in their skill tree.", name, Trn(points, "{} perk point", "{} perk points")), Notices::Kind::kOrder);
 		} else {
-			Notices::Push(std::format("{} companions have perk points to spend: Battle plan, Path.", news.size()), Notices::Kind::kOrder);
+			Notices::Push(Trf("{} companions have perk points to spend in their skill trees.", news.size()), Notices::Kind::kOrder);
 		}
 		for (const auto& [name, points] : news) {
 			Log::Info("[Paths] {} has {} perk point(s) to spend."sv, name, points);
@@ -254,8 +274,11 @@ namespace FWM::PathsLink
 
 	Outcome Learn(RE::FormID a_id, Role a_role, std::size_t a_node)
 	{
+		if (static_cast<std::size_t>(a_role)>=Paths::kRoles || a_node>=Paths::kNodes) return {false, std::string(Tr("Invalid perk."))};
+        if (!Unlimited(a_id) && a_role == Role::kBruiser && Party::LackFor(a_id, a_role) != Lack::kNothing) return {false, std::string(Tr("Requires a two-handed melee weapon in inventory."))};
+        if (!Party::CanHaveRole(a_id)) return { false, std::string(Tr("Roles are unavailable for creature companions and summons.")) };
 		if (!api) {
-			return { false, "Paths - Follower Ability Skilltree is not installed." };
+			return { false, std::string(Tr("Path of the Companions is not installed.")) };
 		}
 		const auto& node = Paths::PathOf(a_role)[std::min(a_node, Paths::kNodes - 1)];
 		const auto  result = api->Learn(a_id, static_cast<std::uint32_t>(a_role), static_cast<std::uint32_t>(a_node));
@@ -264,15 +287,17 @@ namespace FWM::PathsLink
 		if (copy) {
 			told[a_id] = copy->progress.Unspent();
 		}
+        if(result!=static_cast<int>(Paths::Block::kNone))return {false,Paths::Requirement(static_cast<Paths::Block>(result),node,rank+1)};
 		const bool first = node.kind == Paths::Kind::kAbility && rank == 1;
-		return Answered(result, first ? std::format("{} learns {}.", NameOf(a_id), node.name) :
-		                                std::format("{}: {} rank {}.", NameOf(a_id), node.name, rank));
+		return Answered(result, first ? Trf("{} learns {}.", NameOf(a_id), Tr(node.name)) :
+		                                Trf("{}: {} rank {}.", NameOf(a_id), Tr(node.name), rank));
 	}
 
 	Outcome Forget(RE::FormID a_id, Role a_role, std::size_t a_node)
 	{
+        if (!Party::CanHaveRole(a_id)) return { false, std::string(Tr("Roles are unavailable for creature companions and summons.")) };
 		if (!api) {
-			return { false, "Paths - Follower Ability Skilltree is not installed." };
+			return { false, std::string(Tr("Path of the Companions is not installed.")) };
 		}
 		const auto& node = Paths::PathOf(a_role)[std::min(a_node, Paths::kNodes - 1)];
 		const auto  result = api->Forget(a_id, static_cast<std::uint32_t>(a_role), static_cast<std::uint32_t>(a_node));
@@ -280,13 +305,14 @@ namespace FWM::PathsLink
 		if (copy) {
 			told[a_id] = copy->progress.Unspent();
 		}
-		return Answered(result, std::format("{} gives back a rank of {}.", NameOf(a_id), node.name));
+		return Answered(result, Trf("{} gives back a rank of {}.", NameOf(a_id), Tr(node.name)));
 	}
 
 	Outcome Reset(RE::FormID a_id, Role a_role)
 	{
+        if (!Party::CanHaveRole(a_id)) return { false, std::string(Tr("Roles are unavailable for creature companions and summons.")) };
 		if (!api) {
-			return { false, "Paths - Follower Ability Skilltree is not installed." };
+			return { false, std::string(Tr("Path of the Companions is not installed.")) };
 		}
 		const int before = Find(a_id) ? Paths::Spent(Find(a_id)->record, a_role) : 0;
 		const auto result = api->Reset(a_id, static_cast<std::uint32_t>(a_role));
@@ -294,23 +320,27 @@ namespace FWM::PathsLink
 		if (copy) {
 			told[a_id] = copy->progress.Unspent();
 		}
-		return Answered(result, std::format("{} starts the {} over: {} point{} back.", NameOf(a_id), Paths::Info(a_role).title, before, before == 1 ? "" : "s"));
+		return Answered(result, Trf("{} starts the {} over: {} back.", NameOf(a_id), Tr(Paths::Info(a_role).title), Trn(before, "{} point", "{} points")));
 	}
 
 	Outcome Equip(RE::FormID a_id, Role a_role, std::size_t a_slot, Paths::Ability a_ability)
 	{
+        if (!Unlimited(a_id) && a_role == Role::kBruiser && Party::LackFor(a_id, a_role) != Lack::kNothing) return {false, std::string(Tr("Requires a two-handed melee weapon in inventory."))};
+        if (!Party::CanHaveRole(a_id)) return { false, std::string(Tr("Roles are unavailable for creature companions and summons.")) };
 		if (!api) {
-			return { false, "Paths - Follower Ability Skilltree is not installed." };
+			return { false, std::string(Tr("Path of the Companions is not installed.")) };
 		}
 		const auto result = api->Equip(a_id, static_cast<std::uint32_t>(a_role), static_cast<std::uint32_t>(a_slot), static_cast<std::uint32_t>(a_ability));
 		Read(a_id);
-		return Answered(result, std::format("{} carries {} into a fight.", NameOf(a_id), Paths::Info(a_ability).name));
+		return Answered(result, Trf("{} carries {} into a fight.", NameOf(a_id), Tr(Paths::Info(a_ability).name)));
 	}
 
 	Outcome Invest(RE::FormID a_id, Role a_role, int a_room)
 	{
+        if (!Unlimited(a_id) && a_role == Role::kBruiser && Party::LackFor(a_id, a_role) != Lack::kNothing) return {false, std::string(Tr("Requires a two-handed melee weapon in inventory."))};
+        if (!Party::CanHaveRole(a_id)) return { false, std::string(Tr("Roles are unavailable for creature companions and summons.")) };
 		if (!api) {
-			return { false, "Paths - Follower Ability Skilltree is not installed." };
+			return { false, std::string(Tr("Path of the Companions is not installed.")) };
 		}
 		const auto result = api->Invest(a_id, static_cast<std::uint32_t>(a_role), a_room);
 		auto*      copy = Read(a_id);
@@ -318,34 +348,36 @@ namespace FWM::PathsLink
 		if (copy) {
 			told[a_id] = copy->progress.Unspent();
 		}
-		return Answered(result, std::format("{}: a point into the {}'s bonus ({} there).", NameOf(a_id), Paths::Info(a_role).title, in));
+		return Answered(result, Trf("{}: a point into the {}'s bonus ({} there).", NameOf(a_id), Tr(Paths::Info(a_role).title), in));
 	}
 
 	Outcome Divest(RE::FormID a_id, Role a_role)
 	{
+        if (!Party::CanHaveRole(a_id)) return { false, std::string(Tr("Roles are unavailable for creature companions and summons.")) };
 		if (!api) {
-			return { false, "Paths - Follower Ability Skilltree is not installed." };
+			return { false, std::string(Tr("Path of the Companions is not installed.")) };
 		}
 		const auto result = api->Divest(a_id, static_cast<std::uint32_t>(a_role));
 		auto*      copy = Read(a_id);
 		if (copy) {
 			told[a_id] = copy->progress.Unspent();
 		}
-		return Answered(result, std::format("{} takes a point back out of the {}'s bonus.", NameOf(a_id), Paths::Info(a_role).title));
+		return Answered(result, Trf("{} takes a point back out of the {}'s bonus.", NameOf(a_id), Tr(Paths::Info(a_role).title)));
 	}
 
 	Outcome SetUnlimited(RE::FormID a_id, bool a_on)
 	{
+        if (!Party::CanHaveRole(a_id)) return { false, std::string(Tr("Roles are unavailable for creature companions and summons.")) };
 		if (!api) {
-			return { false, "Paths - Follower Ability Skilltree is not installed." };
+			return { false, std::string(Tr("Path of the Companions is not installed.")) };
 		}
 		const auto result = api->SetUnlimited(a_id, a_on);
 		auto*      copy = Read(a_id);
 		if (copy) {
 			told[a_id] = copy->progress.Unspent();
 		}
-		return Answered(result, a_on ? std::format("{} has unlimited points. Cheater.", NameOf(a_id)) :
-		                               std::format("{} is back to the points they earned.", NameOf(a_id)));
+		return Answered(result, a_on ? Trf("Debug Mode enabled for {}.", NameOf(a_id)) :
+		                               Trf("Debug Mode disabled for {}.", NameOf(a_id)));
 	}
 
 	bool Unlimited(RE::FormID a_id)

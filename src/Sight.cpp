@@ -7,6 +7,7 @@
 #include "FWM/Party.h"
 #include "FWM/Rules.h"
 #include "FWM/Settings.h"
+#include "FWM/Text.h"
 #include "FWM/WalkWithMe.h"
 
 namespace FWM::Sight
@@ -16,7 +17,6 @@ namespace FWM::Sight
 		constexpr float       kLookEvery = 0.5f;
 		constexpr float       kSheatheAfter = 5.0f;  // seconds with no enemy in view
 		constexpr float       kLostAfter = 2.0f;     // a glimpse between trees is one sighting, not one per look
-		constexpr float       kDrawEvery = 2.0f;     // a companion whose AI put the weapon away again is asked again, at most this often
 		constexpr float       kEngageEvery = 3.0f;
 		constexpr int         kEngageTries = 3;      // per companion and enemy
 		constexpr float       kForgetAfter = 10.0f;  // out of the question this long, an enemy can be asked about afresh
@@ -32,14 +32,14 @@ namespace FWM::Sight
 		float pending{ 0.0f };
 		float clearFor{ 0.0f };
 		bool  sighted{ false };  // an enemy has been in view lately
-		int   redraws{ 0 };      // this sighting: weapons drawn again after the AI put them away
+		int   undone{ 0 };       // this sighting: weapons we drew that the game put away again
 
 		struct Watch
 		{
 			RE::FormID id{ 0 };
-			float      drawIn{ 0.0f };
 			float      engageIn{ 0.0f };
-			bool       drew{ false };  // their weapons are out because of us
+			bool       drew{ false };   // their weapons are out because of us
+			bool       tried{ false };  // drawn once this sighting; the game may put them away, and that stands
 			float       outFor{ 0.0f };   // in a fight, seconds they have been out of it
 			std::string held;             // why they were last left out, as logged
 			float       bareFor{ 0.0f };  // in combat without a combat controller
@@ -93,7 +93,6 @@ namespace FWM::Sight
 			a_elapsed = pending;
 			pending = 0.0f;
 			for (auto& watch : watches) {
-				watch.drawIn = std::max(watch.drawIn - a_elapsed, 0.0f);
 				watch.engageIn = std::max(watch.engageIn - a_elapsed, 0.0f);
 			}
 			std::erase_if(watches, [](const Watch& a_watch) { return !Party::Find(a_watch.id); });
@@ -133,9 +132,28 @@ namespace FWM::Sight
 			return !brawl || !a_actor->IsInFaction(brawl);
 		}
 
+		std::vector<RE::FormID> leftAlone;  // logged once each
+
+		// A fox or an elk is hostile by the game's test, but unaggressive wildlife comes at
+		// nobody until a fight finds it, so it brings no weapons out and starts no fight.
+		bool KeepsToItself(RE::Actor* a_actor)
+		{
+			const auto* race = a_actor->GetRace();
+			const bool  wildlife = race && !race->HasKeywordString("ActorTypeNPC");
+			const float aggression = a_actor->AsActorValueOwner()->GetActorValue(RE::ActorValue::kAggression);
+			if (!Rules::KeepsToItself(wildlife, aggression, a_actor->IsInCombat())) {
+				return false;
+			}
+			if (std::find(leftAlone.begin(), leftAlone.end(), a_actor->GetFormID()) == leftAlone.end()) {
+				leftAlone.push_back(a_actor->GetFormID());
+				Log::Info("[Sight] {} keeps to itself (aggression {:.0f}, in no fight); not an enemy until it is."sv, Game::Name(a_actor), aggression);
+			}
+			return true;
+		}
+
 		bool Enemy(RE::Actor* a_actor, RE::PlayerCharacter* a_player)
 		{
-			return Opponent(a_actor, a_player) && a_actor->IsHostileToActor(a_player);
+			return Opponent(a_actor, a_player) && a_actor->IsHostileToActor(a_player) && !KeepsToItself(a_actor);
 		}
 
 		// On their feet and free: not seated, mounted, swimming, down or already fighting.
@@ -144,6 +162,15 @@ namespace FWM::Sight
 			const auto* state = a_actor->AsActorState();
 			return Game::Usable(a_actor) && !a_actor->IsInCombat() && !state->IsBleedingOut() && !state->IsSwimming() && !a_actor->IsOnMount() &&
 			       state->GetSitSleepState() == RE::SIT_SLEEP_STATE::kNormal;
+		}
+
+		// Walk With Me's Relax camp keeps its companions where they are, and a follower told to
+		// wait is waiting. Neither runs off to a fight out of their sight, often cells away; one
+		// that comes to them, they meet.
+		bool StaysPut(const Party::Member& a_member, RE::Actor* a_actor, Formation a_formation)
+		{
+			return (a_member.managedByWalkWithMe && a_formation == Formation::kRelax) ||
+			       a_actor->AsActorValueOwner()->GetActorValue(RE::ActorValue::kWaitingForPlayer) > 0.0f;
 		}
 
 		// Why a companion out of a fight cannot join it right now, or empty if they can. A
@@ -201,9 +228,8 @@ namespace FWM::Sight
 			watch.engageIn = kEngageEvery;
 			++ask.tries;
 			const bool taken = a_actor->StartCombat(a_enemy);
-			// A fight the other side knows nothing about does not hold: Walk With Me keeps a
-			// companion in formation until an enemy is actually at the party, and the fight
-			// falls apart within a second. So an enemy not yet at any of us is set on them too.
+			// A fight the other side knows nothing about does not hold: it falls apart within a
+			// second. So an enemy not yet at any of us is set on them too.
 			bool turned = false;
 			if (taken) {
 				auto*      player = RE::PlayerCharacter::GetSingleton();
@@ -228,10 +254,10 @@ namespace FWM::Sight
 			for (const auto& [enemy, names] : a_told) {
 				std::string who;
 				for (std::size_t i = 0; i < names.size(); ++i) {
-					who += i == 0 ? "" : i + 1 == names.size() ? " and " : ", ";
+					who += i == 0 ? "" : i + 1 == names.size() ? Tr(" and ") : Tr(", ");
 					who += names[i];
 				}
-				Notices::Push(std::format("{} {} on {}.", who, names.size() == 1 ? "takes" : "take", enemy), Notices::Kind::kOrder);
+				Notices::Push(names.size() == 1 ? Trf("{} takes on {}.", who, enemy) : Trf("{} take on {}.", who, enemy), Notices::Kind::kOrder);
 			}
 		}
 
@@ -258,11 +284,14 @@ namespace FWM::Sight
 
 		void EndSighting()
 		{
-			if (sighted && redraws > 0) {
-				Log::Info("[Sight] Weapons were put away by the AI and drawn again {} time(s) while the enemy was in view."sv, redraws);
+			if (sighted && undone > 0) {
+				Log::Info("[Sight] The game put the weapons away again on {} companion(s) while the enemy was in view; left that way."sv, undone);
 			}
 			sighted = false;
-			redraws = 0;
+			undone = 0;
+			for (auto& watch : watches) {
+				watch.tried = false;
+			}
 		}
 	}
 
@@ -347,19 +376,25 @@ namespace FWM::Sight
 
 		if (settings.drawOnSight) {
 			std::string drew;
+			// Once a sighting: asking again each time the game puts them away only has them
+			// drawing and sheathing for as long as the enemy stays in view.
 			for (auto& looker : lookers) {
-				auto& watch = WatchOf(looker.member->id);
-				if (looker.actor->AsActorState()->IsWeaponDrawn() || watch.drawIn > 0.0f) {
+				auto&      watch = WatchOf(looker.member->id);
+				const bool drawn = looker.actor->AsActorState()->IsWeaponDrawn();
+				if (watch.tried) {
+					if (watch.drew && !drawn) {
+						watch.drew = false;
+						++undone;
+					}
+					continue;
+				}
+				if (drawn) {
 					continue;
 				}
 				looker.actor->DrawWeaponMagicHands(true);
-				watch.drawIn = kDrawEvery;
-				if (watch.drew) {
-					++redraws;
-				} else {
-					watch.drew = true;
-					drew += std::format("{}{}", drew.empty() ? "" : ", ", looker.member->name);
-				}
+				watch.tried = true;
+				watch.drew = true;
+				drew += std::format("{}{}", drew.empty() ? "" : ", ", looker.member->name);
 			}
 			if (!drew.empty()) {
 				Log::Info("[Sight] Weapons out: {}."sv, drew);
@@ -368,11 +403,10 @@ namespace FWM::Sight
 
 		if (settings.autoBattle) {
 			const bool sneaking = player->IsSneaking();
-			const auto formation = WalkWithMe::CurrentFormation();
 			std::vector<std::pair<std::string, std::vector<std::string>>> told;
 			for (auto& looker : lookers) {
 				const auto* orders = looker.sees ? Party::FindOrders(looker.member->id) : nullptr;
-				if (!orders || !Rules::StartsFight(Resolve(orders->position, formation), sneaking)) {
+				if (!orders || !Rules::StartsFight(orders->position, sneaking)) {
 					continue;
 				}
 				if (Engage(*looker.member, looker.actor.get(), looker.sees, "starts the fight with"sv)) {
@@ -423,7 +457,7 @@ namespace FWM::Sight
 			}
 			if (auto on = Game::CombatTarget(a_enemy.get()); on && (on.get() == player || Party::IsPartyActor(on.get()))) {
 				foes.push_back({ std::move(a_enemy), std::move(on) });
-			} else if (open && a_enemy->IsHostileToActor(player)) {
+			} else if (open && a_enemy->IsHostileToActor(player) && !KeepsToItself(a_enemy.get())) {
 				others.push_back(std::move(a_enemy));
 			}
 		};
@@ -483,8 +517,9 @@ namespace FWM::Sight
 			if (held.empty()) {
 				// Hold back starts nothing: a bow or spell joins in on whoever is already at it, a
 				// blade only on whoever comes near or is on them.
-				const bool holdBack = Resolve(orders->position, formation) == Position::kHoldBack;
+				const bool holdBack = orders->position == Position::kHoldBack;
 				const bool ranged = Rules::IsRanged(orders->role);
+				const bool staysPut = StaysPut(member, actor.get(), formation);
 				const Foe* pick = nullptr;
 				float      best = 0.0f;
 				float      nearest = -1.0f;
@@ -496,6 +531,9 @@ namespace FWM::Sight
 						continue;
 					}
 					if (!onThem && d > settings.sightRange + kLeadSlack && Game::Distance(player, foe.actor.get()) > settings.sightRange) {
+						continue;
+					}
+					if (staysPut && !onThem && d > settings.sightRange) {
 						continue;
 					}
 					// Whoever is on them first, then the nearest.
@@ -514,7 +552,9 @@ namespace FWM::Sight
 					target = FirstSeen(actor.get(), others, settings.sightRange);
 					why = "takes on";
 				}
-				if (!target) {
+				if (!target && staysPut && !foes.empty()) {
+					held = std::format("staying put (Relax camp or told to wait), and the nearest enemy is {:.0f} away", nearest);
+				} else if (!target) {
 					held = !foes.empty() ? (holdBack ? std::format("on Hold back, and nobody near them is fighting (nearest {:.0f} away)", nearest)
 					                                 : std::format("the nearest enemy is {:.0f} away", nearest))
 					       : !others.empty() ? (holdBack ? std::format("on Hold back, and none of the {} enemies near has come at any of you", others.size())
@@ -552,8 +592,9 @@ namespace FWM::Sight
 	{
 		watches.clear();
 		asked.clear();
+		leftAlone.clear();
 		sighted = false;
-		redraws = 0;
+		undone = 0;
 		clearFor = 0.0f;
 		lookIn = 0.0f;
 		pending = 0.0f;

@@ -9,6 +9,12 @@
 
 namespace FWM
 {
+    // Creature keywords win over NPC on mixed/custom races. Missing race data fails closed.
+    [[nodiscard]] constexpr bool RoleAllowed(bool a_npcRace, bool a_creatureRace, bool a_summon)
+    {
+        return a_npcRace && !a_creatureRace && !a_summon;
+    }
+
 	enum class Role : std::uint8_t
 	{
 		kFighter,
@@ -38,7 +44,7 @@ namespace FWM
 
 	enum class Position : std::uint8_t
 	{
-		kFormation,
+		kRetired,  // was Walk With Me's formation; kept so saved values keep their meaning, read as Free
 		kFree,
 		kGuard,
 		kHoldBack,
@@ -51,7 +57,7 @@ namespace FWM
 	{
 		Role         role{ Role::kFighter };
 		Focus        focus{ Focus::kEngine };
-		Position     position{ Position::kFormation };
+		Position     position{ Position::kFree };
 		bool         autoAbility{ true };  // taunt or heal without being told
 		std::uint8_t healThreshold{ 55 };  // percent, for a healer
 		bool         autoSpecial{ true };  // the role's special ability without being told
@@ -74,7 +80,7 @@ namespace FWM
 	enum class Special : std::uint8_t
 	{
 		kNone,
-		kBodyguard,  // tank: runs to you when you are in trouble and takes what is on you
+		kBodyguard,  // tank: Weak Will (saved enum slot)
 		kVolley,     // archer: everyone at range fires at one enemy
 		kWarCry,     // bruiser: staggers everything around them
 		kWard,       // mage, healer: hardens your skin with alteration
@@ -92,13 +98,13 @@ namespace FWM
 
 	inline constexpr std::array<SpecialInfo, static_cast<std::size_t>(Special::kCount)> specials{ {
 		{ "", "", "", 0 },
-		{ "Bodyguard", "Runs to your side and taunts everything that is on you.", "When your health drops below 40% with enemies on you.", 0xF132 },
+		{ "Weak Will", "A spectral helmet weakens their own damage and that of enemies who attack them.", "When several enemies attack them, or they are hurt under pressure.", 0xEF02 },
 		{ "Volley", "Looses five arrows in quick succession at their target; every other archer and mage turns on it too.", "When a boss or an enemy well above their level joins the fight.",
 			0xF140 },
 		{ "War cry", "A roar that staggers every enemy close around them.", "When three or more enemies close in on them, or two when they are hurt.",
 			0xF028 },
-		{ "Ward", "Hardens your skin with alteration: Oakflesh, then Stone, Iron and Ebony as they rise in level.",
-			"When enemies are on you or your health falls, and no ward of theirs is on you.", 0xF6FC },
+		{ "Azura's Moon", "A spectral Wispmother grants a chance to ignore hostile damage to you and nearby companions.",
+			"When the party is under heavy attack or a wounded ally needs protection.", 0xF186 },
 		{ "Disarm", "Staggers their opponent and knocks the weapon out of their hands, as the Disarm shout does, up to ten levels above their own.",
 			"When they meet a boss, a two-handed weapon, or someone at or above their level.", 0xF256 },
 	} };
@@ -110,13 +116,15 @@ namespace FWM
 	{
 		switch (a_special) {
 		case Special::kBodyguard:
+			return 40.0f;
 		case Special::kWarCry:
 			return 30.0f;
 		case Special::kDisarm:
 			return 40.0f;
 		case Special::kVolley:
-		case Special::kWard:
 			return 45.0f;
+		case Special::kWard:
+			return 90.0f;
 		default:
 			return 0.0f;
 		}
@@ -151,12 +159,12 @@ namespace FWM
 	};
 
 	inline constexpr std::array<RoleInfo, static_cast<std::size_t>(Role::kCount)> roles{ {
-		{ "Fighter", "Balanced melee. Flanks and presses whoever the fight puts in front of them.", Focus::kEngine, Position::kFormation, 0xF6DE },
-		{ "Tank", "Holds the line. Blocks, bashes and taunts enemies off the rest of the party.", Focus::kAttackingParty, Position::kGuard, 0xF3ED },
-		{ "Healer", "Stays back, heals the whole party at once and quickens everyone's magicka.", Focus::kAttackingParty, Position::kHoldBack, 0xF4BE },
-		{ "Bruiser", "Heavy hitter. Power attacks and bashes to stagger the big ones.", Focus::kStrongest, Position::kFrontLine, 0xF0E3 },
+		{ "Fighter", "Melee. Works round to the side of whoever the fight puts in front of them.", Focus::kEngine, Position::kFree, 0xF6DE },
+		{ "Tank", "Holds the line before you and turns on whoever attacks the party.", Focus::kAttackingParty, Position::kGuard, 0xF3ED },
+		{ "Healer", "Stays back out of reach, watching whoever attacks the party.", Focus::kAttackingParty, Position::kHoldBack, 0xF4BE },
+		{ "Bruiser", "Requires a two-handed melee weapon. Into the front line after the strongest enemy.", Focus::kStrongest, Position::kFrontLine, 0xF0E3 },
 		{ "Archer", "Keeps range and picks off casters and other archers first.", Focus::kBackLine, Position::kHoldBack, 0xF05B },
-		{ "Mage", "Spell pressure from range. Finishes off whoever is weakest.", Focus::kWeakest, Position::kHoldBack, 0xE2CA },
+		{ "Mage", "Keeps range and finishes off whoever is weakest.", Focus::kWeakest, Position::kHoldBack, 0xE2CA },
 	} };
 
 	struct ChoiceInfo
@@ -181,7 +189,7 @@ namespace FWM
 	} };
 
 	inline constexpr std::array<ChoiceInfo, static_cast<std::size_t>(Position::kCount)> positions{ {
-		{ "Formation", "Take the position from Walk With Me's formation.", 0xF0C0 },
+		{ "Free", "Go wherever the fight takes them.", 0xF0B2 },  // retired; never offered
 		{ "Free", "Go wherever the fight takes them.", 0xF0B2 },
 		{ "Guard you", "Only fight enemies near you or attacking you.", 0xF505 },
 		{ "Hold back", "Stay behind and fight only what comes close.", 0xF2EA },
@@ -287,6 +295,8 @@ namespace FWM
 		bool  staff{ false };     // a staff, which casts without magicka
 		float castCost{ 0.0f };   // magicka for the cheapest spell they would fight or heal with; 0 for none
 
+        bool twoHanded{ false }; // carried greatsword, battleaxe or warhammer
+
 		friend bool operator==(const Arsenal&, const Arsenal&) = default;
 	};
 
@@ -294,6 +304,7 @@ namespace FWM
 	{
 		kNothing,
 		kWeapon,
+        kTwoHanded,
 		kBow,
 		kSpells
 	};
@@ -308,8 +319,9 @@ namespace FWM
 		case Role::kFighter:
 			return a_arsenal.melee || empty ? Lack::kNothing : Lack::kWeapon;
 		case Role::kTank:
-		case Role::kBruiser:
 			return a_arsenal.melee ? Lack::kNothing : Lack::kWeapon;
+        case Role::kBruiser:
+            return a_arsenal.twoHanded ? Lack::kNothing : Lack::kTwoHanded;
 		case Role::kArcher:
 			return a_arsenal.ranged ? Lack::kNothing : Lack::kBow;
 		case Role::kMage:
@@ -322,6 +334,8 @@ namespace FWM
 	[[nodiscard]] constexpr std::string_view Why(Lack a_lack)
 	{
 		switch (a_lack) {
+		case Lack::kTwoHanded:
+            return "Requires a two-handed melee weapon in inventory.";
 		case Lack::kWeapon:
 			return "Carries no melee weapon.";
 		case Lack::kBow:
@@ -367,20 +381,13 @@ namespace FWM
 		kCustom = 6
 	};
 
-	[[nodiscard]] constexpr Position Resolve(Position a_position, Formation a_formation)
+	// The positions on offer, in the order the plan shows them.
+	inline constexpr int kFirstPosition = static_cast<int>(Position::kFree);
+	inline constexpr int kPositionChoices = static_cast<int>(Position::kCount) - kFirstPosition;
+
+	// A position as orders keep it: anything unknown or retired fights Free.
+	[[nodiscard]] constexpr Position Live(Position a_position)
 	{
-		if (a_position != Position::kFormation) {
-			return a_position;
-		}
-		switch (a_formation) {
-		case Formation::kLead:
-			return Position::kFrontLine;
-		case Formation::kCompanion:
-			return Position::kGuard;
-		case Formation::kRear:
-			return Position::kHoldBack;
-		default:
-			return Position::kFree;
-		}
+		return a_position == Position::kRetired || a_position >= Position::kCount ? Position::kFree : a_position;
 	}
 }

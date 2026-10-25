@@ -14,6 +14,8 @@ namespace FWM::Party
 		RE::FormID      id{ 0 };
 		std::string     name;
 		bool            summon{ false };  // conjured or raised: healed and protected, not commanded
+        bool            creature{ false };
+        [[nodiscard]] bool CanTakeRole() const { return RoleAllowed(true, creature, summon); }
 		bool            managedByWalkWithMe{ false };
 		Arsenal         arsenal;            // refreshed every few seconds
 		bool            arsenalKnown{ false };
@@ -59,6 +61,7 @@ namespace FWM::Party
 
 		const RE::TESForm* rightHand{ nullptr };  // what was in the right hand at the last decision
 		bool               armed{ false };        // the start-of-fight weapon check is done
+		Role               armedRole{ Role::kCount };  // effective role last equipped, including ammo fallback
 		bool               warnedAmmo{ false };   // told the player this fight that they have no arrows
 
 		// Out of magicka: a mage or healer falls back until it comes back.
@@ -110,7 +113,7 @@ namespace FWM::Party
 
 	// What came of something the player asked a companion for: done, or why not. Shown under
 	// the button in the plan and written to the log, so no button ever seems to do nothing.
-	void Answer(Member& a_member, std::string a_text, bool a_done = false);
+	void Answer(Member& a_member, std::string_view a_text, bool a_done = false);
 
 	// a_dt ages the arsenal timers.
 	void Refresh(float a_dt = 0.0f);
@@ -136,11 +139,15 @@ namespace FWM::Party
 	// Orders for a follower, creating them on first sight from their loadout (or
 	// their NFF role) when guessing is on.
 	[[nodiscard]] Orders& OrdersFor(RE::Actor* a_actor);
+    [[nodiscard]] bool CanHaveRole(RE::Actor* a_actor);
+    [[nodiscard]] bool CanHaveRole(RE::FormID a_id);
 	[[nodiscard]] const Orders* FindOrders(RE::FormID a_id);
 	void                        SetOrders(RE::FormID a_id, const Orders& a_orders);
 
 	[[nodiscard]] std::vector<std::pair<std::uint32_t, Orders>> SavedOrders();
 	void LoadOrders(const std::vector<std::pair<std::uint32_t, Orders>>& a_orders);
+	// Orders from an older save's other half: only for companions who have none yet.
+	void AdoptOrders(const std::vector<std::pair<std::uint32_t, Orders>>& a_orders);
 
 	// The spells chosen for a mage's or healer's hands; none chosen is all zero.
 	[[nodiscard]] Hands HandsOf(RE::FormID a_id);

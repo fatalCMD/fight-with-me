@@ -16,8 +16,8 @@ namespace FWM::Leash
 {
 	[[nodiscard]] bool Available() noexcept;
 
-	// Around the player, or around a_center when given (a healer going to a downed
-	// companion: the combat AI walks them into the area without leaving the fight).
-	// a_radius <= 0 lets the companion roam again.
-	void Apply(RE::Actor* a_follower, float a_radius, RE::Actor* a_center = nullptr);
+	// Around the player, or around a_center when given (a companion walking into a healer's
+	// circle, centred on its marker: the combat AI walks them into the area without leaving the
+	// fight). a_radius <= 0 lets the companion roam again.
+	void Apply(RE::Actor* a_follower, float a_radius, RE::TESObjectREFR* a_center = nullptr, bool a_recovering = false);
 }

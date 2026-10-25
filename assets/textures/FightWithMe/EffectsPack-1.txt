@@ -1,0 +1,3 @@
+POTC Effects
+Asset contract: 1
+Install alongside Path of the Companions.

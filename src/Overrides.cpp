@@ -1,6 +1,8 @@
 #include "FWM/Overrides.h"
 
 #include "FWM/Game.h"
+#include "FWM/AbilityLink.h"
+#include "FWM/WindstepDecoys.h"
 #include "FWM/Log.h"
 
 #ifdef GetObject
@@ -36,6 +38,9 @@ namespace FWM::Overrides
 			if (!actor || actor->IsDead() || actor->IsDisabled() || actor->IsMarkedForDeletion()) {
 				return false;
 			}
+			// A held illusion remains eligible between detection refreshes. Only our live,
+			// registered temporary actors qualify; normal combat targets keep native rules.
+			if (actor->Is3DLoaded() && (WindstepDecoys::Is(actor->GetFormID()) || AbilityLink::IsWindstepDecoy(actor->GetFormID()))) return true;
 			auto* group = a_controller->combatGroup;
 			if (!group) {
 				return false;
@@ -176,13 +181,13 @@ namespace FWM::Overrides
 			return Takes::kBoth;  // two hands, or a slot we do not know: strict
 		}
 
-		bool HandAllows(const RE::CombatInventoryItem* a_item, const Hands& a_hands)
+		bool HandAllows(const RE::CombatInventoryItem* a_item, const LoadoutPolicy::Pools& a_pools)
 		{
-			if (a_hands == Hands{}) {
+			if (a_pools[0].empty() && a_pools[1].empty()) {
 				return true;
 			}
 			const auto id = a_item->item ? a_item->item->GetFormID() : 0;
-			auto       fits = [&](std::size_t a_hand) { return !a_hands[a_hand] || a_hands[a_hand] == id; };
+			auto       fits = [&](std::size_t a_hand) { return LoadoutPolicy::Allows(a_pools[a_hand],id); };
 			switch (TakesOf(a_item->itemSlot.equipSlot)) {
 			case Takes::kLeft:
 				return fits(kLeftHand);
@@ -215,7 +220,12 @@ namespace FWM::Overrides
 							}
 						}
 					}
-					if (HandAllows(a_item, entry.hands)) {
+                    if(entry.recovering)return false;
+					if(entry.battleLocked && (!a_item->item || !a_item->item->IsWeapon())) {
+                        // A staff can share its left hand with a spell, never give up its right hand.
+                        if(!entry.staffLocked || TakesOf(a_item->itemSlot.equipSlot)!=Takes::kLeft)return false;
+                    }
+                    if (!entry.twoHandedOnly && (a_item->item && a_item->item->As<RE::TESObjectWEAP>() ? LoadoutPolicy::Allows(entry.pools[2],a_item->item->GetFormID()) : HandAllows(a_item, entry.pools))) {
 						return true;
 					}
 					kept.fetch_add(1, std::memory_order_relaxed);
@@ -251,7 +261,7 @@ namespace FWM::Overrides
 				const auto id = a_spell->GetFormID();
 				for (const auto& entry : *table) {
 					if (entry.body == a_actor) {
-						return entry.hands[kLeftHand] == id || entry.hands[kRightHand] == id;
+						return (entry.explicitSpells[0] && LoadoutPolicy::Contains(entry.pools[0],id)) || (entry.explicitSpells[1] && LoadoutPolicy::Contains(entry.pools[1],id));
 					}
 				}
 				return false;
@@ -355,6 +365,17 @@ namespace FWM::Overrides
 			// CombatInventoryItem slot 0x0F
 			static bool Thunk(RE::CombatInventoryItem* a_item, RE::CombatController* a_controller)
 			{
+                if (const auto gear=chosenHands.load(std::memory_order_acquire); gear && a_controller) {
+                    for (const auto& choice:*gear) if (choice.actor==a_controller->attackerHandle.native_handle()) {
+                        const auto* w=a_item->item?a_item->item->As<RE::TESObjectWEAP>():nullptr;
+                        if(choice.recovering || (choice.caster && (!w || (!w->IsStaff() && !w->IsBound()))))return false;
+                        if(choice.twoHandedOnly && (!w || w->IsBound() || !(w->IsTwoHandedSword()||w->IsTwoHandedAxe())))return false;
+                        if(w && !LoadoutPolicy::Allows(choice.pools[2],w->GetFormID()))return false;
+                        if((choice.battleLocked || choice.roleRestricted) && a_item->item && a_item->item->IsArmor() && !LoadoutPolicy::Contains(choice.pools[2],a_item->item->GetFormID()))return false;
+                        if(!w && !a_item->item && !choice.pools[2].empty())return false;
+                        break;
+                    }
+                }
 				const auto  table = current.load(std::memory_order_acquire);
 				const auto* entry = Listed(table.get(), a_controller);
 				if (entry && entry->resting) {
@@ -365,7 +386,7 @@ namespace FWM::Overrides
 				// they conjured is magic too.
 				if (entry && entry->noMelee) {
 					const auto* weapon = a_item->item ? a_item->item->As<RE::TESObjectWEAP>() : nullptr;
-					if (!weapon || !weapon->IsBound()) {
+					if (!weapon || (!weapon->IsBound() && !weapon->IsStaff())) {
 						melee.fetch_add(1, std::memory_order_relaxed);
 						return false;
 					}
@@ -416,15 +437,25 @@ namespace FWM::Overrides
 	}
 
 	void PublishHands(std::vector<HandsEntry> a_entries)
-	{
-		const auto previous = chosenHands.load(std::memory_order_acquire);
-		if (previous && previous->size() == a_entries.size() &&
-			std::equal(a_entries.begin(), a_entries.end(), previous->begin(),
-				[](const HandsEntry& a, const HandsEntry& b) { return a.actor == b.actor && a.body == b.body && a.hands == b.hands; })) {
-			return;  // nothing changed: keep the one the hooks already have
-		}
-		chosenHands.store(std::make_shared<const std::vector<HandsEntry>>(std::move(a_entries)), std::memory_order_release);
-	}
+    {
+        const auto previous=chosenHands.load(std::memory_order_acquire);
+        const auto same=[](const HandsEntry& a,const HandsEntry& b) {
+            return a.actor==b.actor && a.body==b.body && a.hands==b.hands && a.pools==b.pools &&
+                a.twoHandedOnly==b.twoHandedOnly && a.battleLocked==b.battleLocked && a.staffLocked==b.staffLocked &&
+                a.roleRestricted==b.roleRestricted && a.caster==b.caster && a.recovering==b.recovering && a.explicitSpells==b.explicitSpells;
+        };
+        if(previous && previous->size()==a_entries.size() && std::equal(a_entries.begin(),a_entries.end(),previous->begin(),same))return;
+        auto next=std::make_shared<const std::vector<HandsEntry>>(std::move(a_entries));
+        chosenHands.store(next,std::memory_order_release);
+        // Main-thread publication: rebuild cached equipment scores only for changed
+        // companions, including entering/leaving recovery. Hooks see the new policy first.
+        for(const auto& entry:*next) {
+            const bool changed=!previous || std::none_of(previous->begin(),previous->end(),[&](const auto& old){return same(entry,old);});
+            if(!changed)continue;
+            auto actor=Game::FromNative(entry.actor).get();
+            if(auto* controller=actor?Game::Controller(actor.get()):nullptr;controller && controller->inventory)controller->inventory->dirty=true;
+        }
+    }
 
 	std::optional<std::array<std::uint16_t, 2>> SeenHands(std::uint32_t a_actor)
 	{

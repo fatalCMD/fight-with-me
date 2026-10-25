@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "FWM/Text.h"
+
 // Shared by the battle plan, Paths, HUD notices and the settings pages.
 // Resource and warning colours belong to their meaning, not to the chosen theme.
 namespace FWM::UITheme
@@ -17,9 +19,9 @@ namespace FWM::UITheme
 	constexpr const char* Name(int a_theme)
 	{
 		switch (Normalize(a_theme)) {
-		case 1: return "Oxblood";
-		case 2: return "Nordic";
-		default: return "Vanilla";
+		case 1: return Ntr("Oxblood");
+		case 2: return Ntr("Nordic");
+		default: return Ntr("Vanilla");
 		}
 	}
 
@@ -37,14 +39,14 @@ namespace FWM::UITheme
 
 	inline constexpr Palette Vanilla{
 		Style::Vanilla,
-		RGBA(9, 11, 13, 218), RGBA(210, 214, 216, 88), RGBA(235, 238, 240, 7), RGBA(235, 238, 240, 22),
-		RGBA(73, 82, 90), RGBA(164, 170, 174), RGBA(208, 220, 228),
-		RGBA(236, 237, 232), RGBA(181, 185, 185), RGBA(127, 133, 137), RGBA(240, 242, 238),
-		RGBA(19, 24, 29, 245), RGBA(36, 45, 53, 250), RGBA(7, 10, 13, 65),
-		RGBA(16, 21, 28, 245), RGBA(44, 64, 82), RGBA(148, 185, 216), RGBA(148, 193, 227),
-		RGBA(72, 117, 151), RGBA(237, 247, 255), RGBA(187, 218, 241), RGBA(184, 222, 250), RGBA(240, 249, 255),
-		RGBA(49, 57, 64, 232), RGBA(68, 78, 87, 240), RGBA(58, 67, 75, 236), RGBA(80, 91, 101, 240),
-		RGBA(243, 245, 241), RGBA(44, 53, 61, 230), RGBA(65, 75, 84, 236)
+		RGBA(11, 11, 11, 218), RGBA(213, 213, 213, 88), RGBA(238, 238, 238, 7), RGBA(238, 238, 238, 22),
+		RGBA(82, 82, 82), RGBA(169, 169, 169), RGBA(219, 219, 219),
+		RGBA(235, 235, 235), RGBA(184, 184, 184), RGBA(132, 132, 132), RGBA(240, 240, 240),
+		RGBA(24, 24, 24, 245), RGBA(45, 45, 45, 250), RGBA(10, 10, 10, 65),
+		RGBA(22, 22, 22, 245), RGBA(63, 63, 63), RGBA(183, 183, 183), RGBA(189, 189, 189),
+		RGBA(113, 113, 113), RGBA(246, 246, 246), RGBA(215, 215, 215), RGBA(219, 219, 219), RGBA(248, 248, 248),
+		RGBA(57, 57, 57, 232), RGBA(78, 78, 78, 240), RGBA(67, 67, 67, 236), RGBA(91, 91, 91, 240),
+		RGBA(243, 243, 243), RGBA(53, 53, 53, 230), RGBA(75, 75, 75, 236)
 	};
 
 	inline constexpr Palette Oxblood{

@@ -1,14 +1,16 @@
 #include "FWM/PathBonus.h"
+#include "FWM/PartyBalance.h"
 
 #include "FWM/Abilities.h"
+#include "FWM/AzurasMoon.h"
 #include "FWM/Game.h"
 #include "FWM/Log.h"
 #include "FWM/Party.h"
 #include "FWM/PathsLink.h"
 #include "FWM/Rules.h"
 #include "FWM/Settings.h"
+#include "FWM/TankActs.h"
 
-#include <random>
 
 namespace FWM::PathBonus
 {
@@ -17,8 +19,6 @@ namespace FWM::PathBonus
 		// Lifts kept up on the planner's tick lapse this long after the fight stops asking.
 		constexpr float kHold = 2.0f;
 
-		// For the hooks, which can run on the AI's threads: a healer's healing, a mage's spell
-		// costs and the damage a tank takes, by actor. The actors are compared, never followed.
 		struct Factor
 		{
 			const RE::Actor* body{ nullptr };
@@ -38,16 +38,8 @@ namespace FWM::PathBonus
 			int   spent{ 0 };
 			float percent{ 0.0f };
 
-			// An archer's arrows this fight: what they had at the last look, how many they shot
-			// and how many came back.
-			RE::TESAmmo* ammo{ nullptr };
-			int          count{ -1 };
-			int          shot{ 0 };
-			int          kept{ 0 };
 		};
 		std::unordered_map<RE::FormID, Known> known;
-
-		std::mt19937 dice{ std::random_device{}() };
 
 		std::shared_ptr<const std::vector<Factor>> Table() { return factors.load(std::memory_order_acquire); }
 
@@ -74,44 +66,6 @@ namespace FWM::PathBonus
 			return std::round((base * (1.0f + a_share) - without) * 1000.0f) / 1000.0f;
 		}
 
-		int Count(RE::Actor* a_actor, RE::TESAmmo* a_ammo)
-		{
-			int have = 0;
-			for (const auto& [object, entry] : a_actor->GetInventory([&](RE::TESBoundObject& a_object) { return &a_object == a_ammo; })) {
-				have += object ? entry.first : 0;
-			}
-			return have;
-		}
-
-		// Arrows gone since the last look were shot (nothing else takes them in a fight); each
-		// comes back on the archer's chance.
-		void Quiver(Known& a_known, RE::Actor* a_actor)
-		{
-			auto* ammo = a_actor->GetCurrentAmmo();
-			if (!ammo) {
-				a_known.ammo = nullptr;
-				a_known.count = -1;
-				return;
-			}
-			int have = Count(a_actor, ammo);
-			if (a_known.ammo == ammo && a_known.count > have) {
-				const int gone = std::min(a_known.count - have, 20);
-				std::uniform_real_distribution<float> roll(0.0f, 100.0f);
-				int back = 0;
-				for (int i = 0; i < gone; ++i) {
-					back += roll(dice) < a_known.percent ? 1 : 0;
-				}
-				a_known.shot += gone;
-				if (back > 0) {
-					a_actor->AddObjectToContainer(ammo, nullptr, back, nullptr);
-					a_known.kept += back;
-					have += back;
-				}
-			}
-			a_known.ammo = ammo;
-			a_known.count = have;
-		}
-
 		// --- Health effects: a healer's heals stronger, harm to a tank weaker -------------------
 
 		// ActiveEffect slot 0 (AdjustForPerks, 33278 on SE): where the caster's perks and then the
@@ -128,8 +82,21 @@ namespace FWM::PathBonus
 					return;
 				}
 				const auto* base = a_this->GetBaseObject();
+                if (base && base->IsDetrimental() && (base->data.primaryAV == RE::ActorValue::kHealth || base->data.secondaryAV == RE::ActorValue::kHealth)) {
+                    auto* outgoingTarget = a_target ? a_target->GetTargetStatsObject() : nullptr;
+                    a_this->magnitude *= PartyBalance::Multiplier(a_caster, outgoingTarget ? outgoingTarget->As<RE::Actor>() : nullptr);
+                    auto* ref = a_target ? a_target->GetTargetStatsObject() : nullptr;
+                    if (AzurasMoon::Negate(a_caster, ref ? ref->As<RE::Actor>() : nullptr, a_this->magnitude)) {
+                        a_this->magnitude = 0;
+                        return;
+                    }
+                }
 				if (!base || base->data.primaryAV != RE::ActorValue::kHealth) {
 					return;
+				}
+				if (base->IsDetrimental()) {
+					auto* ref = a_target ? a_target->GetTargetStatsObject() : nullptr;
+					a_this->magnitude *= TankActs::Attack(a_caster, ref ? ref->As<RE::Actor>() : nullptr);
 				}
 				const auto table = Table();
 				if (!table) {
@@ -162,9 +129,13 @@ namespace FWM::PathBonus
 			static void Thunk(std::uint32_t a_point, RE::Actor* a_target, RE::Actor* a_attacker, RE::TESObjectWEAP* a_weapon, float* a_damage)
 			{
 				original(a_point, a_target, a_attacker, a_weapon, a_damage);
-				if (!a_target || !a_damage || *a_damage <= 0.0f) {
+				if (!a_target || !a_damage) {
 					return;
 				}
+                if (AzurasMoon::Negate(a_attacker, a_target, *a_damage)) { *a_damage = 0; return; }
+				const float outgoing = TankActs::Attack(a_attacker, a_target);
+				if (*a_damage <= 0.0f) return;
+				*a_damage *= outgoing * PartyBalance::Multiplier(a_attacker, a_target);
 				const auto table = Table();
 				const auto* factor = table ? Find(*table, a_target) : nullptr;
 				if (factor && factor->taken < 1.0f) {
@@ -258,7 +229,8 @@ namespace FWM::PathBonus
 		const auto& tuning = Settings::Get().tuning;
 		std::vector<Factor> next;
 		for (const auto& member : Party::Members()) {
-			if (member.summon) {
+			auto actor = member.handle.get();
+			if (!member.CanTakeRole() || !actor || actor->IsCommandedActor() || actor->IsPlayerRef()) {
 				continue;
 			}
 			const auto* orders = Party::FindOrders(member.id);
@@ -273,25 +245,21 @@ namespace FWM::PathBonus
 				} else if (was.percent > 0.0f) {
 					Log::Info("[Paths] {} has no path bonus now."sv, member.name);
 				}
-				was.ammo = nullptr;
-				was.count = -1;
 			}
 			was.role = kit.role;
 			was.spent = spent;
 			was.percent = percent;
-			auto actor = member.handle.get();
-			if (!actor || percent <= 0.0f) {
-				continue;
-			}
+			Factor factor{ actor.get() };
 			if (kit.role == Role::kHealer) {
-				next.push_back({ actor.get(), 1.0f + percent / 100.0f, 1.0f, 1.0f });
+				factor.healing = 1.0f + percent / 100.0f;
 			} else if (kit.role == Role::kMage) {
-				next.push_back({ actor.get(), 1.0f, 1.0f - percent / 100.0f, 1.0f });
+				factor.cost = 1.0f - percent / 100.0f;
 			} else if (kit.role == Role::kTank) {
-				next.push_back({ actor.get(), 1.0f, 1.0f, 1.0f - percent / 100.0f });
+				factor.taken = 1.0f - percent / 100.0f;
 			}
+			next.push_back(factor);
 		}
-		std::erase_if(known, [](const auto& a_entry) { return !Party::Find(a_entry.first); });
+		std::erase_if(known, [](const auto& a_entry) { return !Party::Find(a_entry.first) || !Party::CanHaveRole(a_entry.first); });
 		const auto now = Table();
 		if (!now || *now != next) {
 			factors.store(std::make_shared<const std::vector<Factor>>(std::move(next)), std::memory_order_release);
@@ -301,12 +269,12 @@ namespace FWM::PathBonus
 	void Fight()
 	{
 		for (const auto& member : Party::Members()) {
-			if (member.summon) {
+			if (!member.CanTakeRole()) {
 				continue;
 			}
 			const auto it = known.find(member.id);
 			auto       actor = member.handle.get();
-			if (it == known.end() || it->second.percent <= 0.0f || !actor || !Game::Usable(actor.get()) || !actor->IsInCombat()) {
+			if (it == known.end() || it->second.percent <= 0.0f || !actor || actor->IsCommandedActor() || !Game::Usable(actor.get()) || !actor->IsInCombat()) {
 				continue;
 			}
 			auto&       bonus = it->second;
@@ -322,7 +290,7 @@ namespace FWM::PathBonus
 					kSource);
 				break;
 			case Role::kArcher:
-				Quiver(bonus, actor.get());
+				Abilities::Keep(member.id, RE::ActorValue::kStaminaRateMult, bonus.percent, kHold, kSource);
 				break;
 			default:
 				break;
@@ -330,23 +298,9 @@ namespace FWM::PathBonus
 		}
 	}
 
-	void StandDown()
-	{
-		for (auto& [id, bonus] : known) {
-			if (bonus.shot > 0) {
-				const auto* member = Party::Find(id);
-				Log::Info("[Paths] {} shot {} arrow(s) this fight and kept {} ({} chance each)."sv, member ? member->name : std::format("{:08X}", id), bonus.shot,
-					bonus.kept, Rules::Percent(bonus.percent));
-			}
-			bonus.ammo = nullptr;
-			bonus.count = -1;
-			bonus.shot = 0;
-			bonus.kept = 0;
-		}
-	}
-
 	void Clear()
 	{
+        PartyBalance::Clear();
 		known.clear();
 		factors.store(nullptr, std::memory_order_release);
 	}
@@ -359,16 +313,19 @@ namespace FWM::PathBonus
 
 	void Install()
 	{
-		// Restore-health spells and potions are value modifiers; three classes share slot 0's
-		// function, the dual one has its own.
+		TankActs::Install();
+		// Health spells, enchantments and potions are value modifiers. Patch each concrete
+		// vtable, including health absorption; inherited slots do not follow a base-table edit.
 		REL::Relocation<std::uintptr_t> plain{ RE::VTABLE_ValueModifierEffect[0] };
 		REL::Relocation<std::uintptr_t> conditions{ RE::VTABLE_ValueAndConditionsEffect[0] };
 		REL::Relocation<std::uintptr_t> accumulating{ RE::VTABLE_AccumulatingValueModifierEffect[0] };
 		REL::Relocation<std::uintptr_t> dual{ RE::VTABLE_DualValueModifierEffect[0] };
+		REL::Relocation<std::uintptr_t> absorb{ RE::VTABLE_AbsorbEffect[0] };
 		Strengthen<0>::original = plain.write_vfunc(0, Strengthen<0>::Thunk);
 		Strengthen<1>::original = conditions.write_vfunc(0, Strengthen<1>::Thunk);
 		Strengthen<2>::original = accumulating.write_vfunc(0, Strengthen<2>::Thunk);
 		Strengthen<3>::original = dual.write_vfunc(0, Strengthen<3>::Thunk);
+		Strengthen<4>::original = absorb.write_vfunc(0, Strengthen<4>::Thunk);
 
 		const auto cost = CostCall();
 		const auto incoming = IncomingCall();
@@ -379,9 +336,10 @@ namespace FWM::PathBonus
 		if (incoming) {
 			Lighten::original = SKSE::GetTrampoline().write_call<5>(incoming, Lighten::Thunk);
 		}
-		Log::Info("[Hook] Path bonus: healers' healing and harmful spells on tanks{}{}."sv,
+		AzurasMoon::SetInterception(incoming != 0);
+		Log::Info("[Hook] Path bonus: healing and incoming tank spells{}{}."sv,
 			cost ? "; mages' spell costs"sv : "; NOT mages' spell costs (the call was not where it was expected)"sv,
-			incoming ? "; blows on tanks"sv : "; NOT blows on tanks (the call was not where it was expected)"sv);
+			incoming ? "; incoming tank weapon damage"sv : "; NOT weapon damage (the call was not where it was expected)"sv);
 	}
 
 	Stats TakeStats()

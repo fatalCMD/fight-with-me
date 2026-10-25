@@ -1,17 +1,16 @@
 #include "Plugin.h"
 
+#include "FWM/AbilityLink.h"
 #include "FWM/Battle.h"
 #include "FWM/Camera.h"
-#include "FWM/Effects.h"
 #include "FWM/Forms.h"
 #include "FWM/Log.h"
 #include "FWM/Menu.h"
 #include "FWM/Overrides.h"
 #include "FWM/Party.h"
-#include "FWM/PathBonus.h"
-#include "FWM/PathsLink.h"
 #include "FWM/Save.h"
 #include "FWM/Settings.h"
+#include "FWM/Text.h"
 #include "FWM/TimeBend.h"
 #include "FWM/WalkWithMe.h"
 
@@ -53,6 +52,32 @@ namespace
 		}
 	} api;
 
+	// The words in the player's language: the INI's choice, or the game's own. Before anything
+	// registers or draws, and never again: changing it takes a restart.
+	void LoadText()
+	{
+		std::string language = FWM::Settings::Get().language;
+		if (language.empty()) {
+			if (auto* setting = RE::GetINISetting("sLanguage:General"); setting && setting->GetType() == RE::Setting::Type::kString && setting->GetString()) {
+				language = setting->GetString();
+			}
+		}
+		language = FWM::Text::Upper(language.empty() ? "ENGLISH"sv : std::string_view(language));
+		std::error_code ec;
+		const auto      folder = std::filesystem::current_path(ec) / L"Data" / L"SKSE" / L"Plugins" / L"FightWithMe" / L"Translations";
+		const auto      loaded = FWM::Text::Load(folder, language);
+		if (loaded.files.empty()) {
+			FWM::Log::Info("[Text] {}: no translation files, so English."sv, language);
+			return;
+		}
+		std::string files;
+		for (const auto& file : loaded.files) {
+			files += (files.empty() ? "" : ", ") + file;
+		}
+		FWM::Log::Info("[Text] {}: {} lines from {}{}."sv, language, loaded.entries, files,
+			loaded.unreadable ? std::format("; {} line(s) could not be read (no tab, or not UTF-8)", loaded.unreadable) : ""s);
+	}
+
 	void OnMessage(SKSE::MessagingInterface::Message* a_message)
 	{
 		if (!a_message) {
@@ -61,15 +86,14 @@ namespace
 		switch (a_message->type) {
 		case SKSE::MessagingInterface::kPostLoad:
 			FWM::WalkWithMe::Connect();
-			FWM::PathsLink::Connect();
+			FWM::AbilityLink::Connect();
 			FWM::Camera::RegisterSmoothCam();
 			break;
 		case SKSE::MessagingInterface::kDataLoaded:
+			LoadText();
 			FWM::Forms::Resolve();
-			FWM::Effects::Install();
 			FWM::TimeBend::Register();
 			FWM::Overrides::Install();
-			FWM::PathBonus::Install();
 			PlayerUpdate::Install();
 			FWM::Camera::Install();
 			FWM::Camera::RequestSmoothCam();
@@ -95,6 +119,28 @@ extern "C" FIGHTWITHME_API bool FightWithMe_OpenBattlePlan()
 {
 	FWM::Menu::Open();
 	return FWM::Menu::Available();
+}
+
+extern "C" FIGHTWITHME_API bool FightWithMe_InBattle()
+{
+	return FWM::Battle::PartyFighting();
+}
+
+// Thread-safe settings snapshot, also read by Paths' render callbacks.
+extern "C" FIGHTWITHME_API int FightWithMe_GetTheme()
+{
+	return FWM::Settings::Get().uiTheme;
+}
+
+// Called on the main thread by Paths' queued settings update.
+extern "C" FIGHTWITHME_API bool FightWithMe_SetTheme(int theme)
+{
+    return FWM::Settings::ApplyTheme(theme);
+}
+
+extern "C" FIGHTWITHME_API std::uint32_t FightWithMe_GetMark(std::uint32_t a_actorFormID)
+{
+	return FWM::Battle::MarkOf(a_actorFormID).native_handle();
 }
 
 EXTERN_C [[maybe_unused]] __declspec(dllexport) bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadInterface* a_skse)

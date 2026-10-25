@@ -14,8 +14,8 @@ namespace FWM::Log
 	// <My Games>/Skyrim Special Edition/SKSE, where SKSE itself logs.
 	[[nodiscard]] std::optional<std::filesystem::path> Directory();
 
-	// Opens FightWithMe.log, keeping the previous run as FightWithMe.previous.log.
-	void Setup();
+	// Opens <name>.log, keeping the previous run as <name>.previous.log.
+	void Setup(std::wstring_view a_name = L"FightWithMe");
 
 	void Write(std::string_view a_level, std::string_view a_message);
 

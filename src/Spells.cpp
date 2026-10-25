@@ -1,4 +1,6 @@
 #include "FWM/Spells.h"
+#include "FWM/Loadouts.h"
+#include "FWM/AbilityLink.h"
 
 #include "FWM/Abilities.h"
 #include "FWM/Enemies.h"
@@ -8,6 +10,7 @@
 #include "FWM/Overrides.h"
 #include "FWM/Party.h"
 #include "FWM/Settings.h"
+#include "FWM/Text.h"
 
 #ifdef GetObject
 #	undef GetObject  // the Windows macro, not the default object lookup
@@ -134,7 +137,7 @@ namespace FWM::Spells
 			return v;
 		}
 
-		std::string_view HandName(std::size_t a_hand) { return a_hand == kRightHand ? "right hand"sv : "left hand"sv; }
+		std::string_view HandName(std::size_t a_hand) { return a_hand == kRightHand ? Tr("right hand") : Tr("left hand"); }
 	}
 
 	std::vector<View::Spell> OptionsFor(RE::Actor* a_companion, Role a_role)
@@ -145,8 +148,10 @@ namespace FWM::Spells
 		}
 		std::unordered_set<RE::FormID> seen;
 		auto add = [&](RE::SpellItem* a_spell, bool a_known) {
-			if (Castable(a_spell) && RoleAllows(a_spell, a_companion, a_role) && seen.insert(a_spell->GetFormID()).second) {
-				out.push_back(ViewOf(a_spell, a_companion, a_known));
+			if (Castable(a_spell) && (AbilityLink::LoadoutMask(a_role) || RoleAllows(a_spell, a_companion, a_role)) && seen.insert(a_spell->GetFormID()).second) {
+				auto option = ViewOf(a_spell, a_companion, a_known);
+				option.allowed = RoleAllows(a_spell, a_companion, a_role);
+				out.push_back(std::move(option));
 			}
 		};
 		for (auto* spell : Game::SpellsOf(a_companion)) {
@@ -176,6 +181,20 @@ namespace FWM::Spells
 		return spell && a_companion ? ViewOf(spell, a_companion, Knows(a_companion, spell)) : View::Spell{};
 	}
 
+    std::array<std::vector<RE::FormID>,2> Automatic(RE::Actor* actor, Role role)
+    {
+        std::array<std::vector<RE::FormID>,2> pools;
+        if (!actor || !ChoosesSpells(role)) return pools;
+        for (auto* spell : Game::SpellsOf(actor)) {
+            if (!Castable(spell) || !RoleAllows(spell,actor,role)) continue;
+            const auto fit=FitOf(spell);
+            if(fit.left)pools[0].push_back(spell->GetFormID());
+            if(fit.right)pools[1].push_back(spell->GetFormID());
+        }
+        for(auto& pool:pools){std::sort(pool.begin(),pool.end());pool.erase(std::unique(pool.begin(),pool.end()),pool.end());}
+        return pools;
+    }
+
 	bool Allowed(RE::FormID a_spell, RE::Actor* a_companion, Role a_role)
 	{
 		auto* spell = RE::TESForm::LookupByID<RE::SpellItem>(a_spell);
@@ -186,7 +205,7 @@ namespace FWM::Spells
 	{
 		const auto id = a_companion->GetFormID();
 		const auto name = Game::Name(a_companion);
-		auto       hands = Party::HandsOf(id);
+		auto       hands = Loadouts::Hands(id);
 		const auto other = a_hand == kLeftHand ? kRightHand : kLeftHand;
 		auto       twoHanded = [](RE::FormID a_id) {
             auto* spell = a_id ? RE::TESForm::LookupByID<RE::SpellItem>(a_id) : nullptr;
@@ -201,30 +220,30 @@ namespace FWM::Spells
 			hands[a_hand] = 0;
 			Party::SetHands(id, hands);
 			Log::Info("[Spells] {}: the {} is back to their own choice."sv, name, HandName(a_hand));
-			return { true, std::format("Their {} is theirs to choose again.", HandName(a_hand)) };
+			return { true, Trf("Their {} is theirs to choose again.", HandName(a_hand)) };
 		}
 
 		auto* spell = RE::TESForm::LookupByID<RE::SpellItem>(a_spell);
 		if (!spell || !Castable(spell)) {
-			return { false, "That is not a spell for the hands." };
+			return { false, std::string(Tr("That is not a spell for the hands.")) };
 		}
 		if (!RoleAllows(spell, a_companion, a_role)) {
-			return { false, a_role == Role::kMage ? std::format("A Mage leaves {} to a healer.", spell->GetName()) :
-			                                         std::format("{} is beyond a Healer of level {}.", spell->GetName(), a_companion->GetLevel()) };
+			return { false, a_role == Role::kMage ? Trf("A Mage leaves {} to a healer.", spell->GetName()) :
+			                                         Trf("{} is beyond a Healer of level {}.", spell->GetName(), a_companion->GetLevel()) };
 		}
 		const auto fit = FitOf(spell);
 		if (!fit.both && !(a_hand == kLeftHand ? fit.left : fit.right)) {
-			return { false, std::format("{} is cast from the {} only.", spell->GetName(), HandName(other)) };
+			return { false, Trf("{} is cast from the {} only.", spell->GetName(), HandName(other)) };
 		}
 
 		// One of yours they do not know yet: taught first.
 		bool taught = false;
 		if (!Knows(a_companion, spell)) {
 			if (!Knows(RE::PlayerCharacter::GetSingleton(), spell) || !a_companion->AddSpell(spell)) {
-				return { false, std::format("Could not teach {} {}.", name, spell->GetName()) };
+				return { false, Trf("Could not teach {} {}.", name, spell->GetName()) };
 			}
 			taught = true;
-			Notices::Push(std::format("You teach {} {}.", name, spell->GetName()), Notices::Kind::kInfo);
+			Notices::Push(Trf("You teach {} {}.", name, spell->GetName()), Notices::Kind::kInfo);
 		}
 
 		if (fit.both) {
@@ -245,8 +264,8 @@ namespace FWM::Spells
 		}
 		Log::Info("[Spells] {}{} {} in the {} ({}, {})."sv, name, taught ? " learns" : " holds", spell->GetName(), fit.both ? "both hands"sv : HandName(a_hand),
 			Rules::tierNames[static_cast<std::size_t>(TierOf(spell))], Rules::schoolNames[static_cast<std::size_t>(SchoolOf(spell))]);
-		return { true, taught ? std::format("Taught {}; it is in their {} now.", spell->GetName(), fit.both ? "hands"sv : HandName(a_hand)) :
-		                        std::format("{} in their {}.", spell->GetName(), fit.both ? "hands"sv : HandName(a_hand)) };
+		return { true, taught ? Trf("Taught {}; it is in their {} now.", spell->GetName(), fit.both ? Tr("hands") : HandName(a_hand)) :
+		                        Trf("{} in their {}.", spell->GetName(), fit.both ? Tr("hands") : HandName(a_hand)) };
 	}
 
 	bool Conjures(RE::FormID a_spell)
@@ -260,7 +279,7 @@ namespace FWM::Spells
 	std::string EquipChosen(RE::Actor* a_companion)
 	{
 		auto*       equip = RE::ActorEquipManager::GetSingleton();
-		const auto  hands = a_companion ? Party::HandsOf(a_companion->GetFormID()) : Hands{};
+		const auto  hands = a_companion ? Loadouts::Hands(a_companion->GetFormID()) : Hands{};
 		std::string names;
 		for (const auto hand : { kLeftHand, kRightHand }) {
 			auto* spell = hands[hand] ? RE::TESForm::LookupByID<RE::SpellItem>(hands[hand]) : nullptr;
@@ -278,11 +297,12 @@ namespace FWM::Spells
 
 	void Recheck(RE::Actor* a_companion, Role a_role)
 	{
+        Loadouts::Recheck(a_companion,a_role);
 		if (!a_companion || !ChoosesSpells(a_role)) {
 			return;  // kept for when they are a mage or healer again
 		}
 		const auto id = a_companion->GetFormID();
-		auto       hands = Party::HandsOf(id);
+		auto       hands = Loadouts::Hands(id);
 		bool       changed = false;
 		for (const auto hand : { kLeftHand, kRightHand }) {
 			if (hands[hand] && !Allowed(hands[hand], a_companion, a_role)) {
@@ -396,17 +416,27 @@ namespace FWM::Spells
 		for (auto& ready : a_member.spellReady) {
 			ready = std::max(ready - a_dt, 0.0f);
 		}
-		const auto hands = Party::HandsOf(a_member.id);
+		const auto pools = Loadouts::Effective(a_member.id);
+        auto hands = Loadouts::Hands(a_member.id);
 		if (!a_actor || hands == Hands{}) {
 			a_member.spellIdle = 0.0f;
 			return;
 		}
 		// The combat AI casting one of them itself: nothing to do for a while.
-		for (const auto hand : { kLeftHand, kRightHand }) {
-			auto* spell = hands[hand] ? RE::TESForm::LookupByID<RE::SpellItem>(hands[hand]) : nullptr;
+		for (const auto hand : { kLeftHand, kRightHand }) for(const auto selected:pools[hand]) {
+			auto* spell = RE::TESForm::LookupByID<RE::SpellItem>(selected);
 			if (spell && a_actor->IsCasting(spell)) {
 				a_member.spellIdle = 0.0f;
 				a_member.spellsByAi = true;
+				return;
+			}
+		}
+		// A staff or an automatically chosen spell can be busy outside the selected pools.
+		// Let the native cast finish before considering a fallback spell.
+		for (const auto source : { RE::MagicSystem::CastingSource::kLeftHand, RE::MagicSystem::CastingSource::kRightHand }) {
+			const auto* caster = a_actor->GetMagicCaster(source);
+			if (caster && (caster->state == RE::MagicCaster::State::kCharging || caster->state == RE::MagicCaster::State::kCasting)) {
+				a_member.spellIdle = 0.0f;
 				return;
 			}
 		}
@@ -428,20 +458,21 @@ namespace FWM::Spells
 		// The best fit now: a heal when badly hurt, then a blow at the enemy, then what has run out.
 		std::size_t best = 2;
 		Use         bestUse = Use::kNone;
-		int         bestRank = 0;
+		int bestRank = 0;
+        RE::FormID bestSpell=0;
 		// Only a spell the combat AI never took up: one it has, it casts from the hand itself.
 		const auto seen = Overrides::SeenHands(Game::Native(a_member.handle));
 		if (!seen || a_member.inCombatFor < 4.0f) {
 			return;
 		}
-		for (const auto hand : { kRightHand, kLeftHand }) {
-			if (!hands[hand] || a_member.spellReady[hand] > 0.0f || (hand == kLeftHand && hands[kLeftHand] == hands[kRightHand])) {
+		for (const auto hand : { kRightHand, kLeftHand }) for(const auto selected:pools[hand]) {
+			if (a_member.spellReady[hand] > 0.0f) {
 				continue;
 			}
-			if ((*seen)[hand] != 0) {
+			if (selected==hands[hand] && (*seen)[hand] != 0) {
 				continue;
 			}
-			auto* spell = RE::TESForm::LookupByID<RE::SpellItem>(hands[hand]);
+			auto* spell = RE::TESForm::LookupByID<RE::SpellItem>(selected);
 			if (!spell || spell->CalculateMagickaCost(a_actor) > magicka) {
 				continue;
 			}
@@ -474,13 +505,14 @@ namespace FWM::Spells
 				best = hand;
 				bestUse = use;
 				bestRank = rank;
+                bestSpell=selected;
 			}
 		}
 		if (bestRank == 0) {
 			return;
 		}
 
-		auto*      spell = RE::TESForm::LookupByID<RE::SpellItem>(hands[best]);
+		auto*      spell = RE::TESForm::LookupByID<RE::SpellItem>(bestSpell);
 		const bool atEnemy = bestUse == Use::kAtTarget || bestUse == Use::kTouch;
 		RE::Actor* on = atEnemy ? a_target : a_actor;
 		// From the hand that holds it, turned to the target and with the target set as the

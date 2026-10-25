@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ability Preview</title>
+<style>
+  :root { --bg: #121214; --panel: rgba(18, 18, 22, 0.86); --line: rgba(255, 255, 255, 0.10); --text: #e9e6df; --muted: #9a958c; --accent: #ee703c; --hit: #4fd18b; --miss: #e2574c; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+  #view { position: fixed; inset: 0; }
+  .panel { position: fixed; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; backdrop-filter: blur(6px); }
+  #controls { left: 16px; right: 16px; bottom: 16px; padding: 12px 14px; display: grid; gap: 10px; }
+  #timeline { position: relative; height: 34px; }
+  #scrub { width: 100%; margin: 0; position: absolute; top: 14px; accent-color: var(--accent); }
+  .beat { position: absolute; top: 0; font-size: 10px; color: var(--muted); transform: translateX(-50%); white-space: nowrap; }
+  .beat::after { content: ""; position: absolute; left: 50%; top: 14px; width: 1px; height: 10px; background: var(--muted); }
+  .beat.snap { color: var(--accent); }
+  .beat.snap::after { background: var(--accent); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button, select { background: rgba(255,255,255,0.06); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font: inherit; cursor: pointer; }
+  button:hover, select:hover { border-color: rgba(255,255,255,0.25); }
+  button.on { border-color: var(--accent); color: #fff; background: rgba(238,112,60,0.18); }
+  label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); cursor: pointer; }
+  .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+  #readout { top: 16px; left: 16px; padding: 10px 12px; min-width: 220px; font-variant-numeric: tabular-nums; }
+  #readout b { color: #fff; font-weight: 600; }
+  #readout .phase { font-size: 15px; color: var(--accent); letter-spacing: 0.04em; text-transform: uppercase; }
+  #bite { top: 16px; right: 16px; padding: 10px 12px; max-width: 280px; }
+  #bite .yes { color: var(--hit); } #bite .no { color: var(--miss); }
+  #status { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
+  @media (max-width: 640px) { #bite { display: none; } #readout { min-width: 0; } }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="view"></div>
+<div id="status">Loading the meshes, the textures and the animations...</div>
+<div id="readout" class="panel">
+  <div class="phase" id="phase">-</div>
+  <div>time <b id="time">0.00</b> s of <span id="total">0.00</span></div>
+  <div id="line1"></div>
+  <div id="line2"></div>
+</div>
+<div id="bite" class="panel">
+  <div><b>The bite</b> (at <span id="snapAt">-</span> s)</div>
+  <div id="verdict">-</div>
+  <div style="color: var(--muted); margin-top: 4px">Head capsule against the enemy's body, as the plugin tests it.</div>
+</div>
+<div id="controls" class="panel">
+  <div id="timeline"><input id="scrub" type="range" min="0" max="1000" value="0"></div>
+  <div class="row">
+    <select id="scene">
+      <option value="wolf">Kynareth's Maw</option>
+      <option value="dragonbreath">Dragon's Breath</option>
+      <option value="warcry">War Cry — Spectral Beasts</option>
+      <option value="surge">Arcane Surge � Following Seal</option>
+      <option value="berserk">Berserk — Rage Mantle</option>
+      <option value="volley">Volley - Bow Gusts</option>
+      <option value="windstep">Windstep - Spectral Retreat</option>
+      <option value="explosive">Explosive Arrow - Emerald Rune</option>
+      <option value="riposte">Riposte - Guarded Counter</option>
+      <option value="disarm">Disarm — Weapon Strike</option>
+      <option value="azura">Azura’s Moon — Lunar Blessing</option>
+      <option value="secondwind">Second Wind — Renewed Energy</option>
+      <option value="taunt">Taunt — Bear Roar</option>
+      <option value="chaos">Chaos Down</option>
+      <option value="weakwill">Weak Will</option>
+      <option value="bastion">Last Bastion</option>
+      <option value="circle">Healing Circle</option>
+      <option value="rejuvenation">Rejuvenation</option>
+      <option value="blast">Elemental Burst</option>
+      <option value="magnus">Magnus</option>
+      <option value="sunder">Sunder</option>
+      <option value="quake">Earthshaker</option>
+      <option value="rain">Arrow Rain</option>
+      <option value="renewal">Renewal</option>
+    </select>
+    <div class="sep"></div>
+    <a href="/support.html" style="color:var(--text);padding:6px 10px;border:1px solid var(--line);border-radius:6px;text-decoration:none">Supporting effects</a>
+    <button id="play">Pause</button>
+    <button id="restart">Restart</button>
+    <select id="speed">
+      <option value="1">1x</option><option value="0.5">0.5x</option><option value="0.25">0.25x</option><option value="0.1">0.1x</option>
+    </select>
+    <label><input type="checkbox" id="loop" checked> Loop</label>
+    <label><input type="checkbox" id="effectSound" checked> Sound effects</label>
+    <span id="audioStatus" aria-live="polite"></span>
+    <div id="audioPlayers" hidden></div>
+    <div class="sep"></div>
+    <button data-view="game" class="on">Game camera</button>
+    <button data-view="side">Side</button>
+    <button data-view="front">Front</button>
+    <button data-view="close">Close</button>
+    <button data-view="face">Face</button>
+    <div class="sep"></div>
+    <select id="wolfRank" class="wolf">
+      <option value="plain">Kynareth's Maw I-II (blue)</option>
+      <option value="grand">Kynareth's Maw III (red)</option>
+    </select>
+    <label class="wolf"><input type="checkbox" id="fur" checked> Fur</label>
+    <label class="wolf"><input type="checkbox" id="capsules"> Capsules</label>
+    <label class="wolf"><input type="checkbox" id="hitstop" checked> Hit-stop</label>
+    <label class="wolf"><input type="checkbox" id="shake" checked> Camera shake</label>
+    <select id="weakWillRank" class="weakwill">
+      <option value="1">Weak Will I — spectral steel</option>
+      <option value="2">Weak Will II — spectral steel</option>
+      <option value="3">Weak Will III — purple ebony</option>
+    </select>
+    <select id="weakWillDuration" class="weakwill">
+      <option value="0">Lingering Dread: none</option>
+      <option value="2">Lingering Dread I (+2 s)</option>
+      <option value="4">Lingering Dread II (+4 s)</option>
+      <option value="6">Lingering Dread III (+6 s)</option>
+    </select>
+    <select id="bastionRank" class="bastion">
+      <option value="1">Last Bastion I — round tower</option>
+      <option value="2">Last Bastion II — greater tower</option>
+      <option value="3">Last Bastion III — crimson fortress</option>
+    </select>
+    <select id="bastionDuration" class="bastion">
+      <option value="8">Hold the Line: none</option>
+      <option value="10">Hold the Line I (+2 s)</option>
+      <option value="12">Hold the Line II (+4 s)</option>
+      <option value="14">Hold the Line III (+6 s)</option>
+    </select>
+    <label class="bastion"><input type="checkbox" id="bastionMove"> Follower moves</label>
+    <select id="warCryRank" class="warcry">
+      <option value="1">War Cry I — Golden Sabre-cat</option>
+      <option value="2">War Cry II — Golden Sabre-cat</option>
+      <option value="3">War Cry III — Crimson Sabre-cat</option>
+    </select>
+    <select id="bearRank" class="taunt">
+      <option value="plain">Taunt I-II (amber)</option>
+      <option value="grand">Taunt III (larger, red)</option>
+    </select>
+    <label class="taunt"><input type="checkbox" id="bearFur" checked> Bear fur</label>
+    <select id="chaosRank" class="chaos">
+      <option value="25">Chaos Down I — Skeleton (25%)</option>
+      <option value="40">Chaos Down II — Skeleton (40%)</option>
+      <option value="55">Chaos Down III — Crowned draugr (55%)</option>
+    </select>
+    <select id="chaosView" class="chaos">
+      <option value="full">Circle and affected enemies</option>
+      <option value="target">Affected enemy</option>
+    </select>
+    <select id="chaosWide" class="chaos">
+      <option value="0">Widening Chaos: none</option>
+      <option value="50">Widening Chaos I (+50)</option>
+      <option value="100">Widening Chaos II (+100)</option>
+      <option value="150">Widening Chaos III (+150)</option>
+    </select>
+    <select id="chaosLingering" class="chaos">
+      <option value="0">Lingering Chaos: none</option>
+      <option value="2">Lingering Chaos I (+2 s)</option>
+      <option value="4">Lingering Chaos II (+4 s)</option>
+      <option value="6">Lingering Chaos III (+6 s)</option>
+    </select>
+    <select id="healRank" class="circle"><option value="1">Healing Circle I–II</option><option value="3">Healing Circle III · radiant</option></select>
+    <select id="reach" class="circle">
+      <option value="0">Wide Circle: none</option>
+      <option value="60">Wide Circle I (+60)</option>
+      <option value="120">Wide Circle II (+120)</option>
+      <option value="180">Wide Circle III (+180)</option>
+    </select>
+    <select id="sunderRank" class="sunder">
+      <option value="plain">Sunder I-II — fractured armor</option>
+      <option value="grand">Sunder III — armor rupture</option>
+    </select>
+    <select id="element" class="blast">
+      <option value="fire">Fire</option>
+      <option value="frost">Frost</option>
+      <option value="shock">Lightning</option>
+    </select>
+    <select id="tier" class="blast">
+      <option value="0">Apprentice (reach 210)</option>
+      <option value="1" selected>Adept (reach 250)</option>
+      <option value="2">Expert (reach 300)</option>
+    </select>
+    <select id="quakeRank" class="quake">
+      <option value="1">Earthshaker I (they fall)</option>
+      <option value="2">Earthshaker II (they fall)</option>
+      <option value="3">Earthshaker III (thrown, grand)</option>
+    </select>
+    <select id="renewalRank" class="renewal">
+      <option value="plain">Renewal I-II (water)</option>
+      <option value="grand">Renewal III (gold)</option>
+    </select>
+    <select id="rainRank" class="rain">
+      <option value="plain">Arrow Rain II (9 arrows)</option>
+      <option value="grand">Arrow Rain III + Downpour (18 arrows, grand)</option>
+    </select>
+    <select id="rejuvenationRank" class="rejuvenation">
+      <option value="1">Rejuvenation I</option>
+      <option value="2">Rejuvenation II</option>
+      <option value="3">Rejuvenation III — Grand</option>
+    </select>
+    <select id="magnusRank" class="magnus">
+      <option value="plain">Magnus I (12 s)</option>
+      <option value="grand">Magnus III (25 s, grand)</option>
+    </select>
+    <select id="enemy" class="wolf">
+      <option value="128,20">Enemy: a man</option>
+      <option value="100,18">Enemy: a skeleton bowman</option>
+      <option value="230,45">Enemy: a troll</option>
+      <option value="150,60">Enemy: a bear</option>
+    </select>
+    <select id="light">
+      <option value="day">Daylight</option>
+      <option value="dungeon">Dungeon torchlight</option>
+      <option value="night">Night</option>
+    </select>
+  </div>
+</div>
+<script type="module" src="viewer.js"></script>
+</body>
+</html>

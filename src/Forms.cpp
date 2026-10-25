@@ -1,4 +1,5 @@
 #include "FWM/Forms.h"
+#include "FWM/Bastion.h"
 
 #include "FWM/Log.h"
 #include "FWM/Settings.h"
@@ -115,9 +116,29 @@ namespace FWM::Forms
 		spells(forms.bursts[2], { 0x02DD29, 0x045F9D, 0x10F7EE });  // Lightning Bolt, Chain Lightning, Thunderbolt
 		forms.flameCloak = Lookup<RE::SpellItem>("Skyrim.esm"sv, 0x03AE9F);
 		forms.ironArrow = Lookup<RE::TESAmmo>("Skyrim.esm"sv, 0x01397D);
+		forms.pathArrows = { Lookup<RE::TESAmmo>("Skyrim.esm"sv, 0x01397F), Lookup<RE::TESAmmo>("Skyrim.esm"sv, 0x0139BD),
+			Lookup<RE::TESAmmo>("Skyrim.esm"sv, 0x0139BF) };
 		forms.quakeSound = Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x0C4E30);
-		forms.cleaveSound = Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x0E4CAD);
-		forms.chicken = { Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x10A00C), Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x10A00E) };
+		forms.blowSound = Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x0E4CAD);
+		forms.quakeRocks = Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x03EA9C);    // TRPRockfallReleaseSD
+		forms.quakeRumble = Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x101F41);   // AMBRumbleShakeSD
+		forms.quakeCrumble = Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x03C8A2);  // AMBrDungeonCaveCrumbleSD
+		for (std::size_t i = 0; i < Bastion::kSounds.size(); ++i) {
+			forms.bastionSounds[i] = Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, Bastion::kSounds[i].form);
+			forms.bastionGrandSounds[i] = Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, Bastion::kSounds[i].grandForm);
+		}
+		forms.wolfHowl = Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x0D8D4B);
+		forms.bearRoar = Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x0F95BC);  // NPCBearAggroWarning02
+		forms.wolfSnarl = Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x0E7521);
+		// MAGDestructionFireballExplosion, FXExplosionIceSD, VOCShoutImpactStormCallNearSD; then
+		// MAGDestructionFireballExplosionDistant, MAGIcicleImpactBreakSD, MAGShockImpactSD.
+		forms.blastSounds = { Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x02518E), Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x023992),
+			Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x044F5C) };
+		forms.magnusOpen = Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x101E65);    // OBJEyeofMagnusOpen
+		forms.magnusHum = Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x101E63);     // OBJEyeofMagnusCloseLowLPSD
+		forms.magnusVanish = Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x10F852);  // OBJEyeofMagnusVanish
+		forms.blastAfter = { Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x02518F), Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x03EDD8),
+			Lookup<RE::BGSSoundDescriptorForm>("Skyrim.esm"sv, 0x03F20D) };
 		forms.fleshShaders = { Lookup<RE::TESEffectShader>("Skyrim.esm"sv, 0x094160), Lookup<RE::TESEffectShader>("Skyrim.esm"sv, 0x094161),
 			Lookup<RE::TESEffectShader>("Skyrim.esm"sv, 0x094163), Lookup<RE::TESEffectShader>("Skyrim.esm"sv, 0x094162) };
 		const auto found = [](const auto& a_list) { return std::count_if(a_list.begin(), a_list.end(), [](auto* a_form) { return a_form != nullptr; }); };

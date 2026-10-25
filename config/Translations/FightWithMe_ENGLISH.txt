@@ -1,0 +1,875 @@
+﻿# English<TAB>Translation, one entry a line. Translate the right side only, keeping every {} (a value
+# filled in as the game runs; {0}, {1} put them in another order) and \n (a new line). Leave a right
+# side empty to keep the English. Save as UTF-8 and name the copy after the game's language, e.g.
+# <Mod>_FRENCH.txt, beside this one in Data/SKSE/Plugins/FightWithMe/Translations.
+# For Cyrillic, Chinese, Japanese, Korean or Thai, switch the matching Enable... on under [Fonts]
+# in SKSEMenuFramework.ini, so the menus have the letters.
+
+# include/FWM/Orders.h
+Weak Will	Weak Will
+A spectral helmet weakens their own damage and that of enemies who attack them.	A spectral helmet weakens their own damage and that of enemies who attack them.
+When several enemies attack them, or they are hurt under pressure.	When several enemies attack them, or they are hurt under pressure.
+Volley	Volley
+Looses five arrows in quick succession at their target; every other archer and mage turns on it too.	Looses five arrows in quick succession at their target; every other archer and mage turns on it too.
+When a boss or an enemy well above their level joins the fight.	When a boss or an enemy well above their level joins the fight.
+War cry	War cry
+A roar that staggers every enemy close around them.	A roar that staggers every enemy close around them.
+When three or more enemies close in on them, or two when they are hurt.	When three or more enemies close in on them, or two when they are hurt.
+Azura's Moon	Azura's Moon
+A spectral Wispmother grants a chance to ignore hostile damage to you and nearby companions.	A spectral Wispmother grants a chance to ignore hostile damage to you and nearby companions.
+When the party is under heavy attack or a wounded ally needs protection.	When the party is under heavy attack or a wounded ally needs protection.
+Disarm	Disarm
+Staggers their opponent and knocks the weapon out of their hands, as the Disarm shout does, up to ten levels above their own.	Staggers their opponent and knocks the weapon out of their hands, as the Disarm shout does, up to ten levels above their own.
+When they meet a boss, a two-handed weapon, or someone at or above their level.	When they meet a boss, a two-handed weapon, or someone at or above their level.
+Fighter	Fighter
+Melee. Works round to the side of whoever the fight puts in front of them.	Melee. Works round to the side of whoever the fight puts in front of them.
+Tank	Tank
+Holds the line before you and turns on whoever attacks the party.	Holds the line before you and turns on whoever attacks the party.
+Healer	Healer
+Stays back out of reach, watching whoever attacks the party.	Stays back out of reach, watching whoever attacks the party.
+Bruiser	Bruiser
+Requires a two-handed melee weapon. Into the front line after the strongest enemy.	Requires a two-handed melee weapon. Into the front line after the strongest enemy.
+Archer	Archer
+Keeps range and picks off casters and other archers first.	Keeps range and picks off casters and other archers first.
+Mage	Mage
+Keeps range and finishes off whoever is weakest.	Keeps range and finishes off whoever is weakest.
+Their choice	Their choice
+Whoever the combat AI would pick anyway.	Whoever the combat AI would pick anyway.
+Casters	Casters
+Enemies with offensive spells or a staff.	Enemies with offensive spells or a staff.
+Healers	Healers
+Enemies who can heal their allies.	Enemies who can heal their allies.
+Archers	Archers
+Enemies with a bow or crossbow out.	Enemies with a bow or crossbow out.
+Strongest	Strongest
+The most dangerous enemy: level, health, armor and weapon.	The most dangerous enemy: level, health, armor and weapon.
+Weakest	Weakest
+Whoever has the least health left. Finish them.	Whoever has the least health left. Finish them.
+Attacking you	Attacking you
+Whoever is fighting you.	Whoever is fighting you.
+Attacking the party	Attacking the party
+Whoever is fighting you or another companion.	Whoever is fighting you or another companion.
+Your target	Your target
+The enemy you are fighting or aiming at.	The enemy you are fighting or aiming at.
+Marked enemy	Marked enemy
+One enemy you mark on the battlefield.	One enemy you mark on the battlefield.
+Casters and archers	Casters and archers
+Enemies who fight from behind their line: spells, a staff, healing or a bow.	Enemies who fight from behind their line: spells, a staff, healing or a bow.
+Free	Free
+Go wherever the fight takes them.	Go wherever the fight takes them.
+Guard you	Guard you
+Only fight enemies near you or attacking you.	Only fight enemies near you or attacking you.
+Hold back	Hold back
+Stay behind and fight only what comes close.	Stay behind and fight only what comes close.
+Front line	Front line
+Meet the enemies furthest forward first.	Meet the enemies furthest forward first.
+With me	With me
+Stay at your side, weapons out, and fight from there: melee takes whatever comes near you, ranged shoots the nearest enemy.	Stay at your side, weapons out, and fight from there: melee takes whatever comes near you, ranged shoots the nearest enemy.
+As you were	As you were
+Everyone back to what their role suggests.	Everyone back to what their role suggests.
+Attack!	Attack!
+Everyone goes all out for your target.	Everyone goes all out for your target.
+To me!	To me!
+Everyone comes back to your side and fights there.	Everyone comes back to your side and fights there.
+Everyone stays back and meets only what comes for the party.	Everyone stays back and meets only what comes for the party.
+Requires a two-handed melee weapon in inventory.	Requires a two-handed melee weapon in inventory.
+Carries no melee weapon.	Carries no melee weapon.
+Carries no bow or crossbow.	Carries no bow or crossbow.
+Knows no attack spell and carries no staff.	Knows no attack spell and carries no staff.
+
+# include/FWM/Rules.h
+Novice	Novice
+Apprentice	Apprentice
+Adept	Adept
+Expert	Expert
+Master	Master
+Destruction	Destruction
+Restoration	Restoration
+Alteration	Alteration
+Conjuration	Conjuration
+Illusion	Illusion
+Other	Other
+
+# include/FWM/TraitRules.h
+Uncommon	Uncommon
+Rare	Rare
+Epic	Epic
+Legendary	Legendary
+Common	Common
+Evade	Evade
+Summon	Summon
+Aura	Aura
+On hit	On hit
+Instinct	Instinct
+Nerve	Nerve
+Strike	Strike
+
+# include/FWM/UITheme.h
+Oxblood	Oxblood
+Nordic	Nordic
+Vanilla	Vanilla
+
+# src/Abilities.cpp
+Companion unavailable.	Companion unavailable.
+No role selected.	No role selected.
+Not enough {}: requires {:.0f}.	Not enough {}: requires {:.0f}.
+magicka	magicka
+stamina	stamina
+no enemy	no enemy
+Taunts are switched off (Tanks settings).	Taunts are switched off (Tanks settings).
+Not yet: ready in {:.0f} s.	Not yet: ready in {:.0f} s.
+Could not break off to taunt.	Could not break off to taunt.
+No enemy in sight within {:.0f}.	No enemy in sight within {:.0f}.
+Taunted: {} turned on them.	Taunted: {} turned on them.
+Taunted, but {} shrugged it off.	Taunted, but {} shrugged it off.
+everyone	everyone
+{} taunts: {}.	{} taunts: {}.
+{} draws the fire: {}.	{} draws the fire: {}.
+ {} shrugs it off.	 {} shrugs it off.
+ Braced: +{:.0f} armor.	 Braced: +{:.0f} armor.
+Healing is switched off (Healers settings).	Healing is switched off (Healers settings).
+Down themselves.	Down themselves.
+Knocked about; could not.	Knocked about; could not.
+Their circle still stands.	Their circle still stands.
+Nobody within {:.0f} needs healing.	Nobody within {:.0f} needs healing.
+Could not raise the circle here.	Could not raise the circle here.
+you	you
+themselves	themselves
+{} raises a healing circle under {}.	{} raises a healing circle under {}.
+Healing circle under {}.	Healing circle under {}.
+Rejuvenate is switched off (Healers settings).	Rejuvenate is switched off (Healers settings).
+Everyone's magicka is full.	Everyone's magicka is full.
+{} raises Rejuvenate: {:g}% magicka per second for {:.0f} s.	{} raises Rejuvenate: {:g}% magicka per second for {:.0f} s.
+Rejuvenate: {:g}% magicka per second inside the circle for {:.0f} s.	Rejuvenate: {:g}% magicka per second inside the circle for {:.0f} s.
+Enable Debug Mode first.	Enable Debug Mode first.
+Invalid ability rank.	Invalid ability rank.
+Companion is busy.	Companion is busy.
+{} is not one of the abilities they carry.	{} is not one of the abilities they carry.
+The fight is over.	The fight is over.
+{} enemy	{} enemy
+{} enemies	{} enemies
+{} enemy turns on them	{} enemy turns on them
+{} enemies turn on them	{} enemies turn on them
+
+# src/AbilityLink.cpp
+Path of the Companions does not match this version of Fight With Me. Update both.	Path of the Companions does not match this version of Fight With Me. Update both.
+
+# src/Arts.cpp
+No enemies close enough for Chaos Down.	No enemies close enough for Chaos Down.
+No enemies can be slowed here.	No enemies can be slowed here.
+{} uses Chaos Down: {} slowed by {:.0f}% for {:.0f} s.	{} uses Chaos Down: {} slowed by {:.0f}% for {:.0f} s.
+Chaos Down: {} slowed by {:.0f}% for {:.0f} s.	Chaos Down: {} slowed by {:.0f}% for {:.0f} s.
+Needs a nearby living ally below 25% health in combat, and no other active Last Bastion.	Needs a nearby living ally below 25% health in combat, and no other active Last Bastion.
+{}: "Behind me!" Absorbing {:.0f}% of nearby allies' damage.	{}: "Behind me!" Absorbing {:.0f}% of nearby allies' damage.
+Last Bastion: absorbs {:.0f}% of nearby party damage for {:.0f} s.	Last Bastion: absorbs {:.0f}% of nearby party damage for {:.0f} s.
+Nobody within reach needs it.	Nobody within reach needs it.
+{} calls up Renewal: {:.0f}% health a second for {:.0f} s{}.	{} calls up Renewal: {:.0f}% health a second for {:.0f} s{}.
+; {} back on their feet	; {} back on their feet
+Renewal: {:.0f}% a second for {:.0f} s.	Renewal: {:.0f}% a second for {:.0f} s.
+Already berserk.	Already berserk.
+{} goes berserk: +{:.0f}% damage for {:.0f} s.	{} goes berserk: +{:.0f}% damage for {:.0f} s.
+Berserk: +{:.0f}% damage.	Berserk: +{:.0f}% damage.
+Could not show the Sunder effect.	Could not show the Sunder effect.
+Sunder effect activated.	Sunder effect activated.
+Nobody to sunder.	Nobody to sunder.
+{} is out of reach ({:.0f} away).	{} is out of reach ({:.0f} away).
+{} sunders {}: -{:.0f} armor for {:.0f} s.	{} sunders {}: -{:.0f} armor for {:.0f} s.
+Sundered {}: -{:.0f} armor.	Sundered {}: -{:.0f} armor.
+Nobody close enough to feel it.	Nobody close enough to feel it.
+{} shakes the earth: {} within {:.0f} go down.	{} shakes the earth: {} within {:.0f} go down.
+Earthshaker: {} in reach.	Earthshaker: {} in reach.
+Not winded yet.	Not winded yet.
+{} gets a second wind.	{} gets a second wind.
+Second wind: {:.0f}% health back.	Second wind: {:.0f}% health back.
+Cannot raise a guard right now.	Cannot raise a guard right now.
+{} sets themselves to riposte.	{} sets themselves to riposte.
+Riposte: guard the next melee blow, {:.0f} s.	Riposte: guard the next melee blow, {:.0f} s.
+They must stand before {}, not beside or behind it.	They must stand before {}, not beside or behind it.
+Nobody they stand before.	Nobody they stand before.
+Their wolf is still out.	Their wolf is still out.
+10 m ahead	10 m ahead
+{} calls down Kynareth's Maw on {}!	{} calls down Kynareth's Maw on {}!
+Kynareth's Maw on {}.	Kynareth's Maw on {}.
+No enemy in sight.	No enemy in sight.
+Needs a bow and arrows, or a shot is already preparing.	Needs a bow and arrows, or a shot is already preparing.
+{} prepares an explosive arrow.	{} prepares an explosive arrow.
+Explosive arrow readied.	Explosive arrow readied.
+No safe space to retreat.	No safe space to retreat.
+{} slips away on the wind.	{} slips away on the wind.
+Windstep.	Windstep.
+Nobody to rain on.	Nobody to rain on.
+Needs a bow and arrows to copy.	Needs a bow and arrows to copy.
+{} calls down a rain of {} arrows on {}.	{} calls down a rain of {} arrows on {}.
+Arrow rain: {} arrows on {}.	Arrow rain: {} arrows on {}.
+Their magicka is already surging.	Their magicka is already surging.
+{}'s magicka surges: {:.0f}x as fast for {:.0f} s.	{}'s magicka surges: {:.0f}x as fast for {:.0f} s.
+Arcane surge: magicka {:.0f}x as fast.	Arcane surge: magicka {:.0f}x as fast.
+Nobody in sight to strike.	Nobody in sight to strike.
+Could not cast it.	Could not cast it.
+fire	fire
+frost	frost
+lightning	lightning
+{} unleashes a burst of {} at {}.	{} unleashes a burst of {} at {}.
+A burst of {} at {}.	A burst of {} at {}.
+No enemy within breath range.	No enemy within breath range.
+Needs room in front to breathe.	Needs room in front to breathe.
+{} unleashes a stream of {}.	{} unleashes a stream of {}.
+Dragon's Breath unleashed.	Dragon's Breath unleashed.
+Magnus is already with them ({:.0f} s).	Magnus is already with them ({:.0f} s).
+{} draws on Magnus: magicka without end for {:.0f} s.	{} draws on Magnus: magicka without end for {:.0f} s.
+Magnus: magicka without end for {:.0f} s.	Magnus: magicka without end for {:.0f} s.
+{} makes a last stand.	{} makes a last stand.
+Last Stand	Last Stand
+{}'s guardian spirit pulls you back: +{:.0f}% health.	{}'s guardian spirit pulls you back: +{:.0f}% health.
+Guardian Spirit	Guardian Spirit
+Nothing to do right now.	Nothing to do right now.
+Only in a fight.	Only in a fight.
+Abilities are switched off (Battle plan settings).	Abilities are switched off (Battle plan settings).
+Berserk	Berserk
+More damage and a power attack at every chance	More damage and a power attack at every chance
+Riposte	Riposte
+Guarding the next melee blow: counter, knockback and floor impact	Guarding the next melee blow: counter, knockback and floor impact
+Arcane Surge	Arcane Surge
+Magicka flowing back many times as fast	Magicka flowing back many times as fast
+Magnus	Magnus
+Magicka without end	Magicka without end
+Renewal	Renewal
+Healing everyone near a little every second	Healing everyone near a little every second
+Own and attackers' damage reduced by {:.0f}%	Own and attackers' damage reduced by {:.0f}%
+Last Bastion	Last Bastion
+Absorbing {:.0f}% of nearby party damage	Absorbing {:.0f}% of nearby party damage
+Windstep	Windstep
+Moving {:.0f}% faster	Moving {:.0f}% faster
++{:.0f} armor	+{:.0f} armor
+
+# src/Battle.cpp
+{} has no arrows for {}.	{} has no arrows for {}.
+{} can't reach {}: shooting instead.	{} can't reach {}: shooting instead.
+{} can't reach {}: casting instead.	{} can't reach {}: casting instead.
+{} can't reach {}.	{} can't reach {}.
+{} lets {} go: {}.	{} lets {} go: {}.
+the combat AI would not take them on	the combat AI would not take them on
+{} is out of magicka and falls back to recover.	{} is out of magicka and falls back to recover.
+they are too far away	they are too far away
+they left the fight	they left the fight
+Roles are unavailable for creature companions and summons.	Roles are unavailable for creature companions and summons.
+Roles are set out of a fight.	Roles are set out of a fight.
+Only mages and healers have spells chosen for them.	Only mages and healers have spells chosen for them.
+Spells can only be changed out of a fight.	Spells can only be changed out of a fight.
+Paths are changed out of a fight.	Paths are changed out of a fight.
+Turn Debug Mode off after the fight.	Turn Debug Mode off after the fight.
+Auto battle on: whoever sees an enemy starts the fight.	Auto battle on: whoever sees an enemy starts the fight.
+Auto battle off: they wait for the fight to come to them.	Auto battle off: they wait for the fight to come to them.
+One-Handed	One-Handed
+Two-Handed	Two-Handed
+Archery	Archery
+Block	Block
+Heavy Armor	Heavy Armor
+Light Armor	Light Armor
+Sneak	Sneak
+Braced	Braced
++{:.0f} armor from their taunt	+{:.0f} armor from their taunt
+Rejuvenated	Rejuvenated
+Restoring {:g}% magicka per second, up to {:.0f}, inside the circle	Restoring {:g}% magicka per second, up to {:.0f}, inside the circle
+Azura's Blessing	Azura's Blessing
+{:.0f}% chance to ignore hostile damage	{:.0f}% chance to ignore hostile damage
+Out of magicka	Out of magicka
+Falling back until it comes back	Falling back until it comes back
+
+# src/Leveling.cpp
+{} reaches level {}.	{} reaches level {}.
+
+# src/Loadouts.cpp
+Change pools outside combat.	Change pools outside combat.
+This pool is full.	This pool is full.
+Unavailable for this role.	Unavailable for this role.
+That weapon is not available in their inventory.	That weapon is not available in their inventory.
+Only mages and healers have spell pools.	Only mages and healers have spell pools.
+The other hand's pool is full.	The other hand's pool is full.
+Pool updated.	Pool updated.
+
+# src/Menu.cpp
+no threat	no threat
+easy	easy
+an even match	an even match
+hard	hard
+deadly	deadly
+boss	boss
+caster	caster
+warrior	warrior
+RIGHT HAND	RIGHT HAND
+LEFT HAND	LEFT HAND
+A Mage holds any spell but a heal.	A Mage holds any spell but a heal.
+A Healer holds any spell (Healers settings).	A Healer holds any spell (Healers settings).
+A Healer holds any spell, with attack spells up to {}	A Healer holds any spell, with attack spells up to {}
+ (Apprentice from level 10)	 (Apprentice from level 10)
+ (Adept from level 25)	 (Adept from level 25)
+{}, level {}\n{}, {} for {}.	{}, level {}\n{}, {} for {}.
+\nHealth {:.0f} / {:.0f}  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  Magicka {:.0f} / {:.0f}  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  Stamina {:.0f} / {:.0f}	\nHealth {:.0f} / {:.0f}  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  Magicka {:.0f} / {:.0f}  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  Stamina {:.0f} / {:.0f}
+\nHeld by {}'s taunt.	\nHeld by {}'s taunt.
+\nClick to send someone after them.	\nClick to send someone after them.
+{}:{:02} left	{}:{:02} left
+{} s left	{} s left
+\n{:.0f}% of the way back	\n{:.0f}% of the way back
+No companions in reach. Followers nearby, Walk With Me's party and summons appear here.	No companions in reach. Followers nearby, Walk With Me's party and summons appear here.
+DOWN	DOWN
+Unbound	Unbound
+Key {}	Key {}
+Shift	Shift
+Ctrl	Ctrl
+Alt	Alt
+None	None
+{}\n{}\nRoles are set out of a fight: open the plan with nobody fighting to change it.	{}\n{}\nRoles are set out of a fight: open the plan with nobody fighting to change it.
+ARMOR	ARMOR
+DAMAGE	DAMAGE
+Level {}	Level {}
+Level {}\nCaught up with you: no XP until you level up.	Level {}\nCaught up with you: no XP until you level up.
+Level {}\n{:.0f} of {:.0f} XP toward level {}.\nWhen a fight is over, every enemy the party brought down counts, whoever struck last.	Level {}\n{:.0f} of {:.0f} XP toward level {}.\nWhen a fight is over, every enemy the party brought down counts, whoever struck last.
+Unique traits	Unique traits
+{} distinct signature abilities. Locked abilities and morale drawbacks do not raise rarity. Shared combat perks and utility effects are excluded.	{} distinct signature abilities. Locked abilities and morale drawbacks do not raise rarity. Shared combat perks and utility effects are excluded.
+No signature abilities detected.	No signature abilities detected.
++{} more	+{} more
+Locked	Locked
+Locked for now: their mod keeps it back until something is done, a quest of theirs, say.	Locked for now: their mod keeps it back until something is done, a quest of theirs, say.
+A role for {}	A role for {}
+Their role	Their role
+Not on offer	Not on offer
+Level up	Level up
+  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  down	  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  down
+  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  no arrows	  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  no arrows
+  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  out of magicka, falling back	  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  out of magicka, falling back
+ROLE	ROLE
+Formations	Formations
+FOCUS	FOCUS
+POSITION	POSITION
+\nCost: {:.0f}% maximum {}	\nCost: {:.0f}% maximum {}
+Rank {}	Rank {}
+AUTO	AUTO
+MANUAL	MANUAL
+Taunt	Taunt
+Heal	Heal
+Holds enemies up to level {}\nReach: {:.0f}\nDuration: {:.0f} s\nStamina: {:.0f}	Holds enemies up to level {}\nReach: {:.0f}\nDuration: {:.0f} s\nStamina: {:.0f}
+\nBraces them: +{:.0f} armor for as long as it holds, more as they rise in level.	\nBraces them: +{:.0f} armor for as long as it holds, more as they rise in level.
+A circle of healing light where it helps most: +{:.0f} health over {:.0f} s to anyone in it, more as they rise in level; undead in it burn; hurt companions walk into it. Spends magicka on activation.\nReady again {:.0f} s after use.	A circle of healing light where it helps most: +{:.0f} health over {:.0f} s to anyone in it, more as they rise in level; undead in it burn; hurt companions walk into it. Spends magicka on activation.\nReady again {:.0f} s after use.
+\nIn a fight only.	\nIn a fight only.
+AUTO on: they taunt by themselves when it is ready and worth it.\nOff: only when you press Taunt.	AUTO on: they taunt by themselves when it is ready and worth it.\nOff: only when you press Taunt.
+AUTO on: they heal by themselves when anyone is down or drops below the line.\nOff: only when you press Heal.	AUTO on: they heal by themselves when anyone is down or drops below the line.\nOff: only when you press Heal.
+Rejuvenate	Rejuvenate
+Restores {:g}% maximum magicka per second (up to {:.0f}) inside the circle for {:.0f} s. Overlapping circles do not stack.\nReady again {:.0f} s after use.{}	Restores {:g}% maximum magicka per second (up to {:.0f}) inside the circle for {:.0f} s. Overlapping circles do not stack.\nReady again {:.0f} s after use.{}
+AUTO on: they rejuvenate by themselves when you, a mage or a healer runs out of magicka or nearly does.\nOff: only when you press Rejuvenate.	AUTO on: they rejuvenate by themselves when you, a mage or a healer runs out of magicka or nearly does.\nOff: only when you press Rejuvenate.
+{}\nCooldown: {:.0f} s{}	{}\nCooldown: {:.0f} s{}
+AUTO on: {}\nOff: only when you press {}.	AUTO on: {}\nOff: only when you press {}.
+Empty	Empty
+\nHolds enemies up to level {}	\nHolds enemies up to level {}
+\nCooldown: {:.0f} s	\nCooldown: {:.0f} s
+\nDebug Mode: usable outside combat.\nLaunched abilities aim 10 m ahead.	\nDebug Mode: usable outside combat.\nLaunched abilities aim 10 m ahead.
+This follower has no abilities at the moment.	This follower has no abilities at the moment.
+Skill tree	Skill tree
+Heal below {}%	Heal below {}%
+{} heard you...	{} heard you...
+LOADOUT	LOADOUT
+WEAPON POOL	WEAPON POOL
+LEFT SPELL POOL	LEFT SPELL POOL
+RIGHT SPELL POOL	RIGHT SPELL POOL
+Automatic choice	Automatic choice
+Choose one or more weapons to start the battle with. One is chosen at random and kept for that battle. Shields pair with one-handed weapons. Tanks can also use two-handed weapons.	Choose one or more weapons to start the battle with. One is chosen at random and kept for that battle. Shields pair with one-handed weapons. Tanks can also use two-handed weapons.
+Select multiple spells. Their combat AI chooses from this pool as the fight changes.	Select multiple spells. Their combat AI chooses from this pool as the fight changes.
+No arrows	No arrows
+BEST AT	BEST AT
+Choose one or more weapons to start the battle with	Choose one or more weapons to start the battle with
+Every school	Every school
+INVENTORY	INVENTORY
+THEY KNOW	THEY KNOW
+YOU CAN TEACH THEM	YOU CAN TEACH THEM
+x{}	x{}
+{}\nUnavailable for {}.	{}\nUnavailable for {}.
+{}\nUnavailable for this role or level.	{}\nUnavailable for this role or level.
+\nClick to remove from this pool.	\nClick to remove from this pool.
+Automatic choice\nClears this pool and lets them choose from options allowed for their role.	Automatic choice\nClears this pool and lets them choose from options allowed for their role.
+{}\nPairs with a one-handed weapon.\nClick to add or remove.	{}\nPairs with a one-handed weapon.\nClick to add or remove.
+{}\n{:.0f} base damage, {} in inventory.\nClick to add or remove.	{}\n{:.0f} base damage, {} in inventory.\nClick to add or remove.
+{}\n{} {}  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  {:.0f} magicka{}{}	{}\n{} {}  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  {:.0f} magicka{}{}
+  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  takes both hands	  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  takes both hands
+\nOne of yours: choosing it teaches them, and they keep it.	\nOne of yours: choosing it teaches them, and they keep it.
+Nothing else for this hand.	Nothing else for this hand.
+{} selected	{} selected
+Done	Done
+{}{}\nReplaces every companion's own orders.	{}{}\nReplaces every companion's own orders.
+Take a point back out of the bonus.	Take a point back out of the bonus.
+No points in the bonus to take back.	No points in the bonus to take back.
+Points come back out of the bonus once the fight is over.	Points come back out of the bonus once the fight is over.
+Put a leftover point straight into the bonus: {} now, {} with it.	Put a leftover point straight into the bonus: {} now, {} with it.
+Points go straight into the bonus once every node on this path is mastered: {} to go.	Points go straight into the bonus once every node on this path is mastered: {} to go.
+The bonus is at its highest: {}.	The bonus is at its highest: {}.
+Not enough perk points	Not enough perk points
+{} faster with their weapons in a fight	{} faster with their weapons in a fight
+{} less damage from every blow, arrow and harmful spell ({} at most)	{} less damage from every blow, arrow and harmful spell ({} at most)
+{} more to all the healing they do: their abilities, the spells they cast and the potions they drink	{} more to all the healing they do: their abilities, the spells they cast and the potions they drink
+{} more damage with their weapons in a fight	{} more damage with their weapons in a fight
+{} faster stamina recovery in combat ({} at most); arrows are always unlimited	{} faster stamina recovery in combat ({} at most); arrows are always unlimited
+{} less magicka for every spell they cast ({} off at most)	{} less magicka for every spell they cast ({} off at most)
+Path bonus. Every point spent on the {}: {}.\n{} spent here: {}.	Path bonus. Every point spent on the {}: {}.\n{} spent here: {}.
+\n{} of them put straight into the bonus.	\n{} of them put straight into the bonus.
+\nAt its highest: more points change nothing.	\nAt its highest: more points change nothing.
+\nEvery node is mastered: leftover points can go straight into it.	\nEvery node is mastered: leftover points can go straight into it.
+\nOnce every node here is mastered, leftover points can go straight into it.	\nOnce every node here is mastered, leftover points can go straight into it.
+\nOnly while they are a {}; they are a {} now.	\nOnly while they are a {}; they are a {} now.
+How paths work, step by step. F1 opens it too, and View on a pad.	How paths work, step by step. F1 opens it too, and View on a pad.
+GUIDE	GUIDE
+Debug Mode. Turn off to restore earned progression.	Debug Mode. Turn off to restore earned progression.
+Debug Mode: free ranks, unlimited perk points and ability testing.	Debug Mode: free ranks, unlimited perk points and ability testing.
+DEBUG: ON	DEBUG: ON
+DEBUG	DEBUG
+Requires level {}	Requires level {}
+TRAIT  /  ALWAYS ON	TRAIT  /  ALWAYS ON
+CAPSTONE	CAPSTONE
+ABILITY  /  EVERYONE STARTS WITH IT	ABILITY  /  EVERYONE STARTS WITH IT
+ABILITY	ABILITY
+Branch of {}	Branch of {}
+Mastered	Mastered
+Rank {} of {}	Rank {} of {}
+Not learned yet	Not learned yet
+Ready again in {:.0f} s	Ready again in {:.0f} s
+{:.0f}% maximum {}	{:.0f}% maximum {}
+Branches {} / {}	Branches {} / {}
+{} at rank {}	{} at rank {}
+Needs {} first	Needs {} first
+II: Level 25   /   III: Level 50	II: Level 25   /   III: Level 50
+Requires all other perks unlocked: {} / {}	Requires all other perks unlocked: {} / {}
+On their own: {}	On their own: {}
+When it is needed.	When it is needed.
+INTO THE BONUS	INTO THE BONUS
+Every node here is mastered: put a leftover point straight into the path bonus, {} now, {} with it.	Every node here is mastered: put a leftover point straight into the path bonus, {} now, {} with it.
+MASTERED	MASTERED
+LEARN	LEARN
+RANK UP	RANK UP
+Give back a rank.	Give back a rank.
+INTO A FIGHT	INTO A FIGHT
+CARRIED ON THIS PATH	CARRIED ON THIS PATH
+Carrying waits for the fight to end	Carrying waits for the fight to end
+Choose a slot for {}	Choose a slot for {}
+CARRY HERE	CARRY HERE
+AGAIN: ALL {} BACK	AGAIN: ALL {} BACK
+START OVER	START OVER
+{}  /  LEVEL {}	{}  /  LEVEL {}
+LEVEL {}	LEVEL {}
+Requires level 50	Requires level 50
+Every other perk unlocked	Every other perk unlocked
+Perks unlocked: {} / {}	Perks unlocked: {} / {}
+INNATE GIFTS	INNATE GIFTS
+Rank {} / {}	Rank {} / {}
+Unlimited perk points	Unlimited perk points
+{} perk points. A perk or path bonus can be learned here.	{} perk points. A perk or path bonus can be learned here.
+{} perk points. No eligible purchase on this path yet.	{} perk points. No eligible purchase on this path yet.
+The path they follow	The path they follow
+Follow this path	Follow this path
+{} fights by the {} from now on: its abilities and traits count, and the points on the others wait.	{} fights by the {} from now on: its abilities and traits count, and the points on the others wait.
+Choose a path to inspect. Q / E or the triggers also switch paths.	Choose a path to inspect. Q / E or the triggers also switch paths.
+PATHS	PATHS
+POINTS	POINTS
+SIX PATHS	SIX PATHS
+THE TREE	THE TREE
+THE CARD	THE CARD
+LEARNING	LEARNING
+THAT'S ALL	THAT'S ALL
+Every companion has a path for each of the six roles: abilities to learn, ranks that make them stronger, and traits that are always on. A few short steps show how it works.	Every companion has a path for each of the six roles: abilities to learn, ranks that make them stronger, and traits that are always on. A few short steps show how it works.
+{} earns a point for every level past {}, counted from the highest level they have reached, so someone met late arrives with points to spend. The same points serve all six paths.	{} earns a point for every level past {}, counted from the highest level they have reached, so someone met late arrives with points to spend. The same points serve all six paths.
+One for each role. Points can go into any of them, but only the path {} follows counts in a fight; Follow this path, under the dropdown at the top left, changes it. Q and E, the triggers or the dropdown turn between them.	One for each role. Points can go into any of them, but only the path {} follows counts in a fight; Follow this path, under the dropdown at the top left, changes it. Q and E, the triggers or the dropdown turn between them.
+One for each role. Points can go into any of them, but only the path of the role {} has now counts in a fight. Q and E, the triggers or the dropdown at the top left turn between them.	One for each role. Points can go into any of them, but only the path of the role {} has now counts in a fight. Q and E, the triggers or the dropdown at the top left turn between them.
+Abilities cost 1, 2 and 3 points for ranks I, II and III. Branches and innate traits cost one point per rank. Innate trait ranks II and III require level 25 and 50. Third abilities require level 35; fourth abilities require level 50. Magnus also requires every other perk unlocked.	Abilities cost 1, 2 and 3 points for ranks I, II and III. Branches and innate traits cost one point per rank. Innate trait ranks II and III require level 25 and 50. Third abilities require level 35; fourth abilities require level 50. Magnus also requires every other perk unlocked.
+Whatever the cursor is on is read here, its numbers picked out. The ladder shows each rank: ticked once held, the next with its price. Point at a rank to read what it would do.	Whatever the cursor is on is read here, its numbers picked out. The ladder shows each rank: ticked once held, the next with its price. Point at a rank to read what it would do.
+Spend points here, or with Enter (A on a pad). Out of a fight a rank comes back for free: the small button beside this one, or a right-click on the node.	Spend points here, or with Enter (A on a pad). Out of a fight a rank comes back for free: the small button beside this one, or a right-click on the node.
+Spend points here, or with Enter (A on a pad). Giving points back is switched off in this game, so choose with care.	Spend points here, or with Enter (A on a pad). Giving points back is switched off in this game, so choose with care.
+Two abilities go into every fight. Choose one they know, then a slot, or press 1 or 2 (X on a pad). They use them on their own when the moment comes, or when you call for them from their card.	Two abilities go into every fight. Choose one they know, then a slot, or press 1 or 2 (X on a pad). They use them on their own when the moment comes, or when you call for them from their card.
+Start over, at the foot of the card, gives back every point on a path. This guide is under the ?, or F1 (View on a pad), whenever you want it again.	Start over, at the foot of the card, gives back every point on a path. This guide is under the ?, or F1 (View on a pad), whenever you want it again.
+GUIDE  /  {} OF {}	GUIDE  /  {} OF {}
+used in a fight	used in a fight
+BRANCH	BRANCH
+adds to its ability	adds to its ability
+TRAIT	TRAIT
+always on	always on
+BEGIN	BEGIN
+DONE	DONE
+NEXT	NEXT
+Close the guide. It is under the ? whenever you want it.	Close the guide. It is under the ? whenever you want it.
+Back	Back
+COMPANION	COMPANION
+OVERHEAD	OVERHEAD
+The overhead view moves the camera, so it needs Glide to the companion on (Battle plan settings, Camera).	The overhead view moves the camera, so it needs Glide to the companion on (Battle plan settings, Camera).
+The whole fight from above: blue rings for the party, red for enemies, white for you. Indoors the ceiling is cut away above everyone's heads. Click an enemy to send someone after them.	The whole fight from above: blue rings for the party, red for enemies, white for you. Indoors the ceiling is cut away above everyone's heads. Click an enemy to send someone after them.
+The camera on the companion you are commanding.	The camera on the companion you are commanding.
+switches	switches
+AUTO BATTLE	AUTO BATTLE
+Auto battle: {}\nOn: a companion who sees an enemy starts the fight. Those on Hold back wait, and nobody starts one while you sneak.\nOff: they wait until an enemy attacks, or you do.{}	Auto battle: {}\nOn: a companion who sees an enemy starts the fight. Those on Hold back wait, and nobody starts one while you sneak.\nOff: they wait until an enemy attacks, or you do.{}
+\nEither way, weapons come out when an enemy is in view.	\nEither way, weapons come out when an enemy is in view.
+Everyone sent	Everyone sent
+{} sent	{} sent
+{} engages	{} engages
+Call {} off	Call {} off
+Send {}	Send {}
+Send everyone	Send everyone
+Call everyone off	Call everyone off
+{}  /  level {}	{}  /  level {}
+LB / RB	LB / RB
+Companion	Companion
+D-pad	D-pad
+Move	Move
+Choose	Choose
+Ability now	Ability now
+RS	RS
+Turn view	Turn view
+LT / RT	LT / RT
+Zoom	Zoom
+Close	Close
+Abilities	Abilities
+Tab	Tab
+Arrows	Arrows
+Enter	Enter
+Right-drag	Right-drag
+Wheel	Wheel
+Esc	Esc
+Next	Next
+Back / Next	Back / Next
+Close guide	Close guide
+Left / Right	Left / Right
+Learn	Learn
+Carry	Carry
+Give back	Give back
+Path	Path
+View	View
+Guide	Guide
+Click	Click
+Right-click	Right-click
+Up / Down	Up / Down
+Spell	Spell
+School	School
+Scroll	Scroll
+LS	LS
+Mid-drag / WASD	Mid-drag / WASD
+Gathering the party...	Gathering the party...
+YOUR PARTY	YOUR PARTY
+BATTLE PLAN	BATTLE PLAN
+The overhead view needs Glide to the companion (Battle plan settings).	The overhead view needs Glide to the companion (Battle plan settings).
+Paths	Paths
+No companions in reach. Followers who travel with you appear here once they are loaded.	No companions in reach. Followers who travel with you appear here once they are loaded.
+Level {}. A perk point for every level past {}, from the highest they have reached.	Level {}. A perk point for every level past {}, from the highest they have reached.
+Perk points	Perk points
+{} of {} points spent. Points go into any path; only the one they follow counts in a fight.	{} of {} points spent. Points go into any path; only the one they follow counts in a fight.
+Setting	Setting
+Value	Value
+Could not save FightWithMePaths_user.ini. Check file access, then change the setting again.	Could not save FightWithMePaths_user.ini. Check file access, then change the setting again.
+Could not save FightWithMe.ini. Check file access, then change the setting again.	Could not save FightWithMe.ini. Check file access, then change the setting again.
+Reset this page	Reset this page
+No companions in reach. Followers nearby, Walk With Me's party and summons appear here once loaded.	No companions in reach. Followers nearby, Walk With Me's party and summons appear here once loaded.
+Role	Role
+Focus	Focus
+Position	Position
+Auto	Auto
+Lv {}	Lv {}
+Taunt without being told.	Taunt without being told.
+Heal without being told.	Heal without being told.
+Only tanks and healers have an ability of their own.	Only tanks and healers have an ability of their own.
+Also with you: {}. Creatures and summons use their own combat AI and can receive party healing.	Also with you: {}. Creatures and summons use their own combat AI and can receive party healing.
+PARTY	PARTY
+Enable Fight With Me	Enable Fight With Me
+Let Fight With Me direct companions in battle. Off hands every fight back to their own judgement at once.	Let Fight With Me direct companions in battle. Off hands every fight back to their own judgement at once.
+COMPANIONS	COMPANIONS
+Orders change at once and are kept in your save. The battle plan shows the same choices with the fight in view.	Orders change at once and are kept in your save. The battle plan shows the same choices with the fight in view.
+Open the battle plan	Open the battle plan
+Slows the world and shows every companion, their target and the enemies around you.	Slows the world and shows every companion, their target and the enemies around you.
+Whole party	Whole party
+Everyone back to their role	Everyone back to their role
+Sets every companion's stance and targets back to what their role suggests.	Sets every companion's stance and targets back to what their role suggests.
+Party orders (Attack!, To me!, Hold back, As you were) replace everyone's own orders at once. They are on the numpad by default; see Controls.	Party orders (Attack!, To me!, Hold back, As you were) replace everyone's own orders at once. They are on the numpad by default; see Controls.
+Roles	Roles
+Role strength	Role strength
+How far a role reshapes a companion's own way of fighting. 0% changes only whom they fight; 100% replaces their style with the role's.	How far a role reshapes a companion's own way of fighting. 0% changes only whom they fight; 100% replaces their style with the role's.
+Guess roles for new companions	Guess roles for new companions
+The first time a companion joins: a shield makes a Tank, a two-hander a Bruiser, a bow an Archer, a staff or spells a Mage or Healer. An NFF tank or healer role is kept. Off: everyone starts as a Fighter.	The first time a companion joins: a shield makes a Tank, a two-hander a Bruiser, a bow an Archer, a staff or spells a Mage or Healer. An NFF tank or healer role is kept. Off: everyone starts as a Fighter.
+Before a fight	Before a fight
+Weapons out when an enemy is in view	Weapons out when an enemy is in view
+Out of a fight, an enemy that a companion or you can see brings their weapons out. They put them away a few seconds after the last one is out of view, unless yours are out.	Out of a fight, an enemy that a companion or you can see brings their weapons out. They put them away a few seconds after the last one is out of view, unless yours are out.
+Auto battle	Auto battle
+A companion who sees an enemy starts the fight instead of waiting to be attacked. Companions on Hold back wait, and nobody starts one while you sneak. Also a switch at the top right of the battle plan.	A companion who sees an enemy starts the fight instead of waiting to be attacked. Companions on Hold back wait, and nobody starts one while you sneak. Also a switch at the top right of the battle plan.
+Sight range	Sight range
+How far away an enemy can be and still count as in view. 2500 is about a long bowshot.	How far away an enemy can be and still count as in view. 2500 is about a long bowshot.
+When the fight is over	When the fight is over
+Stand down when no enemy is left	Stand down when no enemy is left
+With weapons out and nobody left to fight, companions leave combat and fall back into Walk With Me's formation instead of searching.	With weapons out and nobody left to fight, companions leave combat and fall back into Walk With Me's formation instead of searching.
+After	After
+How long the fight must have nobody in it.	How long the fight must have nobody in it.
+Role strength, role guessing, what happens before a fight and standing down back to their defaults. Companions' orders are not touched.	Role strength, role guessing, what happens before a fight and standing down back to their defaults. Companions' orders are not touched.
+TARGETING	TARGETING
+Choosing a target	Choosing a target
+Nearer counts up to	Nearer counts up to
+%.0f units	%.0f units
+Between two enemies that fit the focus, the nearer is preferred up to this distance. Distance never rules anyone out: an ordered target is chased wherever it is.	Between two enemies that fit the focus, the nearer is preferred up to this distance. Distance never rules anyone out: an ordered target is chased wherever it is.
+Stick to a target	Stick to a target
+How much a companion prefers the enemy they are already fighting.	How much a companion prefers the enemy they are already fighting.
+Spread out	Spread out
+How much they avoid an enemy others are already on, per ally.	How much they avoid an enemy others are already on, per ally.
+Distance weight	Distance weight
+How much nearer enemies are preferred.	How much nearer enemies are preferred.
+Rethink every	Rethink every
+How often targets are reconsidered.	How often targets are reconsidered.
+Positions	Positions
+Guard you within	Guard you within
+Guard you: companions fight enemies this close to you, or attacking you.	Guard you: companions fight enemies this close to you, or attacking you.
+Hold back within	Hold back within
+Hold back: melee companions only meet enemies this close to themselves. Ranged ones keep shooting from where they stand.	Hold back: melee companions only meet enemies this close to themselves. Ranged ones keep shooting from where they stand.
+With me within	With me within
+With me (what To me! gives everyone): they keep this close to you and fight from there. Melee companions take anything that comes near you; archers and casters shoot the nearest enemy, however far.	With me (what To me! gives everyone): they keep this close to you and fight from there. Melee companions take anything that comes near you; archers and casters shoot the nearest enemy, however far.
+Fight back within	Fight back within
+An enemy attacking a companion from this close is dealt with first, whatever their focus. Your target and a marked enemy are orders and still come first.	An enemy attacking a companion from this close is dealt with first, whatever their focus. Your target and a marked enemy are orders and still come first.
+Keep them near you	Keep them near you
+Companions guarding you, holding back or with you keep inside their distance, the way a guard keeps to their post: they break off a chase and come back.	Companions guarding you, holding back or with you keep inside their distance, the way a guard keeps to their post: they break off a chase and come back.
+Hold back leash	Hold back leash
+How far from you a companion holding back may go.	How far from you a companion holding back may go.
+Sending someone after an enemy	Sending someone after an enemy
+Outline marked enemies	Outline marked enemies
+While the battle plan is open, an enemy you send someone after is outlined, through walls. The outline goes when the plan closes.	While the battle plan is open, an enemy you send someone after is outlined, through walls. The outline goes when the plan closes.
+Every targeting setting on this page back to its default.	Every targeting setting on this page back to its default.
+Time	Time
+Stop time	Stop time
+Pause the game while planning instead of slowing it.	Pause the game while planning instead of slowing it.
+Slow motion	Slow motion
+%.2fx	%.2fx
+How fast the world runs while the plan is open.	How fast the world runs while the plan is open.
+Ease in and out	Ease in and out
+Seconds for time to slow down and speed back up.	Seconds for time to slow down and speed back up.
+Slow Time screen effect	Slow Time screen effect
+The Slow Time shout's look while planning. It washes the picture out and blurs it; off keeps the battlefield clear.	The Slow Time shout's look while planning. It washes the picture out and blurs it; off keeps the battlefield clear.
+Hide the HUD	Hide the HUD
+Hide the HUD and other interface while the plan is open; everything comes back when it closes.	Hide the HUD and other interface while the plan is open; everything comes back when it closes.
+Camera	Camera
+Glide to the companion	Glide to the companion
+While the plan is open the camera eases over to the companion you are commanding, follows as you switch between them, and eases back when you close it.	While the plan is open the camera eases over to the companion you are commanding, follows as you switch between them, and eases back when you close it.
+Distance	Distance
+How far behind the companion the camera settles.	How far behind the companion the camera settles.
+Height	Height
+How far above their eyes.	How far above their eyes.
+Turning speed	Turning speed
+%.1fx	%.1fx
+How fast the right stick, or dragging with the right mouse button, turns the view around the companion or the fight.	How fast the right stick, or dragging with the right mouse button, turns the view around the companion or the fight.
+Overhead tilt	Overhead tilt
+%.0f deg	%.0f deg
+How steeply the overhead view looks down when it first opens. 88 is straight down; lower shows more of the room's shape. Tilt it in the plan with the right stick.	How steeply the overhead view looks down when it first opens. 88 is straight down; lower shows more of the room's shape. Tilt it in the plan with the right stick.
+Cut the ceiling away overhead	Cut the ceiling away overhead
+When something blocks the view from above (a cave roof, a ceiling, an overhang), the overhead view leaves out everything above the tallest fighter's head, so nobody is hidden. In the open nothing is cut. Off: the camera comes down under the cover instead.	When something blocks the view from above (a cave roof, a ceiling, an overhang), the overhead view leaves out everything above the tallest fighter's head, so nobody is hidden. In the open nothing is cut. Off: the camera comes down under the cover instead.
+Cut above heads	Cut above heads
+How far above the tallest head the cut goes. Raise it to keep more of the walls; lower it if a low ceiling still shows.	How far above the tallest head the cut goes. Raise it to keep more of the walls; lower it if a low ceiling still shows.
+Interface	Interface
+Theme	Theme
+Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights. All use the same windows and controls. Applies to the battle plan, Paths, notices and these settings.	Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights. All use the same windows and controls. Applies to the battle plan, Paths, notices and these settings.
+Menu scale	Menu scale
+Size of the battle plan on top of the screen-height scaling.	Size of the battle plan on top of the screen-height scaling.
+Notices	Notices
+Short lines on the left of the screen when a companion cannot do what they were told, or runs out of arrows.	Short lines on the left of the screen when a companion cannot do what they were told, or runs out of arrows.
+Menu sounds	Menu sounds
+The game's own menu sounds when you point at and choose orders in the battle plan.	The game's own menu sounds when you point at and choose orders in the battle plan.
+Tooltips	Tooltips
+Describe each control when you point at it or move to it with the pad. Turn off once you know them.	Describe each control when you point at it or move to it with the pad. Turn off once you know them.
+Troubleshooting	Troubleshooting
+Log target decisions	Log target decisions
+Every setting on this page back to its default.	Every setting on this page back to its default.
+LB + D-pad down	LB + D-pad down
+LB + D-pad up	LB + D-pad up
+LB + Y	LB + Y
+LB + Right-stick click	LB + Right-stick click
+Right-stick click	Right-stick click
+Left-stick click	Left-stick click
+Back / View	Back / View
+CONTROLS	CONTROLS
+KEY BINDINGS	KEY BINDINGS
+Select the binding, then press a key, holding Shift, Ctrl or Alt with it for a combination. Esc cancels; Delete clears.	Select the binding, then press a key, holding Shift, Ctrl or Alt with it for a combination. Esc cancels; Delete clears.
+Action	Action
+Modifier	Modifier
+Key	Key
+Held with the key. A key with no modifier works whatever else is held, so sprinting does not get in the way.	Held with the key. A key with no modifier works whatever else is held, so sprinting does not get in the way.
+Press a key...	Press a key...
+Clear	Clear
+Attack! (everyone on your target)	Attack! (everyone on your target)
+To me! (everyone guards you)	To me! (everyone guards you)
+Hold back (everyone stays back)	Hold back (everyone stays back)
+Overhead view (in the plan)	Overhead view (in the plan)
+Overhead view	Overhead view
+{} and {} are both on {}; only {} will happen.	{} and {} are both on {}; only {} will happen.
+Gamepad	Gamepad
+Hold LB and press the chosen button. Walk With Me's wheel uses LB with the right stick, Y or D-pad up; pick something it does not.	Hold LB and press the chosen button. Walk With Me's wheel uses LB with the right stick, Y or D-pad up; pick something it does not.
+Switches between the companion and the whole fight seen from above while the plan is open. The right stick turns the view either way.	Switches between the companion and the whole fight seen from above while the plan is open. The right stick turns the view either way.
+In the battle plan	In the battle plan
+What	What
+Keyboard and mouse	Keyboard and mouse
+Choose a companion	Choose a companion
+Click a crest, Tab	Click a crest, Tab
+Move between rows	Move between rows
+D-pad up / down	D-pad up / down
+Pick or step a value	Pick or step a value
+Click, Left / Right	Click, Left / Right
+D-pad left / right	D-pad left / right
+Give a party order	Give a party order
+Click it, or its key	Click it, or its key
+Party orders row, A	Party orders row, A
+Send someone after an enemy	Send someone after an enemy
+Click the enemy	Click the enemy
+Battlefield row, A	Battlefield row, A
+Ability now / switch	Ability now / switch
+Turn the view	Turn the view
+Drag with the right button	Drag with the right button
+Right stick	Right stick
+Mouse wheel	Mouse wheel
+Its key, or the button top left	Its key, or the button top left
+The button set above	The button set above
+Esc or the hotkey	Esc or the hotkey
+Commands pause in game menus. Avoid keys used by other mods or by quicksave and quickload.	Commands pause in game menus. Avoid keys used by other mods or by quicksave and quickload.
+The hotkey and the gamepad button back to their defaults.	The hotkey and the gamepad button back to their defaults.
+Path of the Companions	Path of the Companions
+A point for every level past	A point for every level past
+10: the first point at level 11, forty by level 50. Points come from the highest level a companion has reached, so someone met late arrives with points to spend.	10: the first point at level 11, forty by level 50. Points come from the highest level a companion has reached, so someone met late arrives with points to spend.
+Bonus points	Bonus points
+Points every companion has on top, whatever their level.	Points every companion has on top, whatever their level.
+Give points back	Give points back
+Ranks can be given back out of a fight, and a whole path started over, free. Off: every point spent is spent for good.	Ranks can be given back out of a fight, and a whole path started over, free. Off: every point spent is spent for good.
+Debug Mode button	Debug Mode button
+Test any ability rank and learn perks freely. Turning Debug Mode off restores earned progression.	Test any ability rank and learn perks freely. Turning Debug Mode off restores earned progression.
+Party balance	Party balance
+Scale follower damage	Scale follower damage
+Reduce follower weapon, spell and ability damage as the fighting party grows. Outnumbering enemies adds a further reduction. Player damage is unchanged.	Reduce follower weapon, spell and ability damage as the fighting party grows. Outnumbering enemies adds a further reduction. Player damage is unchanged.
+Per extra follower	Per extra follower
+Damage reduction for each fighting follower after the first.	Damage reduction for each fighting follower after the first.
+Outnumbering enemies	Outnumbering enemies
+Additional reduction for each follower beyond the number of nearby enemies.	Additional reduction for each follower beyond the number of nearby enemies.
+Minimum damage	Minimum damage
+Follower damage never falls below this percentage. One follower always deals full damage.	Follower damage never falls below this percentage. One follower always deals full damage.
+Leveling	Leveling
+Companions level up by fighting	Companions level up by fighting
+When a fight is over, each companion who was in it earns XP for every enemy the party brought down, whoever struck last. Each level costs more than the last, and each brings health, magicka or stamina and skill by their role. Off: everyone goes back to the level their own mod gave them.	When a fight is over, each companion who was in it earns XP for every enemy the party brought down, whoever struck last. Each level costs more than the last, and each brings health, magicka or stamina and skill by their role. Off: everyone goes back to the level their own mod gave them.
+Never above your level	Never above your level
+A companion at your level gains no XP until you level up. One who was already above it keeps their level and waits for you.	A companion at your level gains no XP until you level up. One who was already above it keeps their level and waits for you.
+XP per enemy level	XP per enemy level
+An even enemy's worth: this times the companion's level. Each level an enemy is above them adds 5%, up to 1.75 times; each level below takes 5% off, down to a quarter.	An even enemy's worth: this times the companion's level. Each level an enemy is above them adds 5%, up to 1.75 times; each level below takes 5% off, down to a quarter.
+Boss worth	Boss worth
+How many times more a boss is worth.	How many times more a boss is worth.
+Crowd	Crowd
+How much a crowd adds: the enemy worth the most counts in full and each after it this share of the one before, so at 0.75 a fight is never worth more than four of its best enemy. At 1 every enemy counts in full.	How much a crowd adds: the enemy worth the most counts in full and each after it this share of the one before, so at 0.75 a fight is never worth more than four of its best enemy. At 1 every enemy counts in full.
+Climb	Climb
+How much harder each level gets: a level costs this share more than one of yours would for every level they already have. At 0.05, with fights of four even enemies, a level takes about 6 fights at level 10, 8 at 30 and 11 at 50. At 0 it is 3 or 4 however high they are. Fewer levels means fewer path points too.	How much harder each level gets: a level costs this share more than one of yours would for every level they already have. At 0.05, with fights of four even enemies, a level takes about 6 fights at level 10, 8 at 30 and 11 at 50. At 0 it is 3 or 4 however high they are. Fewer levels means fewer path points too.
+Panel	Panel
+Open the panel	Open the panel
+Select it, then press a key, holding Shift, Ctrl or Alt with it for a combination. Esc cancels; Delete clears.	Select it, then press a key, holding Shift, Ctrl or Alt with it for a combination. Esc cancels; Delete clears.
+Hold LB and press the chosen button.	Hold LB and press the chosen button.
+Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights.	Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights.
+Ability effects	Ability effects
+What the abilities look like in the world: spirit beasts, circles, bursts and weapon flames. Off keeps what they do and drops how they look.	What the abilities look like in the world: spirit beasts, circles, bursts and weapon flames. Off keeps what they do and drops how they look.
+Short lines on the left of the screen when a companion uses an ability or has points to spend.	Short lines on the left of the screen when a companion uses an ability or has points to spend.
+The game's own menu sounds when you point at and choose in the panel.	The game's own menu sounds when you point at and choose in the panel.
+The companion under your crosshair comes first; Tab moves to the next.	The companion under your crosshair comes first; Tab moves to the next.
+Party	Party
+Targeting	Targeting
+Battle plan	Battle plan
+Controls	Controls
+Settings	Settings
+Paths: the panel needs SKSE Menu Framework 3.	Paths: the panel needs SKSE Menu Framework 3.
+Fight With Me: the battle plan needs SKSE Menu Framework 3.	Fight With Me: the battle plan needs SKSE Menu Framework 3.
+{} more rank	{} more rank
+{} more ranks	{} more ranks
+{} companion in reach	{} companion in reach
+{} companions in reach	{} companions in reach
+
+# src/Party.cpp
+{} cannot be a {}: {} Now a {}.	{} cannot be a {}: {} Now a {}.
+
+# src/PathsLink.cpp
+A companion	A companion
+{} has {} to spend in their skill tree.	{} has {} to spend in their skill tree.
+{} companions have perk points to spend in their skill trees.	{} companions have perk points to spend in their skill trees.
+Invalid perk.	Invalid perk.
+Path of the Companions is not installed.	Path of the Companions is not installed.
+{} learns {}.	{} learns {}.
+{}: {} rank {}.	{}: {} rank {}.
+{} gives back a rank of {}.	{} gives back a rank of {}.
+{} starts the {} over: {} back.	{} starts the {} over: {} back.
+{} carries {} into a fight.	{} carries {} into a fight.
+{}: a point into the {}'s bonus ({} there).	{}: a point into the {}'s bonus ({} there).
+{} takes a point back out of the {}'s bonus.	{} takes a point back out of the {}'s bonus.
+Debug Mode enabled for {}.	Debug Mode enabled for {}.
+Debug Mode disabled for {}.	Debug Mode disabled for {}.
+{} perk point	{} perk point
+{} perk points	{} perk points
+{} point	{} point
+{} points	{} points
+
+# src/Rules.cpp
+attack speed	attack speed
+damage taken	damage taken
+healing	healing
+stamina recovery	stamina recovery
+magicka cost	magicka cost
+
+# src/Sight.cpp
+ and 	 and 
+{} takes on {}.	{} takes on {}.
+{} take on {}.	{} take on {}.
+
+# src/Specials.cpp
+Weak Will is already active, or they cannot fight.	Weak Will is already active, or they cannot fight.
+{}: "Your strength fails you!" They and their attackers deal {:.0f}% less damage.	{}: "Your strength fails you!" They and their attackers deal {:.0f}% less damage.
+Weak Will: they and their attackers deal {:.0f}% less damage.	Weak Will: they and their attackers deal {:.0f}% less damage.
+Nobody to fire at.	Nobody to fire at.
+Nothing to shoot with.	Nothing to shoot with.
+Volley! {} looses {} arrows at {}.	Volley! {} looses {} arrows at {}.
+Volley: {} arrows at {}.	Volley: {} arrows at {}.
+Nobody close enough to stagger.	Nobody close enough to stagger.
+{}'s war cry staggers {}.	{}'s war cry staggers {}.
+War cry: {} staggered.	War cry: {} staggered.
+War cry, but nobody staggered.	War cry, but nobody staggered.
+Azura's blessing is already active or unavailable.	Azura's blessing is already active or unavailable.
+{} invokes Azura's Moon.	{} invokes Azura's Moon.
+Azura's blessing is spreading.	Azura's blessing is spreading.
+Nobody to disarm.	Nobody to disarm.
+{} is too far ({:.0f} away).	{} is too far ({:.0f} away).
+{} holds no weapon to take.	{} holds no weapon to take.
+{} is too strong to disarm (level {}).	{} is too strong to disarm (level {}).
+{} held on to the {}.	{} held on to the {}.
+Could not disarm right now.	Could not disarm right now.
+{} kept their feet and the {}.	{} kept their feet and the {}.
+{} knocks the {} out of {}'s hands.	{} knocks the {} out of {}'s hands.
+Disarmed {}: the {} is on the ground.	Disarmed {}: the {} is on the ground.
+No bow and arrow forms available.	No bow and arrow forms available.
+Volley: 10 m ahead.	Volley: 10 m ahead.
+Disarm effect activated.	Disarm effect activated.
+They carry no special ability right now.	They carry no special ability right now.
+Specials are switched off (Battle plan settings).	Specials are switched off (Battle plan settings).
+
+# src/Spells.cpp
+Their {} is theirs to choose again.	Their {} is theirs to choose again.
+That is not a spell for the hands.	That is not a spell for the hands.
+A Mage leaves {} to a healer.	A Mage leaves {} to a healer.
+{} is beyond a Healer of level {}.	{} is beyond a Healer of level {}.
+{} is cast from the {} only.	{} is cast from the {} only.
+Could not teach {} {}.	Could not teach {} {}.
+You teach {} {}.	You teach {} {}.
+Taught {}; it is in their {} now.	Taught {}; it is in their {} now.
+hands	hands
+{} in their {}.	{} in their {}.
+
+# src/TraitRules.cpp
+On a power attack	On a power attack
+When their blow lands	When their blow lands
+On a shield bash	On a shield bash
+When a fight starts	When a fight starts
+In a fight	In a fight
+On a swing	On a swing
+ while below {}% health	 while below {}% health
+ against a target above {}% health	 against a target above {}% health
+, {}% of the time	, {}% of the time
+Runs from danger at the first chance	Runs from danger at the first chance
+Runs once hurt	Runs once hurt
+Runs when badly hurt	Runs when badly hurt
+, or 	, or 
+
+# src/Traits.cpp
+Signature move	Signature move
+when they are hit	when they are hit
+when they go down	when they go down
+Loses nerve	Loses nerve

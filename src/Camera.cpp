@@ -17,6 +17,8 @@ namespace FWM::Camera
 		std::atomic<bool>       portraitWanted{ false };  // no fight on: face to face
 		std::atomic<bool>       overheadWanted{ false };
 		std::atomic<bool>       driving{ false };
+        std::atomic<float> treeLift{0.f};
+        bool treeOnly{false}, treePoseSaved{false};
 
 		// Turns and zoom asked for since the last frame: the right stick, a right-drag, the wheel.
 		std::atomic<float> yawIn{ 0.0f }, pitchIn{ 0.0f }, zoomIn{ 0.0f };
@@ -48,7 +50,8 @@ namespace FWM::Camera
 		RE::NiPoint3 homeOffset{};
 		RE::NiPoint3 homeForward{ 0.0f, 1.0f, 0.0f };
 
-		Pose  shown{};  // what was written last frame
+		Pose treePose{};
+        Pose  shown{};  // what was written last frame
 		Pose  from{};   // where the current move started
 		float progress{ 1.0f };
 		float duration{ kOpenSeconds };
@@ -461,6 +464,7 @@ namespace FWM::Camera
 
 		void Finish(RE::PlayerCamera* a_camera)
 		{
+            treeLift=0.f;treeOnly=false;treePoseSaved=false;
 			active = false;
 			closing = false;
 			subject = 0;
@@ -572,8 +576,21 @@ namespace FWM::Camera
 				shown.eye = Follow(shown.eye, target.eye, dt, quick ? 16.0f : (overheadShown ? 2.5f : 3.0f));
 				shown.look = Follow(shown.look, target.look, dt, quick ? 18.0f : (overheadShown ? 3.0f : 4.0f));
 			}
-			ApplyCut(shown);
-			Write(root, shown, dt);
+			const float lift=treeLift.load(std::memory_order_relaxed);
+            Pose output=shown;
+            if(lift>0.f && !closing) {
+                if(!treePoseSaved){treePose=shown;treePoseSaved=true;}
+                output=treePose;
+                const auto direction=treePose.look-treePose.eye;
+                const float yaw=std::atan2(direction.x,direction.y);
+                const float startPitch=std::atan2(direction.z,std::hypot(direction.x,direction.y));
+                const float pitch=startPitch+(1.12f-startPitch)*lift;
+                const float reach=std::max(direction.Length(),300.f);
+                output.eye.z+=38.f*lift;
+                output.look=output.eye+RE::NiPoint3{std::sin(yaw)*std::cos(pitch)*reach,std::cos(yaw)*std::cos(pitch)*reach,std::sin(pitch)*reach};
+                RestoreNear();
+            } else {treePoseSaved=false;ApplyCut(shown);}
+            Write(root, output, dt);
 
 			if (closing && progress >= 1.0f) {
 				Finish(camera);
@@ -621,9 +638,9 @@ namespace FWM::Camera
 		Log::Info("[Hook] Third-person camera installed."sv);
 	}
 
-	void Begin()
+	void Begin(bool a_treeOnly)
 	{
-		if (!Settings::Get().cameraGlide) {
+		if (!a_treeOnly && !Settings::Get().cameraGlide) {
 			return;
 		}
 		auto* camera = RE::PlayerCamera::GetSingleton();
@@ -669,12 +686,14 @@ namespace FWM::Camera
 		overheadShown = false;
 		cutKnown = false;
 		active = true;
+        treeOnly = a_treeOnly;
 		closing = false;
 		driving = true;
 	}
 
 	void End()
 	{
+        treeLift=0.f;treePoseSaved=false;
 		if (!active || closing) {
 			return;
 		}
@@ -685,6 +704,7 @@ namespace FWM::Camera
 
 	void Reset()
 	{
+        treeLift=0.f;treeOnly=false;treePoseSaved=false;
 		active = false;
 		closing = false;
 		subject = 0;
@@ -696,6 +716,17 @@ namespace FWM::Camera
 		driving = false;
 		ReleaseSmoothCam();
 	}
+
+    void TreeLift(float a_amount) noexcept {
+        const float next=std::clamp(a_amount,0.f,1.f);
+        const float previous=treeLift.exchange(next,std::memory_order_relaxed);
+        if((previous<=0.f && next>0.f) || (previous>0.f && next<=0.f)) {
+            if(auto* tasks=SKSE::GetTaskInterface())tasks->AddTask([] {
+                if(treeLift.load(std::memory_order_relaxed)>0.f) {if(!active)Begin(true);}
+                else if(treeOnly)End();
+            });
+        }
+    }
 
 	void Focus(RE::FormID a_actor, bool a_portrait) noexcept
 	{

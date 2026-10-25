@@ -40,3 +40,9 @@ namespace FightWithMeAPI
 
 extern "C" FIGHTWITHME_API FightWithMeAPI::IFightWithMe* FightWithMe_GetInterface(std::uint32_t a_version);
 extern "C" FIGHTWITHME_API bool                          FightWithMe_OpenBattlePlan();
+// Companions are in a fight Fight With Me runs, or have just been called into one. Walk With
+// Me leaves the party alone while this holds. Safe from any thread.
+extern "C" FIGHTWITHME_API bool                          FightWithMe_InBattle();
+// The enemy a follower (actor reference form id) was sent after in the battle plan, as a native
+// actor handle; 0 when they were sent after no one. Main thread.
+extern "C" FIGHTWITHME_API std::uint32_t                 FightWithMe_GetMark(std::uint32_t a_actorFormID);

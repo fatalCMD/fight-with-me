@@ -1,28 +1,28 @@
 #pragma once
 
 #include "FWM/Cooldowns.h"
+#include "FWM/Party.h"
 #include "FWM/PathsLink.h"
 #include "FWM/StyleLayer.h"
 #include "FWM/View.h"
 
 // The abilities and traits the Paths add-on brings, beyond the eight every role had before:
-//   Tank     Challenge, Stand Fast; Iron Hide, Shield Master, Last Stand
+//   Tank     Chaos Down, Stand Fast; Iron Hide, Shield Master, Last Stand
 //   Healer   Renewal; Triage (in Heal), Serenity, Guardian Spirit
 //   Bruiser  Berserk, Sunder, Earthshaker; Heavy Hands, Momentum, Executioner
-//   Fighter  Second Wind, Riposte, Cleave; Flanker, Endurance, Opportunist
-//   Archer   Deadeye, Pinning Shot, Arrow Rain; Fletcher, Skirmisher, Sharpshooter
+//   Fighter  Second Wind, Riposte, Kynareth's Maw; Flanker, Endurance, Opportunist
+//   Archer   Explosive Arrow, Windstep, Arrow Rain; Steady Breath, Fine Arrows, Spell-Touched
 //   Mage     Arcane Surge, Elemental Burst, Magnus; Arcane Flow, Spell Shield, Unravel
 // Only with a path: without the add-on nobody carries any of them. Main thread.
 
 namespace FWM::Arts
 {
+	void DebugActivate(Party::Member& member, RE::Actor* actor, const PathsLink::Kit& kit, Paths::Ability ability);
 	// The planner's tick, in a fight: the abilities a path carries, and the traits.
 	void Update();
-	// Every frame of a fight: blows landing after their swing, arrows falling, pins, bleeding,
-	// Renewal's pulses, last-ditch saves.
+	// Every frame of a fight: blows landing after their swing, spectral wolves, arrows falling,
+	// pins, bleeding, Renewal's pulses, last-ditch saves.
 	void Tick(float a_dt);
-	// Out of a fight: a fletcher's arrows.
-	void Rest(float a_dt);
 	// The fight is over.
 	void Clear();
 	// A load or a new game.

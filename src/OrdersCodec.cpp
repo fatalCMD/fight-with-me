@@ -112,7 +112,7 @@ namespace FWM::Codec
 			Orders orders;
 			orders.role = Clamp(p[4], defaults.role);
 			orders.focus = Clamp(p[5], defaults.focus);
-			orders.position = Clamp(p[6], defaults.position);
+			orders.position = Live(Clamp(p[6], defaults.position));
 			orders.autoAbility = (p[7] & kAuto) != 0;
 			orders.autoSpecial = (p[7] & kSpecialOff) == 0;
 			orders.autoRejuvenate = (p[7] & kRejuvenateOff) == 0;

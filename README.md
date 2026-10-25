@@ -1,52 +1,48 @@
-# Fight With Me
+# Fight With Me 0.5.0
 
 Battle orders for your companions in Skyrim. Give each follower a role, a focus and a place in
-the fight; the game's own combat AI carries it out. Tanks taunt, healers heal, and opening the
-battle plan slows the world while you decide.
+the fight; the game's own combat AI carries it out. Fight With Me decides whom they fight and
+where they stand, never what their attacks do: abilities, unique traits and levels earned by
+fighting are [Path of the Companions](#path-of-the-companions-optional)'s. Opening the battle plan
+slows the world while you decide.
 
 Pairs with [Walk With Me](https://www.nexusmods.com/skyrimspecialedition/mods/191283): Walk With
-Me moves the party, Fight With Me fights with it. Either works without the other.
+Me moves the party, Fight With Me fights with it. Once companions are in a fight, Walk With Me
+lets go of the party until it is over (Walk With Me 0.3.1 or later). Either works without the
+other.
 
 ## Requirements
 
 - SKSE and Address Library for SKSE Plugins
 - SKSE Menu Framework 3 (for the battle plan; without it, saved orders and the INI still apply)
-- [Triumvirate - Mage Archetypes](https://www.nexusmods.com/skyrimspecialedition/mods/39170), by Enai Siaion
-- [Elemental Destruction Magic Redux](https://www.nexusmods.com/skyrimspecialedition/mods/37211), by reaperix, Redux maintained by phenderix
-- [Vibrant Weapons - Fire Frost Shock](https://www.nexusmods.com/skyrimspecialedition/mods/40087), by jg1
 
-Install those three FX sources with their own requirements and enable their plugins. For
-Vibrant Weapons, use the download for your Skyrim runtime; this integration uses the original
-Fire Frost Shock mod, not Vibrant Weapons EAE. Fight With Me reads their installed visual
-assets; it does not bundle them, cast their spells, or require that followers learn them.
-If a source is missing, its visuals fall back to the simpler vanilla effects and the missing
-plugin or mesh is reported in FightWithMe.log.
+No ESP, and no art: the POTC Effects pack is Path of the Companions' now.
 
 ## Roles
 
-| Role | Plays like | Ability |
-|---|---|---|
-| Fighter | Balanced melee that flanks | |
-| Tank | Blocks, bashes and pulls enemies off the party; shields against archers shooting at them | Taunt: holds enemies up to the tank's level plus a quarter of it, for 10 s (15 s from level 30, 30 s from 60), and braces the tank with extra armor while it holds |
-| Healer | Stays back and keeps the whole party standing | Heal: you and everyone near them at once, more as they level, no spell or magicka needed. Rejuvenate: your magicka and every companion's back twice as fast for 30 s (1 min from level 30, 3 min from 60) |
-| Bruiser | Power attacks and staggers the big ones | |
-| Archer | Keeps range, picks off casters first; fights as a Fighter when out of arrows | |
-| Mage | Spell pressure, finishes the weakest; never conjures a bound weapon | |
+A role is where a companion stands, whom they go for and how they move. What they attack with,
+and how, stays their own (or what you chose for them, below).
 
-Anyone can be a Healer. Mages and healers can be given a spell for each hand on their sheet in
-the party view (out of a fight): one they know, or one of yours they are then taught. Mages
-hold any spell but a heal; healers any spell, with attack spells capped by level. Whatever is
-chosen gets used: a spell the combat AI never casts on its own (one cast on oneself to hurt
-those around, say) is cast for them when their hands have been idle a few seconds. Mages and
-healers never fight with a blade or their fists; out of magicka, they fall back and wait for it.
+| Role | Plays like | Goes for | Stands |
+|---|---|---|---|
+| Fighter | Melee that works round to the side of whoever the fight puts in front of them | Their own choice | Free |
+| Tank | Holds the line before you, close in, without circling away | Whoever attacks the party | Guarding you |
+| Healer | Stays back out of reach, falls back from anyone who closes | Whoever attacks the party | Hold back |
+| Bruiser | Into the front line, giving no ground (needs a two-handed melee weapon) | The strongest enemy | Front line |
+| Archer | Keeps range and falls back from melee; fights as a Fighter when out of arrows | Casters and archers | Hold back |
+| Mage | Keeps range; out of magicka, falls back and waits for it | The weakest enemy | Hold back |
+
+Each role's focus (their own choice, your target, whoever attacks you or the party, casters and
+archers, strongest, weakest, or one marked enemy) and position (free, guard you, hold back,
+front line, with me) are only where it starts: change either in the battle plan. Whatever the
+focus, an enemy attacking a companion up close is dealt with first. **Role strength** on the
+Party page sets how far a role and a position move a companion; at 0 they only change whom
+they fight.
 
 Roles are set out of a fight. In one, the role box shows the role they fight as, with their
-armor, damage and resistances beside it.
-
-Each role also sets a default focus (their own choice, your target, whoever attacks you or the
-party, casters and archers, strongest, weakest, or one marked enemy) and position (formation,
-free, guard you, hold back, front line, with me). Change either in the battle plan. Whatever
-the focus, an enemy attacking a companion up close is dealt with first.
+armor, damage and resistances beside it. Creature companions and summons cannot take a role;
+they stay in the party display and use their own combat AI. NPC races are eligible unless
+tagged as creatures, animals or dragons.
 
 Click an enemy in the battle plan to send a companion (or everyone) after them. A companion
 sent after someone goes, whatever their position: no guard radius or leash holds them back,
@@ -56,72 +52,52 @@ the focus they had.
 ## Before a fight
 
 Out of a fight, an enemy that you or a companion can see within 2500 units brings their
-weapons out; they put them away a few seconds after it is gone, unless yours are out. With
+weapons out; they put them away a few seconds after it is gone, unless yours are out. They
+draw once per sighting, so if the game puts their weapons away, they stay away. Wildlife that
+keeps to itself (a fox, an elk) is not an enemy until it is in a fight. With
 **Auto battle** on (a switch at the top right of the battle plan, off by default), the
 companion who sees an enemy starts the fight instead of waiting to be attacked. Companions on
 Hold back wait for it to come to them, and nobody starts one while you sneak.
 
-## Abilities
+## Weapons and spells
 
-Every role has a special, with a button in the battle plan and an "on their own" switch:
-Bodyguard (tank: runs to you when you are in trouble and taunts what is on you), Volley
-(archer: every archer and mage fires at one enemy), War cry (bruiser: staggers everything close
-around them), Ward (mage and healer: Oakflesh up to Ebonyflesh on you, by their level) and
-Disarm (fighter: the Disarm shout's effect at their opponent). Tanks keep their taunt and
-healers their heal and Rejuvenate.
+Outside combat, open a companion's Loadout and choose what they fight with. Weapon pools list
+the weapons they carry; choosing some limits the combat AI to those, without removing anything
+from their inventory. Mages and healers also have a spell pool for each hand: spells they know,
+or yours, which they are then taught for good. Chosen spells keep their hands on them, and one
+the combat AI never casts on its own is cast for them when their hands have been idle a few
+seconds. A two-handed ritual goes in both hand pools. Empty pools leave the choice to them.
+Pools are kept in the save.
 
-Each ability shows in the world: enemies a taunt holds glow red and the braced tank carries
-a protective aura. Healing blooms around its recipients, Rejuvenate brings a water swirl,
-and Ward raises a barrier. War cry sends out a wind burst; a disarmed weapon throws sparks.
-With Paths, Earthshaker throws up rocks at the impact and aftershock, Sunder sheds fragments
-from its target's armor, and Berserk, Cleave and Riposte light the weapons with fire,
-fire-and-lightning and frost respectively. Renewal sustains a healing aura, Pinning Shot
-binds its target, and Magnus surrounds the mage with Triumvirate's resurrection art.
-Weapon visuals follow the equipped weapon type and hand and end on sheathing or swapping.
-These added visuals can be switched off with **Ability effects** in the settings.
+A Bruiser needs a carried greatsword, battleaxe or warhammer, and fights only with two-handed
+melee weapons while they are one.
 
-In the battle plan, icons over each companion's crest show what is on
-them (braced, rejuvenated, guarding you, out of magicka) with a ring for the time left; point
-at one for the details. Enemy markers show health, magicka and stamina as they are.
+## Path of the Companions (optional)
 
-Fight With Me leaves potions alone: when companions drink is up to the game, or to a mod made
-for it such as [NPCs Use Potions](https://www.nexusmods.com/skyrimspecialedition/mods/67489).
+Path of the Companions is a mod of its own: a perk tree for each role, the abilities on it,
+unique traits from a companion's own mod, and levels earned by fighting. With both installed,
+the role you give a companion here is the path that counts there, the enemy you send them
+after is the one their abilities go for, and Fight With Me carries out what the abilities ask
+of a fight (a volley's target, a healer's circle to walk into, enemies a taunt holds). Its
+panel opens on Numpad 9 (LB + D-pad right on a pad), beside the battle plan. Update both
+together.
 
-## Paths - Follower Ability Skilltree (optional add-on)
+### From Fight With Me 0.3
 
-With Paths installed, every role has a perk tree in the battle plan. A companion earns a perk point for every level past 10 (those met above that have their points
-waiting) and spends them on new abilities, ranks and branches in the ones they know, and
-traits. Each carries two abilities into a fight, chosen on their path, and the level
-milestones above give way to ranks. Without the add-on, everything here works as described.
-
-Every point spent on a path is also a path bonus for a companion of that role, 1% per point
-by default (`[PathBonus]` in the INI), shown beside the path's name: attack speed for a
-fighter, less damage taken for a tank (from blows, arrows and harmful spells; 75% at most),
-all the healing a healer does (abilities, spells they cast,
-potions they drink), weapon damage for a bruiser, the chance an arrow is not used up for an
-archer (90% at most), and less magicka for every spell for a mage (75% off at most). Only
-the path of the role they play now counts. Once a path is mastered, a companion's leftover
-points can go straight into its bonus, and come back out again or with Start over. Every
-companion has their own points, from their own level.
-
-Ability cooldowns run on game time, in a fight or out of it (an hour's wait ends them), and
-are kept in the save.
-
-With Paths installed, the Tanks and Healers settings pages are replaced by a cover, *Your
-Followers Are Guided by Their Path*, and can no longer be changed: the paths set a taunt's
-hold, cooldown and bracing armor, a heal's amount and cooldown and how long Rejuvenate
-lasts, and the rest of those pages stays at the defaults in FightWithMe.ini. Your own
-changes there are kept in FightWithMe_user.ini and return if Paths is removed.
+Saves carry over. Ability lifts still on when the game was saved come off. With Path of the
+Companion installed, it takes up the levels companions earned by fighting, their cooldowns
+and every ability switch. Without it, those levels go back to what the companions' own mods
+give them.
 
 ## Controls
 
 Choose **Oxblood** (the original red, still the default), **Vanilla**, or **Nordic** under
 **Battle plan > Interface > Theme** in the Mod Control Panel. Vanilla uses translucent
-charcoal panels, silver borders, white selection marks and pale blue light on Paths.
+charcoal panels, silver borders and white selection marks.
 Nordic reskins the same windows with dark stone surfaces, engraved corners, beveled metal
 emblems and inset selection highlights. Window placement, dimensions, typography metrics,
 navigation and controls stay the same in every theme. The choice applies to
-the battle plan, Paths, HUD notices and settings together, and is saved without a restart.
+the battle plan, HUD notices and settings together, and to Path of the Companions' panel, and is saved without a restart.
 It can also be set with `iTheme` in the INI's `[Interface]` section: `0` for Vanilla, `1` for
 Oxblood, or `2` for Nordic. Health, magicka, stamina and warning colors keep their meaning
 in every theme.
@@ -141,6 +117,19 @@ enemies in red, you in white. Drag with the middle mouse button (or the left sti
 to move the view about; a middle click brings it back over the fight. Where a roof or a cave
 ceiling hides the fight, it is cut away above everyone's heads; in the open, nothing is.
 
+## Translating
+
+Everything the battle plan, the notices and the settings pages show can be translated, without
+touching the DLL. The package has `SKSE/Plugins/FightWithMe/Translations/FightWithMe_ENGLISH.txt`:
+one line per text, the English, a tab, then the English again. Copy it to the game's language
+name (`FightWithMe_FRENCH.txt`, `FightWithMe_GERMAN.txt`, ...), translate the right-hand side,
+and ship that file in the same folder. A `{}` is a value filled in as the game runs (`{0}`, `{1}`
+put them in another order), `\n` starts a new line, and a line left untranslated stays English.
+The language follows the game's own (`sLanguage` in Skyrim.ini); `sLanguage` under
+`[Interface]` in FightWithMe.ini picks another. The log stays English. For Cyrillic, Chinese,
+Japanese, Korean or Thai, switch the matching `Enable...` on under `[Fonts]` in
+SKSEMenuFramework.ini so the menus have the letters.
+
 ## Nether's Follower Framework
 
 NFF has its own tank and healer roles and combat styles. Set its combat role to Standard and its
@@ -156,16 +145,20 @@ cmake --preset skyrim
 cmake --build build/skyrim --config Release
 ```
 
-`tools/BuildPackage.ps1 -VcpkgRoot <path>` builds, runs the tests and makes the mod-manager ZIP.
+`tools/BuildPackage.ps1 -VcpkgRoot <path>` builds, runs all registered tests, and creates
+`FightWithMe-<version>.zip` and `POTC Effects-<effects-version>.zip` in `package/`.
+Use `-EffectsVersion` when art changes; it can stay fixed for code-only updates. The Effects
+archive includes a versioned file/hash manifest. Neither archive ships debugging symbols.
 
-`tools/VerifyEffectAssets.py --mods <MO2 mods directory> --plugins <profile plugins.txt>`
-checks the FX catalog against the installed sources before an in-game visual test. See
-[ability FX validation](docs/ability-fx.md) for mappings and the runtime checks still needed.
+`tools/VerifyEffectAssets.py --skyrim <stock Skyrim Data directory>` validates every packaged
+NIF and resolves its textures against only our assets and stock Skyrim archives. It also
+checks all runtime model selections and rejects old external effect paths. See
+[ability FX validation](docs/ability-fx.md) for mappings and remaining in-game checks.
 
-## FX credits
+## Split maintenance
 
-Enai Siaion created Triumvirate's support, targeting and magical aura visuals. reaperix
-created the earth, water and wind effects used from Elemental Destruction Magic Redux;
-phenderix maintains the Redux edition. jg1 created Vibrant Weapons' weapon particle models.
-Please download and endorse their mods at the links above. Their assets remain in their
-original mods and are not redistributed in Fight With Me.
+After the split, update **both plugins and their shipped INIs**, preserving the
+`*_user.ini` overrides. Paths owns the ability panel on **Numpad 9 / LB + D-pad right**;
+this battle plan stays on **Numpad 7 / LB + D-pad down**. Abilities are intentionally
+absent from the battle-orders panel. The full review, fixes, and latest effect changes
+are summarized in [the release notes](docs/RELEASE-NOTES.md).

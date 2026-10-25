@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FWM/Orders.h"
+#include "FWM/LoadoutPolicy.h"
 
 // Who should be fighting whom, and with what, handed from the planner (main
 // thread) to the combat AI hooks (possibly worker threads): the target selector,
@@ -86,6 +87,14 @@ namespace FWM::Overrides
 		std::uint32_t actor{ 0 };
 		const RE::Actor* body{ nullptr };  // compared, never followed: for hooks on the AI's threads
 		Hands         hands{};
+        LoadoutPolicy::Pools pools;
+        bool twoHandedOnly{false};
+        bool battleLocked{false};
+        bool staffLocked{false};
+        bool roleRestricted{false};
+        bool caster{false};
+        bool recovering{false};
+        std::array<bool,2> explicitSpells{};
 
 		// Written by the hand hook (any thread): what the combat AI made of each chosen spell, as
 		// bits of Caster, and whether it has looked at this companion's magic at all yet.

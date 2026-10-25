@@ -1,8 +1,10 @@
 #pragma once
 
 #include "FWM/Orders.h"
+#include "FWM/LoadoutPolicy.h"
 #include "FWM/Paths.h"
 #include "FWM/Rules.h"
+#include "FWM/TraitRules.h"
 
 // What the battle plan draws: a copy of the fight taken on the main thread, so the
 // render thread never touches a game object.
@@ -25,6 +27,10 @@ namespace FWM::View
 		Rules::SpellTier  tier{ Rules::SpellTier::kNovice };
 		float             cost{ 0.0f };
 		bool              known{ true };
+        bool weapon{false};
+        bool allowed{true};  // visible, but cannot be added to this role's pool
+        bool shield{false};
+        int count{0};
 		bool              healing{ false };
 		bool              left{ true };   // fits the left hand
 		bool              right{ true };  // fits the right hand
@@ -59,6 +65,8 @@ namespace FWM::View
 		std::string name;
 		int         level{ 1 };
 		bool        summon{ false };
+        bool        creature{ false };
+        [[nodiscard]] bool CanTakeRole() const { return RoleAllowed(true, creature, summon); }
 		bool        walkWithMe{ false };
 		Arsenal     arsenal;
 		bool        arsenalKnown{ false };
@@ -89,8 +97,10 @@ namespace FWM::View
 		// what they may choose from. The list is filled only out of a fight.
 		std::array<Spell, 2> hands{};
 		std::vector<Spell>   spellOptions;
+        std::vector<Spell> weaponOptions;
+        LoadoutPolicy::Pools pools;
 
-		float       healAmount{ 0.0f };  // a healer's heal: health for everyone it reaches
+		float       healAmount{ 0.0f };  // a healer's circle: health for someone in it all along
 		float       healReady{ 0.0f };
 		float       rejuvenateReady{ 0.0f };
 		float       rejuvenateCooldown{ 0.0f };
@@ -102,6 +112,17 @@ namespace FWM::View
 		float       specialReady{ 0.0f };
 		float       specialCooldown{ 0.0f };
 		bool        guarding{ false };          // a bodyguard at your side
+
+		// What their own mod gave them on top of the combat AI, and how rare that makes them.
+		std::vector<Traits::Trait> traits;
+		Traits::Rarity             rarity{ Traits::Rarity::kCommon };
+
+		// Levels earned by fighting: XP toward the next, and how long since the last one came.
+		bool  leveling{ false };
+		float xp{ 0.0f };
+		float xpNext{ 1.0f };
+		float levelUpAge{ 99.0f };
+		bool  levelCapped{ false };  // at or above the player's level: no XP until they level up
 
 		// With the Paths add-on: every path's ranks and slots, the points, and the two
 		// abilities carried, each with its own clock.
@@ -117,7 +138,7 @@ namespace FWM::View
 		int                                  pointsSpent{ 0 };
 		int                                  pointsAbove{ 10 };
 		bool                                 respec{ false };
-		bool                                 unlimited{ false };         // unlimited points are on: a cheater
+		bool                                 unlimited{ false };         // unlimited points are on: Debug Mode
 		bool                                 unlimitedAllowed{ false };  // the button is offered
 		std::array<Carried, Paths::kSlots>   carried{};
 
@@ -185,7 +206,8 @@ namespace FWM::View
 		bool                autoBattle{ false };    // companions start fights with enemies they see
 		bool                drawOnSight{ true };    // and bring weapons out at the sight of one
 		bool                paths{ false };         // Paths - Follower Ability Skilltree is loaded and agrees on the trees
-		Formation           formation{ Formation::kUnknown };
+		bool                pathsAlone{ false };    // Paths on its own, without Fight With Me: its panel, not the battle plan
+		RE::FormID          aimed{ 0 };             // the companion under the crosshair, if any
 		int                 playerLevel{ 1 };
 		std::vector<Member> party;  // companions first, then summons
 		std::vector<Enemy>  enemies;

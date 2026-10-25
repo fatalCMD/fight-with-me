@@ -1,0 +1,32 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Spell-Touched arrows · Fight With Me</title>
+<style>body{margin:0;background:#10151e;color:#eee7d8;font:15px Georgia,serif;overflow:hidden}header{position:absolute;top:24px;left:28px;z-index:2}h1{font-size:26px;margin:0 0 10px}p{color:#aeb9c9;max-width:460px;line-height:1.5;margin:8px 0}button,a{font:14px system-ui;color:#eee7d8;background:#232d40;border:1px solid #596981;padding:9px 15px;border-radius:5px;cursor:pointer;text-decoration:none}footer{position:absolute;bottom:20px;left:28px;color:#aeb9c9}#labels{position:absolute;right:30px;top:28px;line-height:2;font:16px system-ui}#status{font:13px system-ui}</style>
+<header><h1>Spell-Touched arrows</h1><p>Fire and embers. Frost mist and ice particles. Lightning arcs.</p><p>Slow-motion flight preview using the actual effect meshes. Drag to orbit; scroll to zoom.</p><button id="pause">Pause</button> <a href="/?scene=warcry&rank=3">Other effects</a><p id="status">Loading…</p></header>
+<div id="labels"><span style="color:#ff9b43">● Fire</span><br><span style="color:#83cfff">● Frost</span><br><span style="color:#a6a0ff">● Lightning</span></div><footer>One roll per arrow · The flight element carries through to impact</footer>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+import * as T from 'three';import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+const scene=new T.Scene();scene.background=new T.Color('#10151e');const camera=new T.PerspectiveCamera(45,innerWidth/innerHeight,.1,2500);camera.up.set(0,0,1);camera.position.set(50,-410,310);
+const renderer=new T.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);document.body.append(renderer.domElement);const orbit=new OrbitControls(camera,renderer.domElement);orbit.target.set(0,0,65);orbit.update();scene.add(new T.HemisphereLight(0xd9e7ff,0x232532,2));
+const grid=new T.GridHelper(900,36,0x39455c,0x222e40);grid.rotation.x=Math.PI/2;scene.add(grid);
+const colors=[[1,.26,.035],[.32,.72,1],[.42,.40,1]],loader=new T.TextureLoader(),cache=new Map(),arrows=[];
+async function texture(file){if(!cache.has(file)){const tex=await loader.loadAsync('out/'+file);tex.wrapS=tex.wrapT=T.RepeatWrapping;cache.set(file,tex);}return cache.get(file);}
+for(const [element,name] of ['fire','frost','shock'].entries()){
+ const data=await fetch('out/spell-arrow-'+name+'.json').then(r=>r.json()),group=new T.Group(),nodes={},facing=[];
+ for(const n of data.nodes){const node=new T.Group();node.position.fromArray(n.translate);nodes[n.name]=node;if(n.billboard)facing.push(node);}
+ for(const n of data.nodes)(nodes[n.parent]||group).add(nodes[n.name]);
+ for(const s of data.shapes){const geo=new T.BufferGeometry();geo.setAttribute('position',new T.Float32BufferAttribute(s.positions,3));geo.setAttribute('uv',new T.Float32BufferAttribute(s.uvs,2));geo.setAttribute('shade',new T.Float32BufferAttribute(s.colors,4));geo.setIndex(s.indices);
+ const mat=new T.ShaderMaterial({uniforms:{map:{value:await texture(s.diffuse)},tint:{value:new T.Vector3(...colors[element])},power:{value:1},drift:{value:0}},vertexShader:'attribute vec4 shade;varying vec2 vUv;varying vec4 vShade;void main(){vUv=uv;vShade=shade;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',fragmentShader:'uniform sampler2D map;uniform vec3 tint;uniform float power,drift;varying vec2 vUv;varying vec4 vShade;void main(){vec4 t=texture2D(map,vUv+vec2(0.,drift));gl_FragColor=vec4(t.rgb*tint*vShade.rgb*power,t.a*vShade.a);}',transparent:true,depthWrite:false,side:T.DoubleSide,blending:T.AdditiveBlending});mat.userData.scale=s.effect.scale;nodes[s.node].add(new T.Mesh(geo,mat));}
+ const wood=new T.MeshStandardMaterial({color:0x655346}),steel=new T.MeshStandardMaterial({color:0xb7c0ca,metalness:.6,roughness:.35});
+ const shaft=new T.Mesh(new T.CylinderGeometry(.65,.65,65,10),wood);shaft.position.y=-15;group.add(shaft);const tip=new T.Mesh(new T.ConeGeometry(2.3,9,4),steel);tip.position.y=22;group.add(tip);
+ for(let i=0;i<3;i++){const feather=new T.Mesh(new T.BoxGeometry(5,13,.3),new T.MeshStandardMaterial({color:0xd2c8b7}));feather.position.y=-42;feather.rotation.y=i*Math.PI/3;group.add(feather);}
+ group.rotation.z=-Math.PI/2;scene.add(group);arrows.push({group,nodes,facing,element});
+}
+document.querySelector('#status').textContent='Original meshes · Skyrim elemental textures';let paused=false,age=.7,last=performance.now();document.querySelector('#pause').onclick=()=>{paused=!paused;document.querySelector('#pause').textContent=paused?'Play':'Pause';};
+function paint(node,alpha,drift=0){node?.traverse(o=>{if(o.material?.uniforms){o.material.uniforms.power.value=alpha*o.material.userData.scale;o.material.uniforms.drift.value=drift;}});}
+function draw(){requestAnimationFrame(draw);let now=performance.now(),dt=Math.min((now-last)/1000,.1);last=now;if(!paused)age+=dt*.55;const phase=(age%2.2)/2.2,fade=phase>.92?Math.max(0,(1-phase)/.08):1;
+ for(const {group,nodes,facing,element} of arrows){group.position.set(-100+phase*200,(element-1)*75,75+Math.sin(phase*Math.PI)*16);const flicker=element===2?.45+.55*Math.abs(Math.sin(age*47)):.82+.18*Math.sin(age*19);paint(nodes.Filaments,fade*flicker,-age*(element===0?3.2:1.5));paint(nodes.Veil,fade*(element===1?.48:.28),-age*.8);
+ for(let i=0;i<12;i++){const f=(age*(element===2?3:1.6)+i/12)%1,a=i*2.4+age*2,r=2+f*7,n=nodes['Mote'+i];n.position.set(Math.cos(a)*r,15-f*90,Math.sin(a)*r);n.scale.setScalar(.5+f);paint(n,fade*Math.sin(f*Math.PI)*.6);}
+ group.updateMatrixWorld(true);for(const n of facing){const q=new T.Quaternion();n.parent.getWorldQuaternion(q);n.quaternion.copy(q.invert().multiply(camera.quaternion));}}
+ renderer.render(scene,camera);
+}draw();addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+</script></html>

@@ -1,4 +1,7 @@
 #include "FWM/Rules.h"
+#include "FWM/RejuvenatePolicy.h"
+
+#include "FWM/Text.h"
 
 #include <algorithm>
 #include <cmath>
@@ -95,12 +98,12 @@ namespace FWM::Rules
 
 	float RejuvenateSeconds(int a_level, const Tuning& a_tuning)
 	{
-		return a_level >= 60 ? a_tuning.rejuvenateSecondsAt60 : (a_level >= 30 ? a_tuning.rejuvenateSecondsAt30 : a_tuning.rejuvenateSeconds);
+		return RejuvenatePolicy::Seconds(a_level >= 60 ? a_tuning.rejuvenateSecondsAt60 : (a_level >= 30 ? a_tuning.rejuvenateSecondsAt30 : a_tuning.rejuvenateSeconds));
 	}
 
 	float RejuvenateCooldown(int a_level, const Tuning& a_tuning)
 	{
-		return 2.0f * RejuvenateSeconds(a_level, a_tuning);
+		return RejuvenatePolicy::Cooldown(RejuvenateSeconds(a_level, a_tuning));
 	}
 
 	bool Matches(const EnemyView& a_enemy, Focus a_focus)
@@ -328,7 +331,7 @@ namespace FWM::Rules
 		case Role::kBruiser:
 			return a_tuning.bonusDamage;
 		case Role::kArcher:
-			return a_tuning.bonusArrowsKept;
+			return a_tuning.bonusArcherStamina;
 		case Role::kMage:
 			return a_tuning.bonusMagickaCost;
 		default:
@@ -340,7 +343,7 @@ namespace FWM::Rules
 	{
 		switch (a_role) {
 		case Role::kArcher:
-			return kMostArrowsKept;
+			return kMostArcherStamina;
 		case Role::kMage:
 			return kMostCostCut;
 		case Role::kTank:
@@ -377,8 +380,6 @@ namespace FWM::Rules
 	{
 		const auto amount = Percent(a_percent);
 		switch (a_role) {
-		case Role::kArcher:
-			return amount;
 		case Role::kTank:
 		case Role::kMage:
 			return a_percent > 0.0f ? "-" + amount : amount;
@@ -391,17 +392,17 @@ namespace FWM::Rules
 	{
 		switch (a_role) {
 		case Role::kFighter:
-			return "attack speed";
+			return Tr("attack speed");
 		case Role::kTank:
-			return "damage taken";
+			return Tr("damage taken");
 		case Role::kHealer:
-			return "healing";
+			return Tr("healing");
 		case Role::kBruiser:
-			return "damage";
+			return Tr("damage");
 		case Role::kArcher:
-			return "arrows kept";
+			return Tr("stamina recovery");
 		case Role::kMage:
-			return "magicka cost";
+			return Tr("magicka cost");
 		default:
 			return "";
 		}

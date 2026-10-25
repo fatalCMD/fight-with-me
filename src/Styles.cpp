@@ -172,7 +172,7 @@ namespace FWM::Styles
 				// The chosen spells come first; a bow is for when they cannot be cast.
 				data.rangedScore *= 0.1f;
 			}
-			data = Tweaked(data, a_tweaks);
+			data = PositionIntent(Tweaked(data, a_tweaks), a_orders.role, a_resolved, weight);
 			Write(layered.ours, layered.original, a_committed ? Committed(data) : data);
 			layered.role = a_orders.role;
 			layered.position = a_resolved;

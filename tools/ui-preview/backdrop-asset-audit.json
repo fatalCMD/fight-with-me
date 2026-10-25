@@ -1,0 +1,200 @@
+[
+  {
+    "name": "vanilla-fighter.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 842054,
+    "partialPixels": 730148,
+    "sha256": "02465d3d2f123f1aa41f3efeea3293f23f1edf8a498d17538518767452227372"
+  },
+  {
+    "name": "vanilla-tank.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 761041,
+    "partialPixels": 811296,
+    "sha256": "b1fec0a3a34c213bc1c2c04e7cead13c38a83f13fb433d1368a4e58aa09a7bac"
+  },
+  {
+    "name": "vanilla-healer.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 889516,
+    "partialPixels": 682492,
+    "sha256": "859b018096abbf990bd7872ebd2ba9c272c77a67875f543a1094b2dc40cf7845"
+  },
+  {
+    "name": "vanilla-bruiser.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 721679,
+    "partialPixels": 850556,
+    "sha256": "d1ec71046710db5195c3228aba768cf00d95ee0b255cee697406970d53c94be9"
+  },
+  {
+    "name": "vanilla-archer.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 879279,
+    "partialPixels": 692770,
+    "sha256": "c043c0e83a2f3c4b08cfdcbd61930256c6792bedcf9ed6830189db00cc3d2aba"
+  },
+  {
+    "name": "vanilla-mage.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 917191,
+    "partialPixels": 655025,
+    "sha256": "ad3d79ffc281cbebfc8e8eef60a2556e39f8a51a353256d30a9c8873baa99ad0"
+  },
+  {
+    "name": "oxblood-fighter.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 848821,
+    "partialPixels": 723156,
+    "sha256": "831c3863caffbfd4a25d43a3b5f0d4353345d944fa62564a7d70a32943a11de4"
+  },
+  {
+    "name": "oxblood-tank.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 691086,
+    "partialPixels": 881004,
+    "sha256": "616130faaaeed55806fea6abff4973246002947c7b637d97322faf98b2882fd2"
+  },
+  {
+    "name": "oxblood-healer.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 852592,
+    "partialPixels": 719350,
+    "sha256": "178175e0663ebecfbcac774b27bb547d20ac2920856ea8414467a06720b5b3a0"
+  },
+  {
+    "name": "oxblood-bruiser.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 764959,
+    "partialPixels": 807203,
+    "sha256": "d5444b93ebe18d6640ea684ecbb0c8793f3e5ed7020684fa4a86c836b6b41f18"
+  },
+  {
+    "name": "oxblood-archer.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 860869,
+    "partialPixels": 711243,
+    "sha256": "b3ef368568e75c4daf06ff0827457f561f481f6dd4caa0a727610111246776e8"
+  },
+  {
+    "name": "oxblood-mage.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 965180,
+    "partialPixels": 606873,
+    "sha256": "b071a317c995959c7b0d778d3ba48a60d671183f70f0b5a619df17630c516c24"
+  },
+  {
+    "name": "nordic-fighter.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 1135774,
+    "partialPixels": 436671,
+    "sha256": "d20256954235db70460ddf0ee247b46f1e36bff15ccf5006e75e21ea5b7f34d5"
+  },
+  {
+    "name": "nordic-tank.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 892836,
+    "partialPixels": 679558,
+    "sha256": "5b87f42833cc67ddcbc5dea7f1655d4381c76d402dc70d756e84cf60e6cf1439"
+  },
+  {
+    "name": "nordic-healer.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 1138907,
+    "partialPixels": 433413,
+    "sha256": "27c388cb4ebd1fc4e1bb95968cf44033b0f3f99fc47d1241537580047a2239d6"
+  },
+  {
+    "name": "nordic-mage.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 1225988,
+    "partialPixels": 346422,
+    "sha256": "ca4cc03e21aee6fa633c8811f495c85d4e5e8b8e3bb48d45262e672c3551b753"
+  },
+  {
+    "name": "nordic-bruiser.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 1161021,
+    "partialPixels": 411393,
+    "sha256": "6905f8edb77087c2f988ddc09d3a25072dd0feb64beb9fe858442ff4acac04ec"
+  },
+  {
+    "name": "nordic-archer.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "transparentPixels": 1258672,
+    "partialPixels": 313550,
+    "sha256": "61af3418b6f3df98139283221d0ec9ba27abb7f18b5e4f6b74fc055b8621e5dc"
+  }
+]

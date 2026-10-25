@@ -1,12 +1,14 @@
 #pragma once
 
 #include "FWM/Orders.h"
+#include "FWM/StyleLayer.h"
 #include "FWM/View.h"
 
 // The planner. Runs on the main thread from the player update: keeps the roster
-// and the enemy list current, picks each follower's target, runs the abilities
-// and hands the result to the target selector hook. Also owns the battle plan's
-// open state and the queue of orders coming back from the menu.
+// and the enemy list current. In Fight With Me it picks each follower's target and
+// hands it to the target selector hook; in Path of the Companion it runs the
+// abilities. Also owns the battle plan's open state and the queue of orders coming
+// back from the menu.
 
 namespace FWM::Battle
 {
@@ -16,6 +18,10 @@ namespace FWM::Battle
 	void Reset();
 
 	void InstallEvents();
+
+	// Companions are in a fight, or have just been called into one. Safe from any thread; Walk
+	// With Me asks through FightWithMe_InBattle and leaves the party alone while it holds.
+	[[nodiscard]] bool PartyFighting() noexcept;
 
 	// --- Battle plan ---------------------------------------------------------
 
@@ -57,7 +63,8 @@ namespace FWM::Battle
 			kEquip,       // an ability carried in a slot
 			kUnlimited,   // unlimited points for one companion (on), or back to what they had (off)
 			kInvest,      // a leftover point straight into a mastered path's bonus
-			kDivest       // one back out of it
+			kDivest,      // one back out of it
+			kDebugAbility // temporary rank test, authorized only for Debug Mode
 		};
 
 		Type        type{ Type::kSetOrders };
@@ -72,6 +79,7 @@ namespace FWM::Battle
 		// Paths: which path, which node or slot, which ability.
 		Role           path{ Role::kFighter };
 		std::size_t    node{ 0 };
+		int            rank{ 1 };
 		std::size_t    slot{ 0 };
 		Paths::Ability ability{ Paths::Ability::kNone };
 	};
@@ -84,4 +92,25 @@ namespace FWM::Battle
 	void RefreshView();
 
 	[[nodiscard]] std::shared_ptr<const View::Snapshot> ReadView();
+
+	// --- Between the two plugins --------------------------------------------
+
+	// Path of the Companion beside Fight With Me: what the abilities running now ask of each
+	// companion's fight, for Fight With Me to carry out with its own orders. An enemy to turn on,
+	// a healing circle to walk into, how their path changes the way they fight.
+	struct Steer
+	{
+		RE::FormID          member{ 0 };
+		RE::ActorHandle     target;
+		RE::ObjectRefHandle circle;
+		float               radius{ 0.0f };
+		StyleTweaks         tweaks;
+	};
+	[[nodiscard]] std::vector<Steer> Steering();
+
+	// Enemies a taunt holds on a tank: (enemy, tank).
+	[[nodiscard]] std::vector<std::pair<RE::ActorHandle, RE::ActorHandle>> Holds();
+
+	// Fight With Me: the enemy a companion was sent after in the battle plan.
+	[[nodiscard]] RE::ActorHandle MarkOf(RE::FormID a_member);
 }

@@ -1,5 +1,7 @@
 #include "FWM/Settings.h"
 
+#include "FWM/Host.h"
+#include "FWM/PanelBindings.h"
 #include "FWM/Log.h"
 #include "FWM/UITheme.h"
 
@@ -18,7 +20,8 @@ namespace FWM::Settings
 		std::atomic<bool>                  rolesLocked{ false };
 
 		std::mutex                                     submitLock;
-		std::optional<std::pair<std::uint64_t, Data>>  pending;
+		struct Pending {std::uint64_t first;Data second;std::optional<int> theme;};
+        std::optional<Pending> pending;
 		bool                                           taskQueued{ false };
 		std::atomic<std::uint64_t>                     requested{ 0 }, applied{ 0 };
 		std::atomic<bool>                              saveFailed{ false };
@@ -32,10 +35,11 @@ namespace FWM::Settings
 			return std::filesystem::current_path(ec) / L"Data" / L"SKSE" / L"Plugins";
 		}
 
-		// The shipped file: defaults and what each key does. Every update replaces it.
+		// The shipped file: defaults and what each key does. Every update replaces it. Path of the
+		// Companion reads its own file; every key it does not have keeps the default here.
 		[[nodiscard]] std::wstring IniPath()
 		{
-			return (PluginFolder() / L"FightWithMe.ini").wstring();
+			return (PluginFolder() / (Host::Abilities() ? L"FightWithMePaths.ini" : L"FightWithMe.ini")).wstring();
 		}
 
 		// What the player changed in game. Never shipped, so an update cannot reset it;
@@ -43,7 +47,7 @@ namespace FWM::Settings
 		// FightWithMe.ini, so a changed default in a later version still arrives.
 		[[nodiscard]] std::wstring UserIniPath()
 		{
-			return (PluginFolder() / L"FightWithMe_user.ini").wstring();
+			return (PluginFolder() / (Host::Abilities() ? L"FightWithMePaths_user.ini" : L"FightWithMe_user.ini")).wstring();
 		}
 
 		struct Reader
@@ -165,6 +169,8 @@ namespace FWM::Settings
 		void Visit(V& v, Data& d)
 		{
 			auto& t = d.tuning;
+			// Path of the Companions opens a panel, not a battle plan, and names its section after it.
+			const wchar_t* plan = Host::Abilities() ? L"Panel" : L"BattlePlan";
 
 			v.Bool(L"General", L"bEnabled", d.enabled);
 			v.Float(L"General", L"fStyleWeight", d.styleWeight, 0.0f, 1.0f);
@@ -177,9 +183,21 @@ namespace FWM::Settings
 			v.Bool(L"Sight", L"bAutoBattle", d.autoBattle);
 			v.Float(L"Sight", L"fRange", d.sightRange, 500.0f, 6000.0f);
 
-			v.Key(L"BattlePlan", L"iKey", d.planKey.key);
-			v.Key(L"BattlePlan", L"iKeyModifier", d.planKey.modifier);
-			v.Key(L"BattlePlan", L"iGamepadKey", d.planGamepadKey);
+            v.Bool(L"PartyBalance", L"bEnabled", d.partyBalance);
+            v.Float(L"PartyBalance", L"fExtraFollowerPenalty", d.partyExtraPenalty, 0.0f, 25.0f);
+            v.Float(L"PartyBalance", L"fOutnumberPenalty", d.partyAdvantagePenalty, 0.0f, 25.0f);
+            v.Float(L"PartyBalance", L"fMinimumDamage", d.partyMinimumDamage, 10.0f, 100.0f);
+
+			v.Bool(L"Leveling", L"bEnabled", d.leveling);
+			v.Float(L"Leveling", L"fXPPerEnemyLevel", d.xpPerEnemyLevel, 0.5f, 50.0f);
+			v.Float(L"Leveling", L"fBossMult", d.xpBossMult, 1.0f, 10.0f);
+			v.Float(L"Leveling", L"fClimb", d.xpClimb, 0.0f, 0.5f);
+			v.Float(L"Leveling", L"fCrowd", d.xpCrowd, 0.0f, 1.0f);
+			v.Bool(L"Leveling", L"bPlayerLevelCap", d.levelCap);
+
+			v.Key(plan, L"iKey", d.planKey.key);
+			v.Key(plan, L"iKeyModifier", d.planKey.modifier);
+			v.Key(plan, L"iGamepadKey", d.planGamepadKey);
 			v.Key(L"Orders", L"iAttack", d.orderKeys[0].key);
 			v.Key(L"Orders", L"iAttackModifier", d.orderKeys[0].modifier);
 			v.Key(L"Orders", L"iToMe", d.orderKeys[1].key);
@@ -188,23 +206,23 @@ namespace FWM::Settings
 			v.Key(L"Orders", L"iHoldBackModifier", d.orderKeys[2].modifier);
 			v.Key(L"Orders", L"iAsYouWere", d.orderKeys[3].key);
 			v.Key(L"Orders", L"iAsYouWereModifier", d.orderKeys[3].modifier);
-			v.Float(L"BattlePlan", L"fTimeScale", d.timeScale, 0.02f, 1.0f);
-			v.Bool(L"BattlePlan", L"bStopTime", d.stopTime);
-			v.Float(L"BattlePlan", L"fEaseSeconds", d.easeSeconds, 0.0f, 2.0f);
-			v.Bool(L"BattlePlan", L"bTimeEffect", d.timeEffect);
-			v.Bool(L"BattlePlan", L"bHideHUD", d.hideHud);
-			v.Bool(L"BattlePlan", L"bCameraGlide", d.cameraGlide);
-			v.Float(L"BattlePlan", L"fPortraitDistance", d.portraitDistance, 50.0f, 400.0f);
-			v.Float(L"BattlePlan", L"fCameraDistance", d.cameraDistance, 120.0f, 700.0f);
-			v.Float(L"BattlePlan", L"fCameraHeight", d.cameraHeight, 0.0f, 300.0f);
-			v.Float(L"BattlePlan", L"fScale", d.uiScale, 0.6f, 2.0f);
-			v.Float(L"BattlePlan", L"fOrbitSpeed", d.orbitSpeed, 0.2f, 3.0f);
-			v.Key(L"BattlePlan", L"iOverheadKey", d.overheadKey.key);
-			v.Key(L"BattlePlan", L"iOverheadKeyModifier", d.overheadKey.modifier);
-			v.Key(L"BattlePlan", L"iOverheadGamepadKey", d.overheadGamepadKey);
-			v.Float(L"BattlePlan", L"fOverheadPitch", d.overheadPitch, 35.0f, 88.0f);
-			v.Bool(L"BattlePlan", L"bCutaway", d.cutaway);
-			v.Float(L"BattlePlan", L"fCutawayMargin", d.cutawayMargin, 0.0f, 400.0f);
+			v.Float(plan, L"fTimeScale", d.timeScale, 0.02f, 1.0f);
+			v.Bool(plan, L"bStopTime", d.stopTime);
+			v.Float(plan, L"fEaseSeconds", d.easeSeconds, 0.0f, 2.0f);
+			v.Bool(plan, L"bTimeEffect", d.timeEffect);
+			v.Bool(plan, L"bHideHUD", d.hideHud);
+			v.Bool(plan, L"bCameraGlide", d.cameraGlide);
+			v.Float(plan, L"fPortraitDistance", d.portraitDistance, 50.0f, 400.0f);
+			v.Float(plan, L"fCameraDistance", d.cameraDistance, 120.0f, 700.0f);
+			v.Float(plan, L"fCameraHeight", d.cameraHeight, 0.0f, 300.0f);
+			v.Float(plan, L"fScale", d.uiScale, 0.6f, 2.0f);
+			v.Float(plan, L"fOrbitSpeed", d.orbitSpeed, 0.2f, 3.0f);
+			v.Key(plan, L"iOverheadKey", d.overheadKey.key);
+			v.Key(plan, L"iOverheadKeyModifier", d.overheadKey.modifier);
+			v.Key(plan, L"iOverheadGamepadKey", d.overheadGamepadKey);
+			v.Float(plan, L"fOverheadPitch", d.overheadPitch, 35.0f, 88.0f);
+			v.Bool(plan, L"bCutaway", d.cutaway);
+			v.Float(plan, L"fCutawayMargin", d.cutawayMargin, 0.0f, 400.0f);
 
 			v.Bool(L"Taunt", L"bEnabled", d.taunt);
 			v.Bool(L"Taunt", L"bOpener", d.tauntOpener);
@@ -248,9 +266,9 @@ namespace FWM::Settings
 			v.Bool(L"Heal", L"bAnySpell", d.healersAnySpell);
 
 			v.Bool(L"Rejuvenate", L"bEnabled", d.rejuvenate);
-			v.Float(L"Rejuvenate", L"fSeconds", t.rejuvenateSeconds, 5.0f, 600.0f);
-			v.Float(L"Rejuvenate", L"fSecondsLevel30", t.rejuvenateSecondsAt30, 5.0f, 600.0f);
-			v.Float(L"Rejuvenate", L"fSecondsLevel60", t.rejuvenateSecondsAt60, 5.0f, 900.0f);
+			v.Float(L"Rejuvenate", L"fSeconds", t.rejuvenateSeconds, 5.0f, 12.0f);
+			v.Float(L"Rejuvenate", L"fSecondsLevel30", t.rejuvenateSecondsAt30, 5.0f, 12.0f);
+			v.Float(L"Rejuvenate", L"fSecondsLevel60", t.rejuvenateSecondsAt60, 5.0f, 12.0f);
 			v.Float(L"Rejuvenate", L"fRegenBonus", t.rejuvenateBonus, 10.0f, 500.0f);
 
 			v.Float(L"Targeting", L"fEngageRange", t.engageRange, 500.0f, 10000.0f);
@@ -270,11 +288,12 @@ namespace FWM::Settings
 
 			v.Bool(L"Effects", L"bEnabled", d.abilityEffects);
 
+
 			v.Float(L"PathBonus", L"fFighterAttackSpeed", t.bonusAttackSpeed, 0.0f, 10.0f);
 			v.Float(L"PathBonus", L"fTankDamageTaken", t.bonusDamageTaken, 0.0f, 10.0f);
 			v.Float(L"PathBonus", L"fHealerHealing", t.bonusHealing, 0.0f, 10.0f);
 			v.Float(L"PathBonus", L"fBruiserDamage", t.bonusDamage, 0.0f, 10.0f);
-			v.Float(L"PathBonus", L"fArcherArrowsKept", t.bonusArrowsKept, 0.0f, 10.0f);
+			v.Float(L"PathBonus", L"fArcherStaminaRecovery", t.bonusArcherStamina, 0.0f, 10.0f);
 			v.Float(L"PathBonus", L"fMageMagickaCost", t.bonusMagickaCost, 0.0f, 10.0f);
 
 			v.String(L"TimeEffect", L"sIntro", d.imodIntro);
@@ -285,6 +304,7 @@ namespace FWM::Settings
 			v.Bool(L"Interface", L"bSounds", d.sounds);
 			v.Bool(L"Interface", L"bTooltips", d.tooltips);
 			v.Bool(L"Interface", L"bPathsGuideSeen", d.pathsGuideSeen);
+			v.String(L"Interface", L"sLanguage", d.language);
 
 			v.Bool(L"Debug", L"bLogDecisions", d.logDecisions);
 		}
@@ -305,6 +325,25 @@ namespace FWM::Settings
 				hotkey = Normalized(hotkey);
 			}
 			a_data.overheadKey = Normalized(a_data.overheadKey);
+			// Path of the Companions has no battle orders: no role pulls a combat style, nobody is held
+			// to a place or ushered out of a fight, nothing is drawn or started on sight. What stays is
+			// what the abilities need, and the levels companions earn by fighting.
+			if (Host::Abilities()) {
+				a_data.enabled = true;
+				a_data.styleWeight = 0.0f;
+				a_data.guardLeash = false;
+				a_data.leaveEmptyFights = false;
+				a_data.markGlow = false;
+				a_data.drawOnSight = false;
+				a_data.autoBattle = false;
+				a_data.orderKeys = {};
+				a_data.overheadKey = {};
+				a_data.overheadGamepadKey = 0;
+			}
+			// Fight With Me earns no levels: an older save's go back to the companions' own.
+			if (Host::Orders()) {
+				a_data.leveling = false;
+			}
 		}
 
 		[[nodiscard]] Lines Written(Data a_data)
@@ -334,9 +373,15 @@ namespace FWM::Settings
 				return true;
 			}
 			std::ofstream out(std::filesystem::path(a_path), std::ios::binary);
-			out << "; Fight With Me: the settings you changed in game, read after FightWithMe.ini.\r\n"
-				   "; Updates never replace this file. Delete a line, or the whole file, to go back\r\n"
-				   "; to what FightWithMe.ini says.\r\n\r\n";
+			if (Host::Abilities()) {
+				out << "; Path of the Companions: the settings you changed in game, read after\r\n"
+					   "; FightWithMePaths.ini. Updates never replace this file. Delete a line, or the whole\r\n"
+					   "; file, to go back to what FightWithMePaths.ini says.\r\n\r\n";
+			} else {
+				out << "; Fight With Me: the settings you changed in game, read after FightWithMe.ini.\r\n"
+					   "; Updates never replace this file. Delete a line, or the whole file, to go back\r\n"
+					   "; to what FightWithMe.ini says.\r\n\r\n";
+			}
 			return static_cast<bool>(out);
 		}
 
@@ -412,6 +457,11 @@ namespace FWM::Settings
 		const bool      haveOwn = std::filesystem::exists(own.path, ec);
 		const bool      haveUser = std::filesystem::exists(user.path, ec);
 		Data            d;
+		if (Host::Abilities()) {
+			// The panel opens beside Fight With Me's battle plan (Numpad 7, LB + D-pad down).
+			d.planKey = { 73 };       // Numpad 9
+			d.planGamepadKey = 8;     // LB + D-pad right
+		}
 		Visit(own, d);
 		Sanitize(d);
 		{
@@ -420,18 +470,55 @@ namespace FWM::Settings
 			shipped.store(versions.back().get(), std::memory_order_release);
 		}
 		Visit(user, d);
+		if (Host::Abilities() && ::GetModuleHandleW(L"FightWithMe.dll")) {
+			Hotkey ordersKey{71}; std::uint32_t ordersPad=2;
+			for (const auto* file : {L"FightWithMe.ini",L"FightWithMe_user.ini"}) {
+				const Reader theirs{(PluginFolder()/file).wstring()};
+				theirs.Key(L"BattlePlan",L"iKey",ordersKey.key);
+				theirs.Key(L"BattlePlan",L"iKeyModifier",ordersKey.modifier);
+				theirs.Key(L"BattlePlan",L"iGamepadKey",ordersPad);
+			}
+			const auto oldKey=d.planKey; const auto oldPad=d.planGamepadKey;
+			d.planKey=PanelBindings::Keyboard(d.planKey,ordersKey,true,user.Saved(L"Panel",L"iKey").has_value() || user.Saved(L"Panel",L"iKeyModifier").has_value());
+			d.planGamepadKey=PanelBindings::Gamepad(d.planGamepadKey,ordersPad,true,user.Saved(L"Panel",L"iGamepadKey").has_value());
+			if(d.planKey!=oldKey || d.planGamepadKey!=oldPad)
+				Log::Info("[Settings] Legacy Paths shortcuts overlapped the battle plan; using key {} and LB + pad {}. Custom bindings are preserved."sv,d.planKey.key,d.planGamepadKey);
+		}
+		// Beside Fight With Me the look is its choice, so one setting changes both menus.
+		if (Host::Abilities() && ::GetModuleHandleW(L"FightWithMe.dll")) {
+			for (const auto* file : { L"FightWithMe.ini", L"FightWithMe_user.ini" }) {
+				const Reader theirs{ (PluginFolder() / file).wstring() };
+				if (const auto theme = theirs.Saved(L"Interface", L"iTheme")) {
+					d.uiTheme = UITheme::Normalize(static_cast<int>(std::wcstol(theme->c_str(), nullptr, 10)));
+				}
+			}
+		}
 		Publish(d);
 
 		const auto& live = Get();
-		const auto  mine = haveUser ? std::format(" and FightWithMe_user.ini ({} of your changes)", Differences(Defaults(), live)) : std::string{};
+		const auto  file = std::filesystem::path(own.path).filename().string();
+		const auto  mine = haveUser ? std::format(" and {} ({} of your changes)", std::filesystem::path(user.path).filename().string(), Differences(Defaults(), live)) : std::string{};
 		Log::Info("Settings {}{}: plan key {}, time x{:.2f}{}, taunt {}, heal {}, style weight {:.2f}."sv,
-			haveOwn ? "read from FightWithMe.ini"sv : "defaulted (FightWithMe.ini not found)"sv, mine,
+			haveOwn ? std::format("read from {}", file) : std::format("defaulted ({} not found)", file), mine,
 			live.planKey.key, live.timeScale, live.stopTime ? " (stopped)"sv : ""sv, live.taunt, live.heal, live.styleWeight);
 	}
 
 	const Data& Get() noexcept
 	{
 		return *current.load(std::memory_order_acquire);
+	}
+
+	int Theme() noexcept
+	{
+		if (Host::Abilities()) {
+			using Query=int(*)();
+			static const auto query=[]()->Query {
+				auto module=::GetModuleHandleW(L"FightWithMe.dll");
+				return module?reinterpret_cast<Query>(::GetProcAddress(module,"FightWithMe_GetTheme")):nullptr;
+			}();
+			if(query)return UITheme::Normalize(query());
+		}
+		return Get().uiTheme;
 	}
 
 	const Data& Chosen() noexcept
@@ -503,14 +590,32 @@ namespace FWM::Settings
 		return ok;
 	}
 
-	std::uint64_t Submit(const Data& a_data)
+	bool ApplyTheme(int theme)
+    {
+        auto data=Chosen();data.uiTheme=UITheme::Normalize(theme);
+        return Apply(data);
+    }
+
+    bool ShareTheme(int theme)
+    {
+        if(!Host::Abilities())return true;
+        auto module=::GetModuleHandleW(L"FightWithMe.dll");
+        if(!module)return true; // standalone Paths saves its own theme
+        using Setter=bool(*)(int);
+        const auto set=reinterpret_cast<Setter>(::GetProcAddress(module,"FightWithMe_SetTheme"));
+        if(!set){Log::Warn("[Settings] Update Fight With Me to change the shared theme from Path of the Companions."sv);return false;}
+        return set(UITheme::Normalize(theme));
+    }
+
+	std::uint64_t Submit(const Data& a_data, bool shareTheme)
 	{
 		bool          startTask = false;
 		std::uint64_t revision = 0;
 		{
 			const std::scoped_lock guard(submitLock);
 			revision = ++requested;
-			pending = std::make_pair(revision, a_data);
+			const auto theme=shareTheme?std::optional<int>(UITheme::Normalize(a_data.uiTheme)):(pending?pending->theme:std::nullopt);
+            pending = Pending{revision,a_data,theme};
 			startTask = !taskQueued;
 			taskQueued = true;
 		}
@@ -524,7 +629,7 @@ namespace FWM::Settings
 		if (startTask) {
 			tasks->AddTask([] {
 				for (;;) {
-					std::optional<std::pair<std::uint64_t, Data>> update;
+					std::optional<Pending> update;
 					{
 						const std::scoped_lock guard(submitLock);
 						if (!pending) {
@@ -534,7 +639,10 @@ namespace FWM::Settings
 						update = std::move(pending);
 						pending.reset();
 					}
-					saveFailed = !Apply(update->second);
+					if(update->theme)update->second.uiTheme=*update->theme;
+                    const bool localSaved=Apply(update->second);
+                    const bool sharedSaved=!update->theme || ShareTheme(*update->theme);
+                    saveFailed = !localSaved || !sharedSaved;
 					applied = update->first;
 				}
 			});

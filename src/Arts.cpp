@@ -1,16 +1,52 @@
+#include "FWM/PartyBalance.h"
+#include "FWM/SecondWinds.h"
+#include "FWM/AbilityAuto.h"
+#include "FWM/AbilityPolicy.h"
 #include "FWM/Arts.h"
+#include "FWM/Ripostes.h"
+#include "FWM/RiposteFx.h"
+#include "FWM/ArrowArts.h"
+#include "FWM/Windsteps.h"
+#include "FWM/ArrowArtsFx.h"
+#include "FWM/Berserks.h"
+#include "FWM/Surges.h"
+#include "FWM/Loadouts.h"
+#include "FWM/DragonBreaths.h"
+#include "FWM/DragonBreath.h"
+#include "FWM/ArcherAmmo.h"
+#include "FWM/EffectAudio.h"
+
+#include <map>
 
 #include "FWM/Abilities.h"
+#include "FWM/ArrowRain.h"
+#include "FWM/Blast.h"
+#include "FWM/Blasts.h"
+#include "FWM/Bastions.h"
+#include "FWM/ChaosDown.h"
+#include "FWM/ChaosPulses.h"
+#include "FWM/Cloaks.h"
 #include "FWM/Effects.h"
 #include "FWM/Enemies.h"
 #include "FWM/Forms.h"
+#include "FWM/Freeze.h"
 #include "FWM/Game.h"
+#include "FWM/Haunts.h"
 #include "FWM/Log.h"
 #include "FWM/Notices.h"
+#include "FWM/Orbs.h"
 #include "FWM/Party.h"
 #include "FWM/PathBonus.h"
+#include "FWM/Quake.h"
+#include "FWM/Quakes.h"
+#include "FWM/Rainfall.h"
 #include "FWM/Settings.h"
 #include "FWM/Specials.h"
+#include "FWM/Sunders.h"
+#include "FWM/Text.h"
+#include "FWM/TankActs.h"
+#include "FWM/TimeBend.h"
+#include "FWM/WolfBite.h"
 
 namespace FWM::Arts
 {
@@ -28,15 +64,14 @@ namespace FWM::Arts
 			float berserk{ 0.0f }, berserkLength{ 0.0f }, bloodlust{ 0.0f };
 			float riposte{ 0.0f }, riposteLength{ 0.0f }, counter{ 0.0f };
 			bool  riposteDisarm{ false };
-			float deadeye{ 0.0f }, deadeyeLength{ 0.0f }, hawkeye{ 0.0f };
+            int riposteRank{1};
 			float surge{ 0.0f }, surgeLength{ 0.0f };
 			float renewal{ 0.0f }, renewalLength{ 0.0f }, renewalPulse{ 0.0f }, renewalShare{ 0.0f }, renewalTriage{ 0.0f };
+			std::uint32_t cloak{ 0 };  // Renewal's cloak of water (Cloaks), while it shows
 			float magnus{ 0.0f }, magnusLength{ 0.0f }, magnusPower{ 0.0f };
 			bool  lastStandSpent{ false };
 			bool  guardianSpent{ false };
 			RE::ActorHandle unravelOn;
-			float fletchIn{ 5.0f };
-			std::uint64_t fletchToldAt{ 0 };
 		};
 		std::unordered_map<RE::FormID, State> states;
 
@@ -60,10 +95,25 @@ namespace FWM::Arts
 		struct Bleed
 		{
 			RE::ActorHandle enemy;
-			float           perSecond{ 0.0f };
-			float           left{ 0.0f };
+			float perSecond{ 0.0f };
+			float left{ 0.0f };
+			float spurtIn{ 0.0f };
+            RE::ActorHandle by;
 		};
 		std::vector<Bleed> bleeds;
+
+		constexpr float kRainChest = 70.0f;       // an arrow at someone under the rain is aimed this far up them
+		constexpr float kRainAstray = 30.0f;      // and goes up to this far astray
+		constexpr float kRainAimOver = 40.0f;     // one at nobody, this far over the ground
+		constexpr float kRainGraze = 70.0f;       // an arrow landing this near someone grazes them
+		constexpr float kRainTall = 140.0f;       // up to this far above their feet
+		constexpr float kRainGrazeShare = 0.5f;   // for this share of the bow and arrow's blow
+
+		// One of a rain's arrows in the air, followed until it lands so a near miss still grazes.
+		struct Shaft : Game::Arrow
+		{
+			float flown{ 0.0f };
+		};
 
 		struct Rain
 		{
@@ -76,6 +126,12 @@ namespace FWM::Arts
 			float              every{ 0.1f };
 			float              in{ 0.0f };
 			bool               pinning{ false };
+			std::uint32_t      look{ 0 };  // Rainfall's, trailing its arrows
+			std::string        name;       // the archer's
+			std::vector<Shaft> shafts;
+			std::size_t        turn{ 0 };  // whose turn under it to be aimed at
+			int                struck{ 0 };
+			int                grazed{ 0 };
 		};
 		std::vector<Rain> rains;
 
@@ -111,7 +167,7 @@ namespace FWM::Arts
 			std::string text;
 		};
 
-		Result Refused(std::string a_why) { return { false, std::move(a_why) }; }
+		Result Refused(std::string_view a_why) { return { false, std::string(a_why) }; }
 
 		bool Stunned(RE::Actor* a_actor)
 		{
@@ -122,6 +178,12 @@ namespace FWM::Arts
 		bool Standing(RE::Actor* a_actor)
 		{
 			return Game::Usable(a_actor) && !a_actor->AsActorState()->IsBleedingOut() && !a_actor->IsInRagdollState();
+		}
+
+		// For the player: a number and the noun, so a translation needs only its two forms.
+		std::string CountSaid(int a_count)
+		{
+			return a_count == 0 ? std::string(Tr("no enemy")) : Trn(a_count, "{} enemy", "{} enemies");
 		}
 
 		std::string CountOf(int a_count)
@@ -186,7 +248,7 @@ namespace FWM::Arts
 			return profile ? profile->boss : Game::IsBoss(a_actor);
 		}
 
-		// The base damage of the weapon in hand: what Cleave, Earthshaker and a riposte multiply.
+		// The base damage of the weapon in hand: what the wolf's bite, Earthshaker and a riposte multiply.
 		float WeaponDamage(RE::Actor* a_actor)
 		{
 			for (const bool left : { false, true }) {
@@ -204,7 +266,7 @@ namespace FWM::Arts
 		{
 			std::vector<RE::NiPointer<RE::Actor>> team;
 			auto add = [&](RE::NiPointer<RE::Actor> a_actor) {
-				if (a_actor && !a_actor->IsDead() && a_actor->Is3DLoaded() && Game::Distance(a_from, a_actor.get()) <= a_reach) {
+				if (AbilityAuto::Visible(a_from, a_actor.get(), std::min(a_reach, AbilityPolicy::kSupportReach))) {
 					team.push_back(std::move(a_actor));
 				}
 			};
@@ -229,17 +291,10 @@ namespace FWM::Arts
 			strikes.push_back({ a_by->GetHandle(), a_in, std::move(a_land) });
 		}
 
-		void Hurt(RE::Actor* a_enemy, float a_amount)
+		void Hurt(RE::Actor* a_by, RE::Actor* a_enemy, float a_amount)
 		{
 			if (a_amount > 0.0f && a_enemy && !a_enemy->IsDead()) {
-				a_enemy->AsActorValueOwner()->DamageActorValue(RE::ActorValue::kHealth, a_amount);
-			}
-		}
-
-		void Knock(RE::Actor* a_enemy, const RE::NiPoint3& a_from, float a_force)
-		{
-			if (auto* process = a_enemy->GetActorRuntimeData().currentProcess) {
-				process->KnockExplosion(a_enemy, a_from, a_force);
+				PartyBalance::Damage(a_by, a_enemy, a_amount);
 			}
 		}
 
@@ -258,90 +313,55 @@ namespace FWM::Arts
 
 		// --- Tank -----------------------------------------------------------------
 
-		Result Challenge(Party::Member& a_member, RE::Actor* a_tank, const PathsLink::Kit& a_kit, bool a_asked)
+		Result ChaosDown(Party::Member& a_member, RE::Actor* a_tank, const PathsLink::Kit& a_kit, bool a_asked)
 		{
-			auto*                    player = RE::PlayerCharacter::GetSingleton();
-			RE::NiPointer<RE::Actor> target;
-			if (a_asked) {
-				target = Chosen(a_member, a_tank);
-				if (!target) {
-					float best = 1e9f;
-					for (const auto& profile : Enemies::All()) {
-						auto enemy = profile.handle.get();
-						if (enemy && Game::Usable(enemy.get()) && profile.target == player->GetHandle() && Game::Distance(player, enemy.get()) < best) {
-							best = Game::Distance(player, enemy.get());
-							target = enemy;
-						}
-					}
+			const float reach = FWM::ChaosDown::kReach + a_kit.Value(Perk::kChaosDownWide);
+			const float seconds = FWM::ChaosDown::kSeconds + a_kit.Value(Perk::kChaosDownLingering);
+			const int rank = std::max(a_kit.Rank(Ability::kChaosDown), 1);
+			const float percent = Paths::Value(Perk::kChaosDown, rank);
+			auto enemies = EnemiesWithin(a_tank->GetPosition(), reach);
+			std::erase_if(enemies, [&](const auto& enemy) {
+				return enemy.get() == a_tank || Party::IsPartyActor(enemy.get()) || !InSight(a_tank, enemy.get(), reach);
+			});
+			if (enemies.empty() && !PathsLink::DebugCasting(a_member.id)) return a_asked ? Refused(Tr("No enemies close enough for Chaos Down.")) : Result{};
+			if (!a_asked && enemies.size() < 2) return {};
+
+			int slowed = 0;
+			for (const auto& enemy : enemies) {
+				float lasting = 0.0f;
+				for (const auto value : { RE::ActorValue::kSpeedMult, RE::ActorValue::kWeaponSpeedMult, RE::ActorValue::kLeftWeaponSpeedMultiply }) {
+					const auto old = Abilities::BoostOn(enemy->GetFormID(), value, Source(Perk::kChaosDown));
+					const auto combine = value == RE::ActorValue::kSpeedMult ? FWM::ChaosDown::Combine : FWM::ChaosDown::CombineAttack;
+					const auto slow = combine(Game::Current(enemy.get(), value), old ? old->amount : 0.0f, old ? old->left : 0.0f, percent, seconds);
+					if (slow.seconds <= 0.0f) continue;
+					Abilities::Lift(enemy->GetFormID(), value, slow.amount, slow.seconds, Source(Perk::kChaosDown));
+					lasting = std::max(lasting, slow.seconds);
 				}
-			} else {
-				// A boss, or someone well above them, on the party and not already theirs.
-				int bestWeight = -1;
-				for (const auto& profile : Enemies::All()) {
-					auto enemy = profile.handle.get();
-					auto victim = profile.target.get();
-					if (!enemy || !Game::Usable(enemy.get()) || !(profile.boss || profile.level >= a_tank->GetLevel() + 5) || !victim ||
-						!Party::IsPartyActor(victim.get()) || victim.get() == a_tank || Abilities::HolderOf(profile.handle) == a_tank->GetHandle() ||
-						!InSight(a_tank, enemy.get(), 2500.0f)) {
-						continue;
-					}
-					const int weight = profile.level + (profile.boss ? 100 : 0);
-					if (weight > bestWeight) {
-						bestWeight = weight;
-						target = enemy;
-					}
+				if (lasting > 0.0f) {
+					ChaosPulses::Bind(enemy.get(), lasting, rank >= 3);
+					++slowed;
 				}
 			}
-			if (!target) {
-				return a_asked ? Refused("Nobody to challenge.") : Result{};
-			}
-			const auto name = Game::Name(target.get());
-			if (Game::Distance(a_tank, target.get()) > 2500.0f) {
-				return Refused(std::format("{} is too far to hear it.", name));
-			}
-			const float seconds = Paths::Value(Perk::kChallenge, std::max(a_kit.Rank(Ability::kChallenge), 1));
+			if (slowed == 0 && !PathsLink::DebugCasting(a_member.id)) return a_asked ? Refused(Tr("No enemies can be slowed here.")) : Result{};
 			Abilities::Challenge(a_tank);
-			Abilities::Play(Forms::Get().tauntSound, a_tank);
-			Effects::Flash(a_tank, Effects::Look::kTaunt);
-			Effects::Flash(target.get(), Effects::Look::kChallenge);
-			Abilities::AddHold(target->GetHandle(), a_tank->GetHandle(), seconds);
-			if (const float humble = a_kit.Value(Perk::kChallengeHumble) / 100.0f; humble > 0.0f) {
-				Abilities::Lift(target->GetFormID(), RE::ActorValue::kAttackDamageMult, -humble, seconds, Source(Perk::kChallengeHumble));
-			}
-			if (const float duel = a_kit.Value(Perk::kChallengeDuel) / 100.0f; duel > 0.0f) {
-				Abilities::Lift(a_tank->GetFormID(), RE::ActorValue::kAttackDamageMult, duel, seconds, Source(Perk::kChallengeDuel));
-			}
-			Notices::Push(std::format("{} challenges {}: it turns on them for {:.0f} s.", a_member.name, name, seconds), Notices::Kind::kTaunt);
-			Log::Info("[Paths] {} challenges {} (level {}{}), held {:.0f} s."sv, a_member.name, name, target->GetLevel(), Boss(target.get()) ? ", a boss" : "", seconds);
-			return { true, std::format("Challenged {}: on them for {:.0f} s.", name, seconds) };
+			ChaosPulses::Call(a_tank, reach, rank >= 3, seconds);
+			Show();  // The matching restraint aura follows the actual slow timers.
+			Notices::Used(Trf("{} uses Chaos Down: {} slowed by {:.0f}% for {:.0f} s.", a_member.name, CountSaid(slowed), percent, seconds), Paths::Ability::kChaosDown, Notices::Kind::kOrder);
+			Log::Info("[Paths] {} uses Chaos Down: {} enemies, -{:.0f}% movement and attack speed, {:.0f} s, {:.0f} reach."sv, a_member.name, slowed, percent, seconds, reach);
+			return { true, Trf("Chaos Down: {} slowed by {:.0f}% for {:.0f} s.", CountSaid(slowed), percent, seconds) };
 		}
 
 		Result StandFast(Party::Member& a_member, RE::Actor* a_tank, const PathsLink::Kit& a_kit, bool a_asked)
 		{
-			auto*       player = RE::PlayerCharacter::GetSingleton();
-			const float yours = Game::Fraction(player, RE::ActorValue::kHealth);
-			if (!a_asked && !(OnParty() >= 3 || (yours < 0.5f && OnPlayer() >= 1))) {
-				return {};
+			if (!TankActs::LastBastion(a_tank, a_kit)) {
+				return a_asked ? Refused(Tr("Needs a nearby living ally below 25% health in combat, and no other active Last Bastion.")) : Result{};
 			}
-			const auto  team = Team(a_tank, Paths::kStandFastReach);
-			const float armor = Paths::Value(Perk::kStandFast, std::max(a_kit.Rank(Ability::kStandFast), 1));
-			const float unbroken = a_kit.Value(Perk::kStandFastUnbroken);
-			const float breath = a_kit.Value(Perk::kStandFastBreath) / 100.0f;
+			const auto status = TankActs::BastionOn(a_member.id);
 			Abilities::Challenge(a_tank);
-			Abilities::Play(Forms::Get().tauntSound, a_tank);
-			for (const auto& ally : team) {
-				Abilities::Lift(ally->GetFormID(), RE::ActorValue::kDamageResist, armor, Paths::kStandFastSeconds, Source(Perk::kStandFast));
-				if (unbroken > 0.0f) {
-					Abilities::Lift(ally->GetFormID(), RE::ActorValue::kResistMagic, unbroken, Paths::kStandFastSeconds, Source(Perk::kStandFastUnbroken));
-				}
-				if (breath > 0.0f) {
-					ally->AsActorValueOwner()->RestoreActorValue(RE::ActorValue::kStamina, Game::Maximum(ally.get(), RE::ActorValue::kStamina) * breath);
-				}
-				Effects::Flash(ally.get(), Effects::Look::kStandFast);
-			}
-			Notices::Push(std::format("{}: \"Stand fast!\" +{:.0f} armor for {} of the party.", a_member.name, armor, team.size()), Notices::Kind::kOrder);
-			Log::Info("[Paths] {} calls Stand Fast: +{:.0f} armor on {} for {:.0f} s."sv, a_member.name, armor, team.size(), Paths::kStandFastSeconds);
-			return { true, std::format("Stand fast: +{:.0f} armor for {} of you.", armor, team.size()) };
+			Bastions::Call(a_tank, status.length, a_kit.Rank(Ability::kStandFast));
+			Notices::Used(Trf("{}: \"Behind me!\" Absorbing {:.0f}% of nearby allies' damage.", a_member.name, status.percent), Ability::kStandFast, Notices::Kind::kOrder);
+			Log::Info("[Tank] {} becomes the Last Bastion: {:.0f}% final health loss transferred for {:.0f} s."sv, a_member.name, status.percent, status.length);
+			return { true, Trf("Last Bastion: absorbs {:.0f}% of nearby party damage for {:.0f} s.", status.percent, status.length) };
 		}
 
 		// --- Healer ---------------------------------------------------------------
@@ -359,8 +379,8 @@ namespace FWM::Arts
 			if (!a_asked && hurt < 2 && down == 0) {
 				return {};
 			}
-			if (scratched == 0) {
-				return Refused("Nobody within reach needs it.");
+			if (scratched == 0 && !PathsLink::DebugCasting(a_member.id)) {
+				return Refused(Tr("Nobody within reach needs it."));
 			}
 			a_state.renewalShare = Paths::Value(Perk::kRenewal, std::max(a_kit.Rank(Ability::kRenewal), 1)) / 100.0f;
 			a_state.renewalTriage = a_kit.Value(Perk::kTriage) / 100.0f;
@@ -381,15 +401,20 @@ namespace FWM::Arts
 			}
 			if (Settings::Get().abilityEffects) {
 				Abilities::CastGesture(a_healer);
-				Effects::Flash(a_healer, Effects::Look::kHealAura);
+				// A cloak of water round them while it lasts; the game's healing light if it cannot show.
+				Cloaks::End(a_state.cloak);
+				a_state.cloak = Cloaks::Wear(a_healer, a_state.renewalLength, a_kit.Rank(Ability::kRenewal) >= 3);
+				if (!a_state.cloak) {
+					Effects::Flash(a_healer, Effects::Look::kHealAura);
+				}
 			}
 			Abilities::Play(Forms::Get().healSound, a_healer);
-			Notices::Push(std::format("{} calls up Renewal: {:.0f}% health a second for {:.0f} s{}.", a_member.name, a_state.renewalShare * 100.0f, a_state.renewalLength,
-							  lifted ? std::format("; {} back on their feet", lifted) : ""s),
-				Notices::Kind::kHeal);
+			Notices::Used(Trf("{} calls up Renewal: {:.0f}% health a second for {:.0f} s{}.", a_member.name, a_state.renewalShare * 100.0f, a_state.renewalLength,
+							  lifted ? Trf("; {} back on their feet", lifted) : ""s),
+				Paths::Ability::kRenewal, Notices::Kind::kHeal);
 			Log::Info("[Paths] {} starts Renewal ({:.0f}%/s for {:.0f} s; {} hurt, {} lifted)."sv, a_member.name, a_state.renewalShare * 100.0f, a_state.renewalLength,
 				hurt, lifted);
-			return { true, std::format("Renewal: {:.0f}% a second for {:.0f} s.", a_state.renewalShare * 100.0f, a_state.renewalLength) };
+			return { true, Trf("Renewal: {:.0f}% a second for {:.0f} s.", a_state.renewalShare * 100.0f, a_state.renewalLength) };
 		}
 
 		void Pulse(Party::Member& a_member, RE::Actor* a_healer, State& a_state)
@@ -400,7 +425,14 @@ namespace FWM::Arts
 				                   PathBonus::Healing(a_member.id);
 				ally->AsActorValueOwner()->RestoreActorValue(RE::ActorValue::kHealth, give);
 				if (Settings::Get().abilityEffects && Game::Fraction(ally.get(), RE::ActorValue::kHealth) < 0.99f) {
-					Effects::Flash(ally.get(), Effects::Look::kHealAura, 0.9f);
+					// The healer's water washing down whoever it heals, or the game's healing light without it.
+					if (a_state.cloak) {
+						if (ally.get() != a_healer) {
+							Cloaks::Wash(a_state.cloak, ally.get());
+						}
+					} else {
+						Effects::Flash(ally.get(), Effects::Look::kHealAura, 0.9f);
+					}
 				}
 			}
 		}
@@ -418,20 +450,20 @@ namespace FWM::Arts
 				return {};
 			}
 			if (a_state.berserk > 0.0f) {
-				return a_asked ? Refused("Already berserk.") : Result{};
+				return a_asked ? Refused(Tr("Already berserk.")) : Result{};
 			}
 			const float damage = Paths::Value(Perk::kBerserk, std::max(a_kit.Rank(Ability::kBerserk), 1)) / 100.0f;
 			a_state.berserk = a_state.berserkLength = Paths::kBerserkSeconds;
+			Berserks::Call(a_bruiser,a_state.berserk,a_kit.Rank(Ability::kBerserk));
 			a_state.bloodlust = a_kit.Value(Perk::kBerserkBloodlust) / 100.0f;
 			Abilities::Lift(a_member.id, RE::ActorValue::kAttackDamageMult, damage, a_state.berserk, Source(Perk::kBerserk));
 			if (const float armor = a_kit.Value(Perk::kBerserkThickSkull); armor > 0.0f) {
 				Abilities::Lift(a_member.id, RE::ActorValue::kDamageResist, armor, a_state.berserk, Source(Perk::kBerserkThickSkull));
 			}
 			Abilities::Challenge(a_bruiser);
-			Abilities::Play(Forms::Get().tauntSound, a_bruiser);
-			Notices::Push(std::format("{} goes berserk: +{:.0f}% damage for {:.0f} s.", a_member.name, damage * 100.0f, a_state.berserk), Notices::Kind::kTaunt);
+			Notices::Used(Trf("{} goes berserk: +{:.0f}% damage for {:.0f} s.", a_member.name, damage * 100.0f, a_state.berserk), Paths::Ability::kBerserk, Notices::Kind::kTaunt);
 			Log::Info("[Paths] {} goes berserk (+{:.0f}% damage, {} close, boss near: {})."sv, a_member.name, damage * 100.0f, close.size(), bossNear);
-			return { true, std::format("Berserk: +{:.0f}% damage.", damage * 100.0f) };
+			return { true, Trf("Berserk: +{:.0f}% damage.", damage * 100.0f) };
 		}
 
 		// Bloodlust: a kill while berserk heals and keeps the fury going.
@@ -442,6 +474,7 @@ namespace FWM::Arts
 			}
 			a_bruiser->AsActorValueOwner()->RestoreActorValue(RE::ActorValue::kHealth, Game::Maximum(a_bruiser, RE::ActorValue::kHealth) * a_state.bloodlust);
 			a_state.berserk += 3.0f;
+			Berserks::Extend(a_bruiser,a_state.berserk);
 			a_state.berserkLength = std::max(a_state.berserkLength, a_state.berserk);
 			for (const auto perk : { Perk::kBerserk, Perk::kBerserkThickSkull }) {
 				for (const auto value : { RE::ActorValue::kAttackDamageMult, RE::ActorValue::kDamageResist }) {
@@ -455,19 +488,27 @@ namespace FWM::Arts
 
 		Result Sunder(Party::Member& a_member, RE::Actor* a_bruiser, const PathsLink::Kit& a_kit, bool a_asked)
 		{
+			if(PathsLink::DebugCasting(a_member.id)) {
+				const int rank=a_kit.Rank(Ability::kSunder);
+				PowerSwing(a_bruiser);
+				if (!Sunders::Break(a_bruiser,a_bruiser,Paths::kSunderSeconds,rank>=3)) return Refused(Tr("Could not show the Sunder effect."));
+				EffectAudio::Begin(Soundscape::Kind::Sunder,a_bruiser,a_bruiser->GetPosition(),1.8f,rank);
+				return {true,std::string(Tr("Sunder effect activated."))};
+			}
 			auto target = Chosen(a_member, a_bruiser);
 			if (!target || !Standing(target.get())) {
-				return a_asked ? Refused("Nobody to sunder.") : Result{};
+				return a_asked ? Refused(Tr("Nobody to sunder.")) : Result{};
 			}
 			const auto  name = Game::Name(target.get());
 			const float d = Game::Distance(a_bruiser, target.get());
-			if (d > 350.0f) {
-				return a_asked ? Refused(std::format("{} is out of reach ({:.0f} away).", name, d)) : Result{};
+			if (d > 350.0f || !AbilityAuto::Visible(a_bruiser, target.get(), 350.0f)) {
+				return a_asked ? Refused(Trf("{} is out of reach ({:.0f} away).", name, d)) : Result{};
 			}
 			if (!a_asked && !(Boss(target.get()) || target->GetLevel() >= a_bruiser->GetLevel())) {
 				return {};
 			}
-			const float armor = Paths::Value(Perk::kSunder, std::max(a_kit.Rank(Ability::kSunder), 1));
+			const int rank = std::max(a_kit.Rank(Ability::kSunder), 1);
+			const float armor = Paths::Value(Perk::kSunder, rank);
 			const float crack = a_kit.Value(Perk::kSunderCrack);
 			const float shatter = a_kit.Value(Perk::kSunderShatter);
 			const auto  enemy = target->GetHandle();
@@ -475,7 +516,7 @@ namespace FWM::Arts
 			Effects::Flash(a_bruiser, Effects::Look::kStrike);
 			Later(a_bruiser, 0.35f, [=](RE::Actor* a_by) {
 				auto victim = enemy.get();
-				if (!victim || victim->IsDead()) {
+				if (!AbilityAuto::Visible(a_by, victim.get(), 400.0f)) {
 					return;
 				}
 				Abilities::Lift(victim->GetFormID(), RE::ActorValue::kDamageResist, -armor, Paths::kSunderSeconds, Source(Perk::kSunder));
@@ -486,14 +527,16 @@ namespace FWM::Arts
 				if (crack > 0.0f) {
 					Game::Stagger(victim.get(), crack, a_by);
 				}
-				Abilities::Play(Forms::Get().cleaveSound, victim.get());
-				Effects::Flash(victim.get(), Effects::Look::kSunderImpact);
-				Effects::Sparks(victim.get());
+				EffectAudio::Begin(Soundscape::Kind::Sunder,a_by,victim->GetPosition(),1.8f,rank);
+				if (!Sunders::Break(a_by, victim.get(), Paths::kSunderSeconds, rank >= 3)) {
+					Effects::Flash(victim.get(), Effects::Look::kSunderImpact);
+					Effects::Sparks(victim.get());
+				}
 			});
-			Notices::Push(std::format("{} sunders {}: -{:.0f} armor for {:.0f} s.", a_member.name, name, armor, Paths::kSunderSeconds), Notices::Kind::kTaunt);
+			Notices::Used(Trf("{} sunders {}: -{:.0f} armor for {:.0f} s.", a_member.name, name, armor, Paths::kSunderSeconds), Paths::Ability::kSunder, Notices::Kind::kTaunt);
 			Log::Info("[Paths] {} sunders {} (-{:.0f} armor{}{})."sv, a_member.name, name, armor, shatter > 0.0f ? std::format(", -{:.0f}% resistances", shatter) : "",
 				crack > 0.0f ? ", staggered" : "");
-			return { true, std::format("Sundered {}: -{:.0f} armor.", name, armor) };
+			return { true, Trf("Sundered {}: -{:.0f} armor.", name, armor) };
 		}
 
 		Result Earthshaker(Party::Member& a_member, RE::Actor* a_bruiser, const PathsLink::Kit& a_kit, bool a_asked)
@@ -506,40 +549,44 @@ namespace FWM::Arts
 			if (!a_asked && close.size() < 3) {
 				return {};
 			}
-			if (close.empty()) {
-				return Refused("Nobody close enough to feel it.");
+			if (close.empty() && !PathsLink::DebugCasting(a_member.id)) {
+				return Refused(Tr("Nobody close enough to feel it."));
 			}
 			const float damage = WeaponDamage(a_bruiser) * times;
 			PowerSwing(a_bruiser);
 			Effects::Flash(a_bruiser, Effects::Look::kStrike);
 			const auto name = a_member.name;
+			// The slam: rocks burst out of the ground; everyone in reach falls where they stand, or at the
+			// third rank the light enough are thrown up; then they are held down a while.
 			Later(a_bruiser, 0.4f, [=](RE::Actor* a_by) {
 				const auto origin = a_by->GetPosition();
 				Abilities::Play(Forms::Get().quakeSound, a_by);
 				Effects::Flash(a_by, Effects::Look::kEarthshaker);
-				int knocked = 0;
+				Quakes::Slam(a_by, origin, reach, rank >= 3);
+				int felled = 0, thrown = 0;
 				for (const auto& enemy : EnemiesWithin(origin, reach)) {
-					Hurt(enemy.get(), damage);
+					Hurt(a_by, enemy.get(), damage);
 					if (!enemy->IsDead()) {
-						Knock(enemy.get(), origin, 1.5f);
+						(Quakes::Down(enemy.get(), origin, rank, Boss(enemy.get())) ? thrown : felled)++;
 						Effects::Flash(enemy.get(), Effects::Look::kShaken);
-						++knocked;
 					}
 				}
-				Log::Info("[Paths] {}'s Earthshaker: {} knocked down, {:.0f} damage each."sv, name, knocked, damage);
+				Log::Info("[Paths] {}'s Earthshaker (rank {}): {} felled, {} thrown, {:.0f} damage each, held down {:.1f} s."sv, name, rank, felled, thrown, damage,
+					Quake::Downed(rank, false));
 			});
 			if (aftershock) {
 				Later(a_bruiser, 1.9f, [=](RE::Actor* a_by) {
 					Effects::Flash(a_by, Effects::Look::kEarthshaker, 1.2f);
+					Quakes::Slam(a_by, a_by->GetPosition(), reach * 0.6f, false);
 					for (const auto& enemy : EnemiesWithin(a_by->GetPosition(), reach)) {
 						Game::Stagger(enemy.get(), 0.5f, a_by);
 					}
 					Abilities::Play(Forms::Get().quakeSound, a_by);
 				});
 			}
-			Notices::Push(std::format("{} shakes the earth: {} within {:.0f} go down.", a_member.name, CountOf(static_cast<int>(close.size())), reach),
-				Notices::Kind::kTaunt);
-			return { true, std::format("Earthshaker: {} in reach.", CountOf(static_cast<int>(close.size()))) };
+			Notices::Used(Trf("{} shakes the earth: {} within {:.0f} go down.", a_member.name, CountSaid(static_cast<int>(close.size())), reach),
+				Paths::Ability::kEarthshaker, Notices::Kind::kTaunt);
+			return { true, Trf("Earthshaker: {} in reach.", CountSaid(static_cast<int>(close.size()))) };
 		}
 
 		// --- Fighter --------------------------------------------------------------
@@ -551,8 +598,8 @@ namespace FWM::Arts
 			if (!a_asked && health >= 0.35f) {
 				return {};
 			}
-			if (health > 0.95f && stamina > 0.95f) {
-				return Refused("Not winded yet.");
+			if (health > 0.95f && stamina > 0.95f && !PathsLink::DebugCasting(a_member.id)) {
+				return Refused(Tr("Not winded yet."));
 			}
 			const int   rank = std::max(a_kit.Rank(Ability::kSecondWind), 1);
 			const float heal = Paths::Value(Perk::kSecondWind, rank) / 100.0f;
@@ -563,10 +610,10 @@ namespace FWM::Arts
 			if (const float armor = a_kit.Value(Perk::kSecondWindResolve); armor > 0.0f) {
 				Abilities::Lift(a_member.id, RE::ActorValue::kDamageResist, armor, Paths::kResolveSeconds, Source(Perk::kSecondWindResolve));
 			}
-			Effects::Flash(a_fighter, Effects::Look::kSecondWind);
-			Notices::Push(std::format("{} gets a second wind.", a_member.name), Notices::Kind::kHeal);
+			SecondWinds::Call(a_fighter, rank);
+			Notices::Used(Trf("{} gets a second wind.", a_member.name), Paths::Ability::kSecondWind, Notices::Kind::kHeal);
 			Log::Info("[Paths] {} gets a second wind at {:.0f}% health: +{:.0f}% health, +{:.0f}% stamina."sv, a_member.name, health * 100.0f, heal * 100.0f, breath * 100.0f);
-			return { true, std::format("Second wind: {:.0f}% health back.", heal * 100.0f) };
+			return { true, Trf("Second wind: {:.0f}% health back.", heal * 100.0f) };
 		}
 
 		Result Riposte(Party::Member& a_member, RE::Actor* a_fighter, const PathsLink::Kit& a_kit, State& a_state, bool a_asked)
@@ -583,13 +630,16 @@ namespace FWM::Arts
 			if (!a_asked && !(on >= 2 || bossOn)) {
 				return {};
 			}
-			a_state.riposte = a_state.riposteLength = Paths::Value(Perk::kRiposte, std::max(a_kit.Rank(Ability::kRiposte), 1));
+			a_state.riposteRank = std::max(a_kit.Rank(Ability::kRiposte), 1);
+            const float seconds=Paths::Value(Perk::kRiposte,a_state.riposteRank);
+            if(!Ripostes::Guard(a_fighter,a_state.riposteRank,seconds)) return {false, std::string(Tr("Cannot raise a guard right now."))};
+            a_state.riposte = a_state.riposteLength = seconds;
 			a_state.counter = a_kit.Value(Perk::kRiposteCounter);
 			a_state.riposteDisarm = a_kit.Rank(Perk::kRiposteDisarming) > 0;
-			Effects::Flash(a_fighter, Effects::Look::kGuard);
-			Notices::Push(std::format("{} sets themselves to riposte.", a_member.name), Notices::Kind::kOrder);
+			// The held weapon shimmer signals the raised guard; contact gets the flash.
+			Notices::Used(Trf("{} sets themselves to riposte.", a_member.name), Paths::Ability::kRiposte, Notices::Kind::kOrder);
 			Log::Info("[Paths] {} readies a riposte for {:.0f} s ({} on them)."sv, a_member.name, a_state.riposte, on);
-			return { true, std::format("Riposte: every blocked blow answered, {:.0f} s.", a_state.riposte) };
+			return { true, Trf("Riposte: guard the next melee blow, {:.0f} s.", a_state.riposte) };
 		}
 
 		// A blow blocked while Riposte is up.
@@ -598,215 +648,469 @@ namespace FWM::Arts
 			if (!Enemies::Find(a_attacker->GetFormID()) || Game::Distance(a_fighter, a_attacker) > 450.0f || a_attacker->IsDead()) {
 				return;
 			}
-			const bool staggered = Game::Stagger(a_attacker, 0.6f, a_fighter);
-			Hurt(a_attacker, WeaponDamage(a_fighter) * a_state.counter);
-			Effects::Flash(a_attacker, Effects::Look::kShaken);
+			if(!Ripostes::Counter(a_fighter,a_attacker,a_state.riposteRank,WeaponDamage(a_fighter),a_state.counter,Boss(a_attacker))) return;
+            a_state.riposte=0; // consume once before any queued duplicate hit is processed
 			bool disarmed = false;
 			if (a_state.riposteDisarm && a_attacker->GetLevel() <= a_fighter->GetLevel() + 10 && Specials::TakeWeapon(a_fighter, a_attacker)) {
 				a_state.riposteDisarm = false;
 				disarmed = true;
 			}
-			Log::Info("[Paths] {} ripostes {}{}{}."sv, a_member.name, Game::Name(a_attacker), staggered ? ", who staggers" : "", disarmed ? " and loses their weapon" : "");
+			Log::Info("[Paths] {} ripostes {}{}{}."sv, a_member.name, Game::Name(a_attacker), ", countered and pushed back", disarmed ? " and loses their weapon" : "");
 		}
 
-		Result Cleave(Party::Member& a_member, RE::Actor* a_fighter, const PathsLink::Kit& a_kit, bool a_asked)
+		// Kynareth's Maw, a giant spectral wolf's head called down on an enemy the fighter stands before: our own mesh,
+		// the vanilla wolf's head with fur, glowing like a spirit (Effects::Head), posed here frame by frame. It takes shape right in
+		// front of the enemy with its jaws open round them, rears and trembles, clamps down so its
+		// front half bites into them, shakes its catch, and fades. The bite lands as the jaws close and
+		// catches what the head itself touches: a capsule from the skull to the muzzle, a skull wide.
+		// Nothing of it is an actor, and nothing of it is saved.
+		// The timeline and the head's measurements live in WolfBite.h, shared with the preview tool.
+		using WolfBite::kHitStop;
+		using WolfBite::kHitStopSpeed;
+		using WolfBite::kSnap;
+		using WolfBite::kTense;
+		constexpr float kWolfStagger = 0.7f;  // how hard the bite staggers them: a clear recoil to be caught in
+
+		constexpr RE::NiPoint3 Ni(WolfBite::Vec a_v) { return { a_v.x, a_v.y, a_v.z }; }
+		constexpr RE::NiPoint3 kHeadBack = Ni(WolfBite::kHeadBack);
+		constexpr RE::NiPoint3 kHeadFront = Ni(WolfBite::kHeadFront);
+		constexpr RE::NiPoint3 kTeeth = Ni(WolfBite::kTeeth);
+		constexpr float        kHeadRadius = WolfBite::kHeadRadius;
+
+		RE::NiMatrix3 Ni(const WolfBite::Mat& a_m)
 		{
-			const bool  whirl = a_kit.Rank(Perk::kCleaveWhirlwind) > 0;
-			const float times = Paths::Value(Perk::kCleave, std::max(a_kit.Rank(Ability::kCleave), 1));
-			const float bleed = a_kit.Value(Perk::kCleaveLacerate);
-			auto        inArc = [whirl](RE::Actor* a_by, RE::Actor* a_enemy) {
-                if (whirl) {
-                    return true;
-                }
-                const float heading = a_by->GetAngleZ();
-                const auto  to = a_enemy->GetPosition() - a_by->GetPosition();
-                const float length = std::hypot(to.x, to.y);
-                return length < 1.0f || (to.x * std::sin(heading) + to.y * std::cos(heading)) / length > 0.5f;
-			};
-			int inReach = 0;
-			for (const auto& enemy : EnemiesWithin(a_fighter->GetPosition(), Paths::kCleaveReach)) {
-				inReach += inArc(a_fighter, enemy.get()) ? 1 : 0;
-			}
-			if (!a_asked && inReach < 2) {
-				return {};
-			}
-			if (inReach == 0) {
-				return Refused("Nobody in reach.");
-			}
-			const float damage = WeaponDamage(a_fighter) * times;
-			PowerSwing(a_fighter);
-			const auto name = a_member.name;
-			Later(a_fighter, 0.35f, [=](RE::Actor* a_by) {
-				int hit = 0;
-				for (const auto& enemy : EnemiesWithin(a_by->GetPosition(), Paths::kCleaveReach)) {
-					if (!inArc(a_by, enemy.get())) {
-						continue;
-					}
-					Hurt(enemy.get(), damage);
-					Game::Stagger(enemy.get(), 0.35f, a_by);
-					Effects::Flash(enemy.get(), Effects::Look::kShaken);
-					if (bleed > 0.0f) {
-						bleeds.push_back({ enemy->GetHandle(), bleed, Paths::kLacerateSeconds });
-					}
-					++hit;
+			RE::NiMatrix3 out;
+			for (int i = 0; i < 3; ++i) {
+				for (int j = 0; j < 3; ++j) {
+					out.entry[i][j] = a_m[i][j];
 				}
-				if (hit > 0) {
-					Abilities::Play(Forms::Get().cleaveSound, a_by);
+			}
+			return out;
+		}
+
+		struct Spirit
+		{
+			RE::NiPointer<RE::BSTempEffectParticle> effect;
+			RE::NiPointer<RE::NiAVObject>           head;  // its nodes, once the mesh has loaded
+			RE::NiPointer<RE::NiAVObject>           jaw;
+			std::vector<RE::BSShaderProperty*>      skins;  // every shader on it, faded in and out together
+			RE::ActorHandle                         by;
+			RE::ActorHandle                         target;
+			std::string                             name;  // the fighter's
+			RE::NiPoint3                            at;    // the target's feet, followed until the lunge
+			float                                   heading{ 0.0f };
+			float                                   chest{ 0.0f };  // how high above them the jaws close
+			float                                   damage{ 0.0f };
+			float                                   share{ 0.0f };    // of a bitten one's health, bled away
+			float                                   seconds{ 0.0f };  // how long the wounds bleed
+			float                                   hold{ 0.0f };     // how long whatever it catches stands frozen
+			bool                                    grand{ false };   // the third rank's red wolf, holding on longer
+			float                                   age{ 0.0f };
+			bool                                    snarled{ false };
+			bool                                    swung{ false };
+			bool                                    bitten{ false };
+			float                                   spurtIn{ 0.0f };
+		};
+		std::vector<Spirit> spirits;
+
+		// A heavy blow's catch: the world all but stops for a blink. Only from normal speed, and put
+		// back only if nothing else changed it meanwhile (the battle plan, a shout, a killcam).
+		struct
+		{
+			std::chrono::steady_clock::time_point until;
+			bool                                  on{ false };
+		} hitStop;
+
+		void StopTime()
+		{
+			auto* timer = RE::BSTimer::GetSingleton();
+			if (!timer || hitStop.on || TimeBend::Active() || std::abs(RE::BSTimer::QGlobalTimeMultiplier() - 1.0f) > 0.01f) {
+				return;
+			}
+			timer->SetGlobalTimeMultiplier(kHitStopSpeed, true);
+			hitStop.until = std::chrono::steady_clock::now() + std::chrono::milliseconds(static_cast<int>(kHitStop * 1000.0f));
+			hitStop.on = true;
+		}
+
+		void StartTime(bool a_now)
+		{
+			if (!hitStop.on || (!a_now && std::chrono::steady_clock::now() < hitStop.until)) {
+				return;
+			}
+			hitStop.on = false;
+			auto* timer = RE::BSTimer::GetSingleton();
+			if (timer && std::abs(RE::BSTimer::QGlobalTimeMultiplier() - kHitStopSpeed) < 0.01f) {
+				timer->SetGlobalTimeMultiplier(1.0f, true);
+			}
+		}
+
+		// Shortest distance between the segments p0-p1 and q0-q1.
+		float SegmentGap(const RE::NiPoint3& a_p0, const RE::NiPoint3& a_p1, const RE::NiPoint3& a_q0, const RE::NiPoint3& a_q1)
+		{
+			constexpr float kTiny = 1e-4f;
+			const auto      d1 = a_p1 - a_p0;
+			const auto      d2 = a_q1 - a_q0;
+			const auto      r = a_p0 - a_q0;
+			const float     a = d1.Dot(d1), e = d2.Dot(d2), f = d2.Dot(r);
+			float           s = 0.0f, t = 0.0f;
+			if (a <= kTiny && e <= kTiny) {
+				return r.Length();
+			}
+			if (a <= kTiny) {
+				t = std::clamp(f / e, 0.0f, 1.0f);
+			} else {
+				const float c = d1.Dot(r);
+				if (e <= kTiny) {
+					s = std::clamp(-c / a, 0.0f, 1.0f);
+				} else {
+					const float b = d1.Dot(d2);
+					const float denom = a * e - b * b;
+					s = denom > kTiny ? std::clamp((b * f - c * e) / denom, 0.0f, 1.0f) : 0.0f;
+					t = (b * s + f) / e;
+					if (t < 0.0f) {
+						t = 0.0f;
+						s = std::clamp(-c / a, 0.0f, 1.0f);
+					} else if (t > 1.0f) {
+						t = 1.0f;
+						s = std::clamp((b - c) / a, 0.0f, 1.0f);
+					}
 				}
-				Log::Info("[Paths] {}'s Cleave hits {} for {:.0f}{}."sv, name, CountOf(hit), damage, bleed > 0.0f ? std::format(", bleeding {:.0f}/s", bleed) : "");
-			});
-			Effects::Flash(a_fighter, Effects::Look::kCleave);
-			return { true, std::format("Cleave: {} in reach.", CountOf(inReach)) };
+			}
+			return ((a_p0 + d1 * s) - (a_q0 + d2 * t)).Length();
+		}
+
+		// Half an enemy's breadth, from its bounds: a man's is about 20, a troll's or a dragon's far more.
+		float Breadth(RE::Actor* a_actor)
+		{
+			const auto low = a_actor->GetBoundMin();
+			const auto high = a_actor->GetBoundMax();
+			return std::clamp(0.25f * ((high.x - low.x) + (high.y - low.y)), 15.0f, 200.0f);
+		}
+
+		// Where the head is and how its jaw stands at this moment of the bite, in the world.
+		struct Pose
+		{
+			RE::NiTransform head;
+			float           jaw{ 0.0f };
+			float           alpha{ 1.0f };
+		};
+
+		Pose PoseOf(const Spirit& a_spirit, bool display = false)
+		{
+			auto bite = WolfBite::At(a_spirit.age, a_spirit.heading, { a_spirit.at.x, a_spirit.at.y, a_spirit.at.z }, a_spirit.chest, a_spirit.grand);
+			if (display) bite = WolfBite::Display(bite,a_spirit.at.z,a_spirit.grand);
+			Pose       pose;
+			pose.head.rotate = Ni(bite.rotate);
+			pose.head.translate = { bite.translate.x, bite.translate.y, bite.translate.z };
+			pose.head.scale = bite.scale;
+			pose.jaw = bite.jaw;
+			pose.alpha = bite.alpha;
+			return pose;
+		}
+
+		// Our pose onto the mesh, through whatever transform the effect gave its root.
+		void Place(Spirit& a_spirit, const Pose& a_pose)
+		{
+			auto* root = a_spirit.effect ? a_spirit.effect->particleObject.get() : nullptr;
+			if (!root || !root->parent) {
+				return;
+			}
+			if (!a_spirit.head) {
+				a_spirit.head.reset(root->GetObjectByName("Head"));
+				a_spirit.jaw.reset(root->GetObjectByName("Jaw"));
+				if (a_spirit.head) {
+					RE::BSVisit::TraverseScenegraphGeometries(a_spirit.head.get(), [&](RE::BSGeometry* a_geometry) {
+						auto* shader = a_geometry->GetGeometryRuntimeData().shaderProperty.get();
+						if (shader && std::find(a_spirit.skins.begin(), a_spirit.skins.end(), shader) == a_spirit.skins.end()) {
+							a_spirit.skins.push_back(shader);
+						}
+						return RE::BSVisit::BSVisitControl::kContinue;
+					});
+				}
+				if (!a_spirit.head) {
+					return;
+				}
+				Log::Info("[Paths] {}'s spectral wolf head shows {:.2f} s in{}."sv, a_spirit.name, a_spirit.age, a_spirit.jaw ? "" : ", but without its jaw node");
+			}
+			const auto& parent = root->world;
+			const auto  inverse = parent.rotate.Transpose();
+			auto&       local = a_spirit.head->local;
+			local.rotate = inverse * a_pose.head.rotate;
+			local.translate = inverse * (a_pose.head.translate - parent.translate) * (1.0f / parent.scale);
+			local.scale = a_pose.head.scale / parent.scale;
+			if (a_spirit.jaw) {
+				a_spirit.jaw->local.rotate = Ni(WolfBite::JawTurn(a_pose.jaw));
+			}
+			// Under the alpha test the fur grows in from the skin outward as this rises, and recedes as
+			// it falls; the glow fades with it.
+			for (auto* shader : a_spirit.skins) {
+				shader->alpha = a_pose.alpha;
+				if (auto* lit = netimmerse_cast<RE::BSLightingShaderProperty*>(shader); lit && lit->material) {
+					static_cast<RE::BSLightingShaderMaterialBase*>(lit->material)->materialAlpha = a_pose.alpha;
+				} else if (auto* glow = netimmerse_cast<RE::BSEffectShaderProperty*>(shader); glow && glow->material) {
+					static_cast<RE::BSEffectShaderMaterial*>(glow->material)->baseColor.alpha = a_pose.alpha;
+				}
+			}
+			RE::NiUpdateData update{ 0.0f, RE::NiUpdateData::Flag::kNone };
+			a_spirit.head->Update(update);
+		}
+
+		void PlayAt(RE::BGSSoundDescriptorForm* a_sound, const RE::NiPoint3& a_at)
+		{
+			RE::BSSoundHandle sound;
+			if (auto* audio = RE::BSAudioManager::GetSingleton(); audio && a_sound && audio->GetSoundHandle(sound, a_sound)) {
+				sound.SetPosition(a_at);
+				sound.Play();
+			}
+		}
+
+		// The fighter stands before the enemy: near, and inside the arc it faces.
+		bool Before(RE::Actor* a_fighter, RE::Actor* a_enemy)
+		{
+			const auto  to = a_fighter->GetPosition() - a_enemy->GetPosition();
+			const float d = std::hypot(to.x, to.y);
+			if (d > Paths::kWolfReach) {
+				return false;
+			}
+			const float heading = a_enemy->GetAngleZ();
+			return d < 1.0f || (to.x * std::sin(heading) + to.y * std::cos(heading)) / d >= std::cos(Paths::kWolfArc * RE::NI_PI / 180.0f);
+		}
+
+		RE::NiPointer<RE::Actor> NearestBefore(RE::Actor* a_fighter)
+		{
+			RE::NiPointer<RE::Actor> nearest;
+			for (const auto& enemy : EnemiesWithin(a_fighter->GetPosition(), Paths::kWolfReach)) {
+				if (Before(a_fighter, enemy.get()) && InSight(a_fighter, enemy.get(), Paths::kWolfReach) &&
+					(!nearest || Game::Distance(a_fighter, enemy.get()) < Game::Distance(a_fighter, nearest.get()))) {
+					nearest = enemy;
+				}
+			}
+			return nearest;
+		}
+
+		Result SpectralWolf(Party::Member& a_member, RE::Actor* a_fighter, const PathsLink::Kit& a_kit, bool a_asked)
+		{
+			const bool debug=PathsLink::DebugCasting(a_member.id);
+			auto target = debug ? RE::NiPointer<RE::Actor>{} : Chosen(a_member, a_fighter);
+			if (target && !(Standing(target.get()) && InSight(a_fighter, target.get(), a_asked ? Paths::kWolfReach : 600.0f))) {
+				target = nullptr;
+			}
+			if (target && !Before(a_fighter, target.get())) {
+				if (!a_asked) {
+					return {};
+				}
+				// Asked: someone else they do stand before will do.
+				const auto chosen = target;
+				target = NearestBefore(a_fighter);
+				if (!target) {
+					return Refused(Trf("They must stand before {}, not beside or behind it.", Game::Name(chosen.get())));
+				}
+			}
+			if (!target && a_asked && !debug) {
+				target = NearestBefore(a_fighter);
+			}
+			if (!target && !debug) {
+				return a_asked ? Refused(Tr("Nobody they stand before.")) : Result{};
+			}
+			if (!a_asked) {
+				const bool strong = Boss(target.get()) || target->GetLevel() >= a_fighter->GetLevel();
+				const bool bunched = EnemiesWithin(target->GetPosition(), 180.0f).size() >= 2;
+				if (!strong && !bunched) {
+					return {};
+				}
+			}
+			if (std::any_of(spirits.begin(), spirits.end(), [&](const Spirit& a_spirit) { return a_spirit.by == a_fighter->GetHandle(); })) {
+				return a_asked ? Refused(Tr("Their wolf is still out.")) : Result{};
+			}
+
+			// It faces the enemy from the fighter's side, which is the enemy's front.
+			const auto at=debug?PathsLink::DebugAim(a_fighter):target->GetPosition();
+			const auto to=at-a_fighter->GetPosition();
+			const int   rank = std::max(a_kit.Rank(Ability::kSpectralWolf), 1);
+			Spirit      spirit;
+			spirit.by = a_fighter->GetHandle();
+			spirit.target = target?target->GetHandle():RE::ActorHandle{};
+			spirit.name = a_member.name;
+			spirit.at = at;
+			spirit.heading = std::hypot(to.x, to.y) > 1.0f ? std::atan2(to.x, to.y) : a_fighter->GetAngleZ();
+			spirit.chest = (target?target->GetHeight():a_fighter->GetHeight()) * 0.55f;
+			// Snapshot both the bite and max-health bleed once; the wound ticks use these values.
+			spirit.damage = WeaponDamage(a_fighter) * Paths::Value(Perk::kSpectralWolf, rank);
+			spirit.share = Paths::Second(Perk::kSpectralWolf, rank) / 100.0f;
+			spirit.seconds = Paths::kWolfBleedSeconds + a_kit.Value(Perk::kWolfHemorrhage);
+			spirit.hold = Paths::kWolfHold[static_cast<std::size_t>(rank - 1)] + (a_kit.Rank(Perk::kWolfMaul) > 0 ? Paths::kWolfMaulHold : 0.0f);
+			spirit.grand = rank >= 3;
+			spirit.effect.reset(Effects::Head(target?target.get():a_fighter, spirit.at, spirit.heading, WolfBite::Gone(spirit.grand) + 0.1f, spirit.grand));
+			if (!spirit.effect) {
+				Log::Warn("[Paths] Kynareth's Maw from {} has no head to show (is meshes\\FightWithMe\\SpectralWolfHead.nif installed?); it bites unseen."sv, a_member.name);
+			}
+			EffectAudio::Begin(Soundscape::Kind::Wolf,a_fighter,spirit.at,WolfBite::Gone(spirit.grand),rank);
+			spirits.push_back(std::move(spirit));
+
+			Effects::Flash(a_fighter, Effects::Look::kSpiritWolf);
+			const auto name = debug?std::string(Tr("10 m ahead")):Game::Name(target.get());
+			Notices::Used(Trf("{} calls down Kynareth's Maw on {}!", a_member.name, name), Paths::Ability::kSpectralWolf, Notices::Kind::kTaunt);
+			Log::Info("[Paths] {} calls down Kynareth's Maw{} on {}, {:.0f} away ({:.0f} damage, {:.0f}% bled over {:.0f} s, held {:.1f} s)."sv, a_member.name,
+				spirits.back().grand ? " (red)" : "", name, to.Length(), spirits.back().damage, spirits.back().share * 100.0f, spirits.back().seconds,
+				spirits.back().hold);
+			return { true, Trf("Kynareth's Maw on {}.", name) };
+		}
+
+		// The jaws close: everything the head touches is bitten.
+		void Bite(Spirit& a_spirit, const Pose& a_pose)
+		{
+			const auto  back = a_pose.head * kHeadBack;
+			const auto  front = a_pose.head * kHeadFront;
+			const float radius = kHeadRadius * a_pose.head.scale;
+			const auto  teeth = a_pose.head * kTeeth;
+			const auto  by = a_spirit.by.get();
+			std::string   caught;
+			int           hit = 0;
+			std::uint32_t haunt = 0;  // the ghostly smoke on those it holds, once the first is caught
+			for (const auto& enemy : EnemiesWithin(teeth, 800.0f)) {
+				const float        breadth = Breadth(enemy.get());
+				const auto         feet = enemy->GetPosition();
+				const RE::NiPoint3 low{ feet.x, feet.y, feet.z + breadth };
+				auto               top = Game::HeadPosition(enemy.get());
+				top.z = std::max(top.z, low.z);
+				const float gap = SegmentGap(back, front, low, top);
+				if (gap > radius + breadth) {
+					continue;
+				}
+				++hit;
+				Hurt(by.get(), enemy.get(), a_spirit.damage);
+				if (!enemy->IsDead()) {
+					// Caught still mid-stagger, as though struck stiff by the blow, in a ghostly smoke. Not in the
+					// air: a flyer held still would hang there.
+					Game::Stagger(enemy.get(), kWolfStagger, by.get());
+					const float hold = a_spirit.hold * (Boss(enemy.get()) ? Paths::kWolfBossHold : 1.0f);
+					if (!enemy->AsActorState()->IsFlying()) {
+						Freeze::Hold(enemy.get(), Paths::kWolfCatch, hold);
+					}
+					if (!haunt && Settings::Get().abilityEffects) {
+						haunt = Haunts::Begin(enemy.get(), a_spirit.grand);
+					}
+					if (haunt) {
+						Haunts::Hold(haunt, enemy.get(), Paths::kWolfCatch + hold);
+					} else {
+						Effects::Flash(enemy.get(), Effects::Look::kShaken, 0.8f);
+					}
+					const float share = a_spirit.share * (Boss(enemy.get()) ? Paths::kWolfBossBleed : 1.0f);
+					const float total = Game::Maximum(enemy.get(), RE::ActorValue::kHealth) * share;
+					bleeds.push_back({ enemy->GetHandle(), total / a_spirit.seconds, a_spirit.seconds, 0.6f, by->GetHandle() });
+				}
+				auto at = teeth;
+				at.z = std::clamp(at.z, low.z, top.z);
+				Effects::Spray(enemy.get(), at, a_spirit.heading, Effects::Blood::kBite, 2.4f);
+				Effects::Spray(enemy.get(), at, a_spirit.heading + RE::NI_PI, Effects::Blood::kGore, 1.8f);
+				caught += std::format("{}{} ({:.0f} off)", caught.empty() ? "" : ", ", Game::Name(enemy.get()), gap);
+			}
+			// The weight of it: the crunch of the jaws, a giant's blow on the ground under it, the
+			// camera jolted, and the world caught still for a blink.
+			PlayAt(Forms::Get().blowSound, teeth);
+			PlayAt(Forms::Get().quakeSound, teeth);
+			RE::ShakeCamera(0.6f, teeth, 0.6f);
+			StopTime();
+			auto* model = a_spirit.effect ? a_spirit.effect->particleObject.get() : nullptr;
+			const std::string_view seen = a_spirit.head ? ""sv :
+			                              !a_spirit.effect ? " unseen (no head was made)"sv :
+			                              !model ? " unseen (its mesh had not loaded)"sv :
+			                              !model->parent ? " unseen (its mesh was never placed in the world)"sv :
+			                                               " unseen (no Head node in its mesh)"sv;
+			Log::Info("[Paths] Kynareth's Maw from {} bites{}: a head {:.0f} across catches {}{}."sv, a_spirit.name, seen, radius * 2.0f, CountOf(hit),
+				caught.empty() ? "" : ": " + caught);
+		}
+
+		void Spirits(float a_dt)
+		{
+			StartTime(false);
+			for (auto& spirit : spirits) {
+				spirit.age += a_dt;
+				// It keeps in front of its quarry until the jaws start to close.
+				if (spirit.age < kTense) {
+					auto target = spirit.target.get();
+					auto by = spirit.by.get();
+					if (target && !target->IsDead()) {
+						spirit.at = target->GetPosition();
+						if (by) {
+							const auto to = target->GetPosition() - by->GetPosition();
+							if (std::hypot(to.x, to.y) > 1.0f) {
+								spirit.heading = std::atan2(to.x, to.y);
+							}
+						}
+					}
+				}
+				const auto pose = PoseOf(spirit);
+				const auto teeth = pose.head * kTeeth;
+				if (!spirit.snarled && spirit.age >= WolfBite::kSnarl) {
+					spirit.snarled = true;
+					// The layered voice is timed by the shared Wolf sound plan.
+				}
+				// The fighter's own swing lands with the bite.
+				if (!spirit.swung && spirit.age >= WolfBite::kSwing) {
+					spirit.swung = true;
+					auto by = spirit.by.get();
+					auto target = spirit.target.get();
+					if (by && target && Game::Usable(by.get()) && Game::Distance(by.get(), target.get()) < 350.0f) {
+						PowerSwing(by.get());
+					}
+				}
+				if (!spirit.bitten && spirit.age >= kSnap) {
+					spirit.bitten = true;
+					Bite(spirit, pose);
+				}
+				// Blood from the jaws while it shakes them.
+				if (spirit.bitten && spirit.age < WolfBite::ShakeEnd(spirit.grand)) {
+					spirit.spurtIn -= a_dt;
+					if (spirit.spurtIn <= 0.0f) {
+						spirit.spurtIn = 0.22f;
+						if (auto target = spirit.target.get()) {
+							Effects::Spray(target.get(), teeth, spirit.heading + std::uniform_real_distribution<float>(-1.2f, 1.2f)(rng), Effects::Blood::kBleed, 1.4f);
+						}
+					}
+				}
+				Place(spirit, PoseOf(spirit, true));
+			}
+			std::erase_if(spirits, [](const Spirit& a_spirit) { return a_spirit.age >= WolfBite::Gone(a_spirit.grand); });
 		}
 
 		// --- Archer ---------------------------------------------------------------
 
 		// The bow in hand (or the best carried) and the arrows they would shoot from it.
-		std::pair<RE::TESObjectWEAP*, RE::TESAmmo*> BowAndArrows(RE::Actor* a_archer)
-		{
-			RE::TESObjectWEAP* bow = nullptr;
-			if (auto* right = a_archer->GetEquippedObject(false)) {
-				if (auto* weapon = right->As<RE::TESObjectWEAP>(); weapon && weapon->IsBow()) {
-					bow = weapon;
-				}
-			}
-			RE::TESAmmo* ammo = a_archer->GetCurrentAmmo();
-			if (ammo && ammo->IsBolt()) {
-				ammo = nullptr;
-			}
-			std::int32_t most = 0;
-			for (const auto& [object, entry] : a_archer->GetInventory([](RE::TESBoundObject& a_object) { return a_object.IsWeapon() || a_object.IsAmmo(); })) {
-				if (!object || entry.first <= 0) {
-					continue;
-				}
-				if (auto* weapon = object->As<RE::TESObjectWEAP>(); !bow && weapon && weapon->IsBow()) {
-					bow = weapon;
-				}
-				if (auto* arrows = object->As<RE::TESAmmo>(); !ammo && arrows && !arrows->IsBolt() && entry.first > most) {
-					most = entry.first;
-					ammo = arrows;
-				}
-			}
-			return { bow, ammo };
-		}
+        std::pair<RE::TESObjectWEAP*,RE::TESAmmo*> BowAndArrows(RE::Actor* archer) {return Loadouts::Ranged(archer);}
 
-		Result Deadeye(Party::Member& a_member, RE::Actor* a_archer, const PathsLink::Kit& a_kit, State& a_state, bool a_asked)
-		{
-			bool worth = false;
-			for (const auto& profile : Enemies::All()) {
-				auto enemy = profile.handle.get();
-				if (enemy && Game::Usable(enemy.get()) && (profile.boss || profile.caster) && InSight(a_archer, enemy.get(), 3000.0f)) {
-					worth = true;
-					break;
-				}
-			}
-			if (!a_asked && !worth) {
-				return {};
-			}
-			if (a_state.deadeye > 0.0f) {
-				return a_asked ? Refused("Already steady.") : Result{};
-			}
-			const float damage = Paths::Value(Perk::kDeadeye, std::max(a_kit.Rank(Ability::kDeadeye), 1)) / 100.0f;
-			a_state.deadeye = a_state.deadeyeLength = Paths::kDeadeyeSeconds + a_kit.Value(Perk::kDeadeyePatience);
-			a_state.hawkeye = a_kit.Value(Perk::kDeadeyeHawkeye) / 100.0f;
-			Abilities::Lift(a_member.id, RE::ActorValue::kAttackDamageMult, damage, a_state.deadeye, Source(Perk::kDeadeye));
-			Effects::Flash(a_archer, Effects::Look::kVolley);
-			Notices::Push(std::format("{} steadies their aim: +{:.0f}% damage for {:.0f} s.", a_member.name, damage * 100.0f, a_state.deadeye), Notices::Kind::kOrder);
-			Log::Info("[Paths] {} takes Deadeye (+{:.0f}% for {:.0f} s)."sv, a_member.name, damage * 100.0f, a_state.deadeye);
-			return { true, std::format("Deadeye: +{:.0f}% damage.", damage * 100.0f) };
-		}
+        Result ExplosiveArrow(Party::Member& member,RE::Actor* actor,const PathsLink::Kit& kit,bool asked)
+        {
+            const bool debug=PathsLink::DebugCasting(member.id);auto target=Chosen(member,actor);
+            if(!debug&&(!target||!InSight(actor,target.get(),AbilityPolicy::kEnemyReach)))return asked?Refused(Tr("No enemy in sight.")):Result{};
+            const int rank=std::max(1,kit.Rank(Ability::kDeadeye));
+            const auto aim=debug?PathsLink::DebugAim(actor)+RE::NiPoint3{0,0,70}:target->GetPosition();
+            if(!ArrowArts::Explosive(actor,target.get(),aim,rank,kit.Value(Perk::kDeadeyeHawkeye)*70.f,kit.Value(Perk::kDeadeyePatience),debug))return Refused(Tr("Needs a bow and arrows, or a shot is already preparing."));
+            Notices::Used(Trf("{} prepares an explosive arrow.",member.name),Ability::kDeadeye,Notices::Kind::kOrder);
+            return {true,std::string(Tr("Explosive arrow readied."))};
+        }
 
-		void Pinned(RE::Actor* a_archer, const RE::ActorHandle& a_enemy, float a_seconds, float a_bossChance, const std::string& a_by, float a_in)
-		{
-			Later(a_archer, a_in, [=](RE::Actor* a_from) {
-				auto enemy = a_enemy.get();
-				if (!enemy || enemy->IsDead()) {
-					return;
-				}
-				if (Boss(enemy.get()) && std::uniform_real_distribution<float>(0.0f, 100.0f)(rng) >= a_bossChance) {
-					Log::Info("[Paths] {} shrugs off {}'s pinning shot."sv, Game::Name(enemy.get()), a_by);
-					return;
-				}
-				Game::Stagger(enemy.get(), 0.7f, a_from);
-				Effects::Flash(enemy.get(), Effects::Look::kShaken);
-				pins.push_back({ a_enemy, a_from->GetHandle(), a_seconds });
-				Log::Info("[Paths] {} pins {} for {:.0f} s."sv, a_by, Game::Name(enemy.get()), a_seconds);
-			});
-		}
-
-		Result PinningShot(Party::Member& a_member, RE::Actor* a_archer, const PathsLink::Kit& a_kit, bool a_asked)
-		{
-			auto*                    player = RE::PlayerCharacter::GetSingleton();
-			RE::NiPointer<RE::Actor> target;
-			if (a_asked) {
-				target = Chosen(a_member, a_archer);
-			}
-			if (!target) {
-				// Whoever is closing on you, or on a caster of the party.
-				float best = 1e9f;
-				for (const auto& profile : Enemies::All()) {
-					auto enemy = profile.handle.get();
-					auto victim = profile.target.get();
-					if (!enemy || !Standing(enemy.get()) || !victim) {
-						continue;
-					}
-					bool guarded = victim.get() == player;
-					if (!guarded) {
-						if (const auto* member = Party::Find(victim->GetFormID()); member && !member->summon) {
-							const auto* orders = Party::FindOrders(member->id);
-							guarded = orders && ChoosesSpells(orders->role);
-						}
-					}
-					const float d = Game::Distance(victim.get(), enemy.get());
-					if (guarded && d < 600.0f && d < best && InSight(a_archer, enemy.get(), 3000.0f)) {
-						best = d;
-						target = enemy;
-					}
-				}
-			}
-			if (!target) {
-				return a_asked ? Refused("Nobody to pin.") : Result{};
-			}
-			if (!(a_member.arsenal.ranged && a_member.arsenal.ammo)) {
-				return Refused("Nothing to shoot with.");
-			}
-			if (!Specials::LooseArrow(a_archer, target.get())) {
-				return Refused("Could not get a shot off.");
-			}
-			const int   rank = std::max(a_kit.Rank(Ability::kPinningShot), 1);
-			const float seconds = Paths::Value(Perk::kPinningShot, rank) + a_kit.Value(Perk::kPinningHeavy);
-			const float bossChance = a_kit.Second(Perk::kPinningHeavy);
-			const float flight = Game::Distance(a_archer, target.get()) / 3500.0f + 0.05f;
-			Pinned(a_archer, target->GetHandle(), seconds, bossChance, a_member.name, flight);
-			if (a_kit.Rank(Perk::kPinningTwin) > 0) {
-				RE::NiPointer<RE::Actor> second;
-				float                    best = 600.0f;
-				for (const auto& enemy : EnemiesWithin(target->GetPosition(), 600.0f)) {
-					if (enemy != target && Game::Distance(target.get(), enemy.get()) < best) {
-						best = Game::Distance(target.get(), enemy.get());
-						second = enemy;
-					}
-				}
-				if (second && Specials::LooseArrow(a_archer, second.get())) {
-					Pinned(a_archer, second->GetHandle(), seconds, bossChance, a_member.name, Game::Distance(a_archer, second.get()) / 3500.0f + 0.05f);
-				}
-			}
-			const auto name = Game::Name(target.get());
-			return { true, std::format("Pinning shot at {}.", name) };
-		}
+        Result Windstep(Party::Member& member, RE::Actor* actor, const PathsLink::Kit& kit, bool asked)
+        {
+            if (!Windsteps::Call(actor, std::max(1, kit.Rank(Ability::kPinningShot)), kit.Value(Perk::kPinningHeavy), kit.Rank(Perk::kPinningTwin)>0, PathsLink::DebugCasting(member.id)))
+                return asked ? Refused(Tr("No safe space to retreat.")) : Result{};
+            Notices::Used(Trf("{} slips away on the wind.", member.name), Ability::kPinningShot, Notices::Kind::kOrder);
+            return {true, std::string(Tr("Windstep."))};
+        }
 
 		Result ArrowRain(Party::Member& a_member, RE::Actor* a_archer, const PathsLink::Kit& a_kit, bool a_asked)
 		{
+			const bool debug=PathsLink::DebugCasting(a_member.id);
 			RE::NiPointer<RE::Actor> centre;
-			if (a_asked) {
+			if (a_asked && !debug) {
 				centre = Chosen(a_member, a_archer);
 			}
-			if (!centre) {
+			if (!centre && !debug) {
 				// Where they stand thickest.
 				std::size_t most = 0;
 				for (const auto& profile : Enemies::All()) {
 					auto enemy = profile.handle.get();
-					if (!enemy || !Standing(enemy.get()) || !InSight(a_archer, enemy.get(), 3500.0f)) {
+					if (!enemy || !Standing(enemy.get()) || !InSight(a_archer, enemy.get(), AbilityPolicy::kEnemyReach)) {
 						continue;
 					}
 					const auto around = EnemiesWithin(enemy->GetPosition(), Paths::kRainRadius).size();
@@ -819,21 +1123,24 @@ namespace FWM::Arts
 					return {};
 				}
 			}
-			if (!centre) {
-				return a_asked ? Refused("Nobody to rain on.") : Result{};
+			if (!centre && !debug) {
+				return a_asked ? Refused(Tr("Nobody to rain on.")) : Result{};
 			}
-			const auto [bow, ammo] = BowAndArrows(a_archer);
+			const auto [bow, ammo] = debug ? Specials::DebugRanged(a_archer) : BowAndArrows(a_archer);
 			if (!bow || !ammo) {
-				return Refused("Needs a bow and arrows to copy.");
+				return Refused(Tr("Needs a bow and arrows to copy."));
 			}
-			const int count = static_cast<int>(Paths::Value(Perk::kArrowRain, std::max(a_kit.Rank(Ability::kArrowRain), 1)) + a_kit.Value(Perk::kArrowRainDownpour));
-			rains.push_back({ a_archer->GetHandle(), centre->GetHandle(), centre->GetPosition(), ammo, bow, count, Paths::kRainSeconds / static_cast<float>(count), 0.0f,
-				a_kit.Rank(Perk::kArrowRainPinning) > 0 });
-			Effects::Flash(a_archer, Effects::Look::kArrowRain);
-			const auto name = Game::Name(centre.get());
-			Notices::Push(std::format("{} calls down a rain of {} arrows on {}.", a_member.name, count, name), Notices::Kind::kOrder);
+			const int rank = std::max(a_kit.Rank(Ability::kArrowRain), 1);
+			const int count = static_cast<int>(Paths::Value(Perk::kArrowRain, rank) + a_kit.Value(Perk::kArrowRainDownpour));
+			// A flare goes up to call it, and the first arrow falls as it bursts.
+			const auto at=debug?PathsLink::DebugAim(a_archer):centre->GetPosition();
+			const auto look = Rainfall::Call(a_archer, centre.get(), at, Paths::kRainSeconds, rank >= 3);
+			rains.push_back({ a_archer->GetHandle(), centre?centre->GetHandle():RE::ActorHandle{}, at, ammo, bow, count, Paths::kRainSeconds / static_cast<float>(count), ArrowRain::kCall,
+				a_kit.Rank(Perk::kArrowRainPinning) > 0, look, a_member.name });
+			const auto name = debug?std::string(Tr("10 m ahead")):Game::Name(centre.get());
+			Notices::Used(Trf("{} calls down a rain of {} arrows on {}.", a_member.name, count, name), Paths::Ability::kArrowRain, Notices::Kind::kOrder);
 			Log::Info("[Paths] {} rains {} arrows on {}."sv, a_member.name, count, name);
-			return { true, std::format("Arrow rain: {} arrows on {}.", count, name) };
+			return { true, Trf("Arrow rain: {} arrows on {}.", count, name) };
 		}
 
 		void Fall(Rain& a_rain)
@@ -847,15 +1154,58 @@ namespace FWM::Arts
 				a_rain.centre = over->GetPosition();
 			}
 			std::uniform_real_distribution<float> unit(0.0f, 1.0f);
-			const float  angle = unit(rng) * 6.2831853f;
-			const float  radius = std::sqrt(unit(rng)) * Paths::kRainRadius;
-			RE::NiPoint3 spot = a_rain.centre + RE::NiPoint3{ std::cos(angle) * radius, std::sin(angle) * radius, 40.0f };
-			RE::NiPoint3 origin = spot + RE::NiPoint3{ (unit(rng) - 0.5f) * 160.0f, (unit(rng) - 0.5f) * 160.0f, 1100.0f };
-			const auto   dir = spot - origin;
+			const float angle = unit(rng) * 6.2831853f;
+			// Each arrow at one of those under the rain in turn, a little astray, so every one tells; at
+			// the ground somewhere inside it when nobody is there.
+			RE::NiPoint3 ground;
+			float        over = kRainAimOver;
+			if (const auto under = EnemiesWithin(a_rain.centre, Paths::kRainRadius); !under.empty()) {
+				const auto& enemy = under[a_rain.turn++ % under.size()];
+				const float astray = unit(rng) * kRainAstray;
+				ground = enemy->GetPosition() + RE::NiPoint3{ std::cos(angle) * astray, std::sin(angle) * astray, 0.0f };
+				over = kRainChest;
+			} else {
+				const float radius = std::sqrt(unit(rng)) * Paths::kRainRadius;
+				ground = a_rain.centre + RE::NiPoint3{ std::cos(angle) * radius, std::sin(angle) * radius, 0.0f };
+			}
+			const RE::NiPoint3 spot = ground + RE::NiPoint3{ 0.0f, 0.0f, over };
+			const RE::NiPoint3 origin = spot + RE::NiPoint3{ (unit(rng) - 0.5f) * 160.0f, (unit(rng) - 0.5f) * 160.0f, ArrowRain::kSky };
+			const auto         dir = spot - origin;
 			RE::Projectile::ProjectileRot rotation{ -std::atan2(dir.z, std::hypot(dir.x, dir.y)), std::atan2(dir.x, dir.y) };
 			RE::ProjectileHandle          handle;
 			RE::Projectile::LaunchArrow(&handle, archer.get(), a_rain.ammo, a_rain.bow, origin, rotation);
+			Rainfall::Loose(a_rain.look, handle, spot, ground.z);
+			Shaft shaft;
+			shaft.handle = handle;
+			shaft.at = origin;
+			shaft.velocity = dir;
+			a_rain.shafts.push_back(shaft);
 			--a_rain.left;
+		}
+
+		// An arrow down: anyone under the rain within a graze of where its point went in, but the one it
+		// struck (the game's own hit has dealt with them), takes a share of its blow.
+		void Graze(Rain& a_rain, const Shaft& a_shaft, RE::ObjectRefHandle a_struck)
+		{
+			if (a_struck) {
+				++a_rain.struck;
+			}
+			const auto   speed = a_shaft.velocity.Length();
+			const auto   tip = speed > 1.0f ? a_shaft.at + a_shaft.velocity * (ArrowRain::kTip / speed) : a_shaft.at;
+			const float  blow = (static_cast<float>(a_rain.bow ? a_rain.bow->GetAttackDamage() : 0) + (a_rain.ammo ? a_rain.ammo->GetRuntimeData().data.damage : 0.0f)) *
+				kRainGrazeShare;
+			const auto   struck = a_struck.get();
+			for (const auto& profile : Enemies::All()) {
+				auto enemy = profile.handle.get();
+				if (!enemy || !Standing(enemy.get()) || enemy.get() == struck.get()) {
+					continue;
+				}
+				const auto at = enemy->GetPosition();
+				if (std::hypot(at.x - tip.x, at.y - tip.y) <= kRainGraze && tip.z > at.z - kRainGraze && tip.z < at.z + kRainTall) {
+					PartyBalance::Damage(a_rain.archer.get().get(), enemy.get(), blow);
+					++a_rain.grazed;
+				}
+			}
 		}
 
 		// --- Mage -----------------------------------------------------------------
@@ -867,10 +1217,11 @@ namespace FWM::Arts
 				return {};
 			}
 			if (a_state.surge > 0.0f) {
-				return a_asked ? Refused("Their magicka is already surging.") : Result{};
+				return a_asked ? Refused(Tr("Their magicka is already surging.")) : Result{};
 			}
 			const float times = Paths::Value(Perk::kSurge, std::max(a_kit.Rank(Ability::kSurge), 1));
 			a_state.surge = a_state.surgeLength = Paths::kSurgeSeconds;
+            Surges::Call(a_mage,a_state.surge,a_kit.Rank(Ability::kSurge));
 			Abilities::Lift(a_member.id, RE::ActorValue::kMagickaRateMult, (times - 1.0f) * 100.0f, a_state.surge, Source(Perk::kSurge));
 			if (const float overflow = a_kit.Value(Perk::kSurgeOverflow) / 100.0f; overflow > 0.0f) {
 				a_mage->AsActorValueOwner()->RestoreActorValue(RE::ActorValue::kMagicka, Game::Maximum(a_mage, RE::ActorValue::kMagicka) * overflow);
@@ -885,10 +1236,10 @@ namespace FWM::Arts
 			if (Settings::Get().abilityEffects) {
 				Abilities::CastGesture(a_mage);
 			}
-			Abilities::Play(Forms::Get().rejuvenateSound, a_mage);
-			Notices::Push(std::format("{}'s magicka surges: {:.0f}x as fast for {:.0f} s.", a_member.name, times, a_state.surge), Notices::Kind::kHeal);
+			// Its distinct release cue is played once by Abilities::Used.
+			Notices::Used(Trf("{}'s magicka surges: {:.0f}x as fast for {:.0f} s.", a_member.name, times, a_state.surge), Paths::Ability::kSurge, Notices::Kind::kHeal);
 			Log::Info("[Paths] {} surges ({:.0f}x magicka, at {:.0f}%)."sv, a_member.name, times, magicka * 100.0f);
-			return { true, std::format("Arcane surge: magicka {:.0f}x as fast.", times) };
+			return { true, Trf("Arcane surge: magicka {:.0f}x as fast.", times) };
 		}
 
 		// Fire, frost or shock: the element of the spells they hold, or of most of those they
@@ -920,7 +1271,9 @@ namespace FWM::Arts
                     }
                 }
 			};
-			for (const auto id : Party::HandsOf(a_member.id)) {
+			for(bool left:{false,true}) {auto* held=a_mage->GetEquippedObject(left);note(held?held->As<RE::SpellItem>():nullptr,100);}
+            const auto pools=Loadouts::Effective(a_member.id);
+            for(std::size_t hand=0;hand<2;hand++)for (const auto id : pools[hand]) {
 				note(id ? RE::TESForm::LookupByID<RE::SpellItem>(id) : nullptr, 10);
 			}
 			for (auto* spell : Game::SpellsOf(a_mage)) {
@@ -930,44 +1283,67 @@ namespace FWM::Arts
 			return *best > 0 ? static_cast<std::size_t>(best - count.begin()) : 0;
 		}
 
-		bool Hurl(RE::Actor* a_mage, RE::SpellItem* a_spell, RE::Actor* a_target)
+		// The spell's own sound as it leaves the hand.
+		RE::BGSSoundDescriptorForm* ReleaseOf(const RE::SpellItem* a_spell)
 		{
-			auto* caster = a_mage->GetMagicCaster(RE::MagicSystem::CastingSource::kInstant);
-			if (!caster || !a_spell || !a_target) {
-				return false;
+			if (!a_spell) {
+				return nullptr;
 			}
-			caster->CastSpellImmediate(a_spell, false, a_target, 1.0f, false, 0.0f, a_mage);
-			return true;
+			for (const auto* effect : a_spell->effects) {
+				if (!effect || !effect->baseEffect) {
+					continue;
+				}
+				for (const auto& pair : effect->baseEffect->effectSounds) {
+					if (pair.id == RE::MagicSystem::SoundID::kRelease && pair.sound) {
+						return pair.sound;
+					}
+				}
+			}
+			return nullptr;
 		}
 
+		// A spark of their element flies to the target's feet and bursts there (Blasts), striking every
+		// enemy round it; the tier sets its force and reach.
 		Result Burst(Party::Member& a_member, RE::Actor* a_mage, const PathsLink::Kit& a_kit, bool a_asked)
 		{
-			auto target = a_asked ? Chosen(a_member, a_mage) : Opponent(a_mage);
-			if (!target || !InSight(a_mage, target.get(), 3000.0f)) {
-				return a_asked ? Refused("Nobody in sight to strike.") : Result{};
+			const bool debug=PathsLink::DebugCasting(a_member.id);
+			const auto aim=PathsLink::DebugAim(a_mage);
+			auto target = debug ? RE::NiPointer<RE::Actor>{} : a_asked ? Chosen(a_member, a_mage) : Opponent(a_mage);
+			if (!debug && (!target || !InSight(a_mage, target.get(), a_asked ? 3000.0f : AbilityPolicy::kEnemyReach))) {
+				return a_asked ? Refused(Tr("Nobody in sight to strike.")) : Result{};
 			}
-			const auto element = ElementOf(a_member, a_mage);
-			const auto tier = static_cast<std::size_t>(std::clamp(static_cast<int>(Paths::Value(Perk::kBurst, std::max(a_kit.Rank(Ability::kBurst), 1))), 1, 3) - 1);
-			auto*      spell = Forms::Get().bursts[element][tier];
-			if (!spell || !Hurl(a_mage, spell, target.get())) {
-				return Refused("Could not cast it.");
+			const auto     element = ElementOf(a_member, a_mage);
+			const auto     tier = static_cast<std::size_t>(std::clamp(static_cast<int>(Paths::Value(Perk::kBurst, std::max(a_kit.Rank(Ability::kBurst), 1))), 1, 3) - 1);
+			auto*          spell = Forms::Get().bursts[element][tier];
+			Blasts::Strike strike;
+			strike.element = static_cast<Blast::Element>(element);
+			strike.damage = Paths::kBurstDamage[tier];
+			strike.radius = Blast::kRadius[tier];
+			strike.grand = tier == Blast::kGrandTier;
+			strike.stagger = 0.3f + 0.15f * static_cast<float>(tier);
+			strike.searing = a_kit.Value(Perk::kBurstSearing);
+			strike.searingSeconds = Paths::kSearingSeconds;
+			strike.source = Source(Perk::kBurstSearing);
+			strike.release = ReleaseOf(spell);
+			if (!Blasts::Cast(a_mage, a_member.name, target.get(), strike, debug?&aim:nullptr)) {
+				return Refused(Tr("Could not cast it."));
 			}
 			if (Settings::Get().abilityEffects) {
 				Abilities::CastGesture(a_mage);
 			}
-			Abilities::HandGlow(a_mage, spell, 1.0f, kRightHand);
-			const float searing = a_kit.Value(Perk::kBurstSearing);
-			if (searing > 0.0f) {
-				Strip(target.get(), searing, Paths::kSearingSeconds, Perk::kBurstSearing);
+			if (spell) {
+				Abilities::HandGlow(a_mage, spell, 1.0f, kRightHand);
 			}
-			if (a_kit.Rank(Perk::kBurstTwin) > 0) {
+			if (!debug && a_kit.Rank(Perk::kBurstTwin) > 0) {
+				auto echo = strike;
+				echo.damage *= Paths::kBurstEchoShare;
 				const auto first = target->GetHandle();
-				Later(a_mage, 0.45f, [=](RE::Actor* a_from) {
+				Later(a_mage, 0.45f, [=, name = a_member.name](RE::Actor* a_from) {
 					auto                     was = first.get();
 					RE::NiPointer<RE::Actor> next;
 					if (was) {
 						for (const auto& enemy : EnemiesWithin(was->GetPosition(), 800.0f)) {
-							if (enemy != was) {
+							if (enemy != was && InSight(a_from, enemy.get(), AbilityPolicy::kEnemyReach)) {
 								next = enemy;
 								break;
 							}
@@ -976,22 +1352,40 @@ namespace FWM::Arts
 					if (!next) {
 						next = was;
 					}
-					if (next && !next->IsDead() && Hurl(a_from, spell, next.get()) && searing > 0.0f) {
-						Strip(next.get(), searing, Paths::kSearingSeconds, Perk::kBurstSearing);
+					if (next && InSight(a_from, next.get(), AbilityPolicy::kEnemyReach)) {
+						Blasts::Cast(a_from, name, next.get(), echo);
 					}
 				});
 			}
-			const auto name = Game::Name(target.get());
-			Log::Info("[Paths] {} hurls {} at {}."sv, a_member.name, spell->GetName(), name);
-			return { true, std::format("{} at {}.", spell->GetName(), name) };
+			const auto name = debug?std::string(Tr("10 m ahead")):Game::Name(target.get());
+			const std::string kind(element == 0 ? Tr("fire") : (element == 1 ? Tr("frost") : Tr("lightning")));
+			Log::Info("[Paths] {} sends a {} burst at {} ({:.0f} at its middle, reach {:.0f}{})."sv, a_member.name, kind, name, strike.damage, strike.radius,
+				strike.searing > 0.0f ? std::format(", searing {:.0f}", strike.searing) : "");
+			Notices::Used(Trf("{} unleashes a burst of {} at {}.", a_member.name, kind, name), Ability::kBurst, Notices::Kind::kOrder);
+			return { true, Trf("A burst of {} at {}.", kind, name) };
 		}
+
+		Result DragonBreathCast(Party::Member& member, RE::Actor* actor, const PathsLink::Kit& kit, bool asked)
+        {
+            const int rank=kit.Rank(Ability::kDragonBreath);
+            const bool debug=PathsLink::DebugCasting(member.id);
+            const auto aim=PathsLink::DebugAim(actor);
+            auto target=debug?RE::NiPointer<RE::Actor>{}:asked?Chosen(member,actor):Opponent(actor);
+            const float reach=DragonBreath::TargetReach(rank,kit.Rank(Perk::kBreathReach));
+            if(!debug&&(!target||!InSight(actor,target.get(),reach))) return asked?Refused(Tr("No enemy within breath range.")):Result{};
+            const auto element=static_cast<int>(ElementOf(member,actor));
+            if(!DragonBreaths::Cast(actor,target.get(),rank,element,kit.Rank(Perk::kBreathReach),kit.Rank(Perk::kBreathLingering),debug?&aim:nullptr)) return asked?Refused(Tr("Needs room in front to breathe.")):Result{};
+            Abilities::CastGesture(actor);
+            Notices::Used(Trf("{} unleashes a stream of {}.",member.name,element==0?Tr("fire"):element==1?Tr("frost"):Tr("lightning")),Ability::kDragonBreath,Notices::Kind::kOrder);
+            return {true,std::string(Tr("Dragon's Breath unleashed."))};
+        }
 
 		// Magnus, the top of the Storm: for a while their magicka never runs dry, then their
 		// destruction strikes harder, then magic turns aside from them too.
 		Result Magnus(Party::Member& a_member, RE::Actor* a_mage, const PathsLink::Kit& a_kit, State& a_state, bool a_asked)
 		{
 			if (a_state.magnus > 0.0f) {
-				return a_asked ? Refused(std::format("Magnus is already with them ({:.0f} s).", std::ceil(a_state.magnus))) : Result{};
+				return a_asked ? Refused(Trf("Magnus is already with them ({:.0f} s).", std::ceil(a_state.magnus))) : Result{};
 			}
 			bool boss = false;
 			int  enemies = 0;
@@ -1017,13 +1411,13 @@ namespace FWM::Arts
 			magnusLive = true;
 			if (Settings::Get().abilityEffects) {
 				Abilities::CastGesture(a_mage);
-				Effects::Flash(a_mage, Effects::Look::kWardAura);
 			}
-			Abilities::Play(Forms::Get().rejuvenateSound, a_mage);
-			Notices::Push(std::format("{} draws on Magnus: magicka without end for {:.0f} s.", a_member.name, a_state.magnus), Notices::Kind::kHeal);
+			// The great orb behind them, pouring magicka in; the third rank's is the grand one.
+			Orbs::Summon(a_mage, a_member.name, a_state.magnus, rank >= 3);
+			Notices::Used(Trf("{} draws on Magnus: magicka without end for {:.0f} s.", a_member.name, a_state.magnus), Paths::Ability::kMagnus, Notices::Kind::kHeal);
 			Log::Info("[Paths] {} draws on Magnus (rank {}): {:.0f} s, destruction +{:.0f}%, resist magic +{:.0f}%."sv, a_member.name, rank, a_state.magnus,
 				a_state.magnusPower * 100.0f, resist);
-			return { true, std::format("Magnus: magicka without end for {:.0f} s.", a_state.magnus) };
+			return { true, Trf("Magnus: magicka without end for {:.0f} s.", a_state.magnus) };
 		}
 
 		// While Magnus holds: the magicka they spend comes straight back.
@@ -1039,7 +1433,7 @@ namespace FWM::Arts
 		// A destruction spell from someone under Magnus lands harder: a share of its own magnitude
 		// on top. Concentration spells hit many times a second, so theirs are counted at most every
 		// half second per target, at half the share.
-		void Strengthen(RE::Actor* a_caster, float a_power, RE::Actor* a_target, RE::FormID a_source)
+		void Strengthen(RE::Actor* a_by, float a_power, RE::Actor* a_target, RE::FormID a_source)
 		{
 			auto* spell = RE::TESForm::LookupByID<RE::SpellItem>(a_source);
 			auto* effect = spell ? spell->GetCostliestEffectItem() : nullptr;
@@ -1056,8 +1450,7 @@ namespace FWM::Arts
 				last = elapsed;
 				share *= 0.5f;
 			}
-			Hurt(a_target, effect->effectItem.magnitude * share);
-			(void)a_caster;
+			Hurt(a_by, a_target, effect->effectItem.magnitude * share);
 		}
 
 		// --- Traits -----------------------------------------------------------------
@@ -1096,12 +1489,8 @@ namespace FWM::Arts
 				}
 				break;
 			case Role::kArcher:
-				keep(RE::ActorValue::kAttackDamageMult, a_kit.Value(Perk::kSharpshooter) / 100.0f, Perk::kSharpshooter);
-				{
-					const bool quarry = a_state.deadeye > 0.0f && opponent && Enemies::Find(opponent->GetFormID()) &&
-					                    (Enemies::Find(opponent->GetFormID())->caster || Enemies::Find(opponent->GetFormID())->archer);
-					keep(RE::ActorValue::kAttackDamageMult, quarry ? a_state.hawkeye : 0.0f, Perk::kDeadeyeHawkeye);
-				}
+				keep(RE::ActorValue::kStaminaRateMult, a_kit.Value(Perk::kSteadyBreath), Perk::kSteadyBreath);
+
 				break;
 			case Role::kMage:
 				{
@@ -1139,7 +1528,8 @@ namespace FWM::Arts
 				a_actor->AsActorValueOwner()->RestoreActorValue(RE::ActorValue::kHealth, Game::Maximum(a_actor, RE::ActorValue::kHealth) * share);
 				Abilities::Lift(a_member.id, RE::ActorValue::kDamageResist, Paths::kLastStandArmor, Paths::kLastStandSeconds, Source(Perk::kLastStand));
 				Effects::Flash(a_actor, Effects::Look::kRally);
-				Notices::Push(std::format("{} makes a last stand.", a_member.name), Notices::Kind::kTaunt);
+				EffectAudio::Begin(Soundscape::Kind::Ward,a_actor,a_actor->GetPosition(),1.5f);
+				Notices::Push(Trf("{} makes a last stand.", a_member.name), Notices::Kind::kTaunt, 0xF5D7, Tr("Last Stand"));
 				Log::Info("[Paths] {} makes a last stand: +{:.0f}% health, +{:.0f} armor."sv, a_member.name, share * 100.0f, Paths::kLastStandArmor);
 			}
 			if (a_kit.role == Role::kHealer && !a_state.guardianSpent && a_kit.Rank(Perk::kGuardianSpirit) > 0) {
@@ -1149,8 +1539,9 @@ namespace FWM::Arts
 					const float share = a_kit.Value(Perk::kGuardianSpirit) / 100.0f * PathBonus::Healing(a_member.id);
 					player->AsActorValueOwner()->RestoreActorValue(RE::ActorValue::kHealth, Game::Maximum(player, RE::ActorValue::kHealth) * share);
 					Effects::Flash(player, Effects::Look::kHealAura, 2.0f);
+					EffectAudio::Begin(Soundscape::Kind::SecondWind,a_actor,player->GetPosition(),1.5f);
 					Effects::Flash(a_actor, Effects::Look::kHealAura);
-					Notices::Push(std::format("{}'s guardian spirit pulls you back: +{:.0f}% health.", a_member.name, share * 100.0f), Notices::Kind::kHeal);
+					Notices::Push(Trf("{}'s guardian spirit pulls you back: +{:.0f}% health.", a_member.name, share * 100.0f), Notices::Kind::kHeal, 0xF6E2, Tr("Guardian Spirit"));
 					Log::Info("[Paths] {}'s Guardian Spirit heals you for {:.0f}%."sv, a_member.name, share * 100.0f);
 				}
 			}
@@ -1161,8 +1552,8 @@ namespace FWM::Arts
 		Result Run(Party::Member& a_member, RE::Actor* a_actor, const PathsLink::Kit& a_kit, State& a_state, Ability a_ability, bool a_asked)
 		{
 			switch (a_ability) {
-			case Ability::kChallenge:
-				return Challenge(a_member, a_actor, a_kit, a_asked);
+			case Ability::kChaosDown:
+				return ChaosDown(a_member, a_actor, a_kit, a_asked);
 			case Ability::kStandFast:
 				return StandFast(a_member, a_actor, a_kit, a_asked);
 			case Ability::kRenewal:
@@ -1177,16 +1568,18 @@ namespace FWM::Arts
 				return SecondWind(a_member, a_actor, a_kit, a_asked);
 			case Ability::kRiposte:
 				return Riposte(a_member, a_actor, a_kit, a_state, a_asked);
-			case Ability::kCleave:
-				return Cleave(a_member, a_actor, a_kit, a_asked);
+			case Ability::kSpectralWolf:
+				return SpectralWolf(a_member, a_actor, a_kit, a_asked);
 			case Ability::kDeadeye:
-				return Deadeye(a_member, a_actor, a_kit, a_state, a_asked);
+				return ExplosiveArrow(a_member, a_actor, a_kit, a_asked);
 			case Ability::kPinningShot:
-				return PinningShot(a_member, a_actor, a_kit, a_asked);
+				return Windstep(a_member, a_actor, a_kit, a_asked);
 			case Ability::kArrowRain:
 				return ArrowRain(a_member, a_actor, a_kit, a_asked);
 			case Ability::kSurge:
 				return Surge(a_member, a_actor, a_kit, a_state, a_asked);
+			case Ability::kDragonBreath:
+				return DragonBreathCast(a_member, a_actor, a_kit, a_asked);
 			case Ability::kBurst:
 				return Burst(a_member, a_actor, a_kit, a_asked);
 			case Ability::kMagnus:
@@ -1204,8 +1597,11 @@ namespace FWM::Arts
 			{
 				if (a_event && a_event->target && a_event->cause && a_event->flags.any(RE::TESHitEvent::Flag::kHitBlocked)) {
 					auto* attacker = a_event->cause->As<RE::Actor>();
-					if (attacker) {
-						const std::scoped_lock guard(eventLock);
+					auto* form = a_event->source ? RE::TESForm::LookupByID(a_event->source) : nullptr;
+                    auto* weapon = form ? form->As<RE::TESObjectWEAP>() : nullptr;
+                    const bool melee = !a_event->projectile && (!form || (weapon && !weapon->IsBow() && !weapon->IsCrossbow() && !weapon->IsStaff()));
+                    if (attacker && melee) {
+                        const std::scoped_lock guard(eventLock);
 						blocked.push_back({ a_event->target->GetFormID(), attacker->GetHandle() });
 					}
 				}
@@ -1301,8 +1697,17 @@ namespace FWM::Arts
 		}
 	}
 
+	void DebugActivate(Party::Member& member, RE::Actor* actor, const PathsLink::Kit& kit, Paths::Ability ability)
+	{
+		if (!PathsLink::DebugCasting(member.id)) return;
+		auto result=Run(member,actor,kit,StateOf(member.id),ability,true);
+		Party::Answer(member,result.text.empty()?std::string(Tr("Nothing to do right now.")):result.text,result.done);
+		if(result.done) Abilities::Used(member.id,actor,ability,true);
+	}
+
 	void Request(RE::FormID a_member, Paths::Ability a_ability)
 	{
+        if (!Party::CanHaveRole(a_member)) return;
 		if (a_ability != Ability::kNone && static_cast<std::size_t>(a_ability) < Paths::kAbilityCount) {
 			StateOf(a_member).clocks[static_cast<std::size_t>(a_ability)].requested = true;
 		}
@@ -1361,7 +1766,7 @@ namespace FWM::Arts
 		TakeEvents();
 		for (auto& member : Party::Members()) {
 			auto& state = StateOf(member.id);
-			if (member.summon) {
+			if (!member.CanTakeRole()) {
 				continue;
 			}
 			auto        actor = member.handle.get();
@@ -1376,10 +1781,10 @@ namespace FWM::Arts
 				const auto ability = static_cast<Ability>(a);
 				if (!kit.tree || !kit.Carries(ability)) {
 					clock.requested = false;
-					Party::Answer(member, std::format("{} is not one of the abilities they carry.", Paths::Info(ability).name));
+					Party::Answer(member, Trf("{} is not one of the abilities they carry.", Paths::Info(ability).name));
 				} else if (!fighting) {
 					clock.requested = false;
-					Party::Answer(member, "Only in a fight.");
+					Party::Answer(member, Tr("Only in a fight."));
 				}
 			}
 			if (!fighting || !kit.tree) {
@@ -1392,7 +1797,8 @@ namespace FWM::Arts
 				}
 				auto&      clock = state.clocks[static_cast<std::size_t>(ability)];
 				const bool asked = clock.requested;
-				auto       answer = [&](std::string a_text, bool a_done = false) {
+                if(!asked && Ripostes::Guarding(member.id)) continue;
+				auto       answer = [&](std::string_view a_text, bool a_done = false) {
                     if (asked) {
                         clock.requested = false;
                         Party::Answer(member, std::move(a_text), a_done);
@@ -1402,27 +1808,30 @@ namespace FWM::Arts
 					continue;
 				}
 				if (!settings.specials) {
-					answer("Abilities are switched off (Battle plan settings).");
+					answer(Tr("Abilities are switched off (Battle plan settings)."));
 					continue;
 				}
 				if (clock.ready > 0.0f) {
-					answer(std::format("Not yet: ready in {:.0f} s.", std::ceil(clock.ready)));
+					answer(Trf("Not yet: ready in {:.0f} s.", std::ceil(clock.ready)));
 					continue;
 				}
 				if (actor->AsActorState()->IsBleedingOut()) {
-					answer("Down themselves.");
+					answer(Tr("Down themselves."));
 					continue;
 				}
+				if (DragonBreaths::Channeling(actor.get())) continue;
 				if (Stunned(actor.get())) {
 					if (asked && Abilities::WaitedTooLong(member)) {
-						answer("Knocked about; could not.");
+						answer(Tr("Knocked about; could not."));
 					}
 					continue;
 				}
+				if (!asked && !AbilityAuto::Allow(member, actor.get(), ability)) continue;
+				if (const auto block=Abilities::ResourceBlock(actor.get(),ability); !block.empty()) { answer(block); continue; }
 				const auto result = Run(member, actor.get(), kit, state, ability, asked);
-				answer(result.text.empty() ? "Nothing to do right now."s : result.text, result.done);
+				answer(result.text.empty() ? std::string(Tr("Nothing to do right now.")) : result.text, result.done);
 				if (result.done) {
-					Abilities::Used(member.id, actor.get());
+					Abilities::Used(member.id, actor.get(), ability, asked);
 					clock.cooldown = kit.Cooldown(ability);
 					clock.ready = clock.cooldown;
 				}
@@ -1432,6 +1841,7 @@ namespace FWM::Arts
 
 	void Tick(float a_dt)
 	{
+        Ripostes::Tick(a_dt);
 		elapsed += a_dt;
 		magnusLive = std::any_of(states.begin(), states.end(), [](const auto& a_entry) { return a_entry.second.magnus > 0.0f; });
 		TakeEvents();
@@ -1450,6 +1860,7 @@ namespace FWM::Arts
 				land(by.get());
 			}
 		}
+		Spirits(a_dt);
 		// Pins: staggered again whenever they find their feet.
 		std::erase_if(pins, [&](Pin& a_pin) {
 			a_pin.left -= a_dt;
@@ -1470,21 +1881,38 @@ namespace FWM::Arts
 			if (a_bleed.left <= 0.0f || !enemy || enemy->IsDead()) {
 				return true;
 			}
-			Hurt(enemy.get(), a_bleed.perSecond * a_dt);
+			Hurt(a_bleed.by.get().get(), enemy.get(), a_bleed.perSecond * a_dt);
+			a_bleed.spurtIn -= a_dt;
+			if (a_bleed.spurtIn <= 0.0f) {
+				a_bleed.spurtIn = 0.8f;
+				auto at = enemy->GetPosition();
+				at.z += (Game::HeadPosition(enemy.get()).z - at.z) * 0.65f;
+				Effects::Spray(enemy.get(), at, std::uniform_real_distribution<float>(0.0f, 2.0f * RE::NI_PI)(rng), Effects::Blood::kBleed);
+			}
 			return false;
 		});
-		// Arrows falling.
+		// Arrows falling, and landing.
 		for (auto& rain : rains) {
 			rain.in -= a_dt;
 			while (rain.in <= 0.0f && rain.left > 0) {
 				Fall(rain);
 				rain.in += rain.every;
 			}
+			std::erase_if(rain.shafts, [&](Shaft& a_shaft) {
+				a_shaft.flown += a_dt;
+				RE::ObjectRefHandle struck;
+				if (!Game::Landed(a_shaft, a_shaft.flown, a_dt, &struck)) {
+					return false;
+				}
+				Graze(rain, a_shaft, struck);
+				return true;
+			});
 		}
 		std::erase_if(rains, [&](const Rain& a_rain) {
-			if (a_rain.left > 0) {
+			if (a_rain.left > 0 || !a_rain.shafts.empty()) {
 				return false;
 			}
+			Log::Info("[Paths] {}'s arrow rain is down: {} arrows struck someone, {} grazes."sv, a_rain.name, a_rain.struck, a_rain.grazed);
 			if (a_rain.pinning) {
 				auto archer = a_rain.archer.get();
 				for (const auto& enemy : EnemiesWithin(a_rain.centre, Paths::kRainRadius)) {
@@ -1495,7 +1923,7 @@ namespace FWM::Arts
 		});
 		// Timers, Renewal's pulses, and the last-ditch saves.
 		for (auto& member : Party::Members()) {
-			if (member.summon) {
+			if (!member.CanTakeRole()) {
 				continue;
 			}
 			auto it = states.find(member.id);
@@ -1504,14 +1932,15 @@ namespace FWM::Arts
 			}
 			auto& state = it->second;
 			state.berserk = std::max(state.berserk - a_dt, 0.0f);
-			state.riposte = std::max(state.riposte - a_dt, 0.0f);
-			state.deadeye = std::max(state.deadeye - a_dt, 0.0f);
+			state.riposte = Ripostes::Guarding(member.id) ? std::max(state.riposte - a_dt, 0.0f) : 0;
 			state.surge = std::max(state.surge - a_dt, 0.0f);
 			state.magnus = std::max(state.magnus - a_dt, 0.0f);
 			auto        actor = member.handle.get();
 			const auto* orders = Party::FindOrders(member.id);
-			if (!actor || !orders || !Game::Usable(actor.get()) || !actor->IsInCombat()) {
+			if (!actor || !orders || !Game::Usable(actor.get()) || (!actor->IsInCombat() && !PathsLink::Unlimited(member.id))) {
 				state.renewal = 0.0f;
+				Cloaks::End(state.cloak);
+				state.cloak = 0;
 				continue;
 			}
 			if (state.magnus > 0.0f) {
@@ -1524,76 +1953,39 @@ namespace FWM::Arts
 					state.renewalPulse += 1.0f;
 					Pulse(member, actor.get(), state);
 				}
+				if (state.renewal <= 0.0f) {
+					state.cloak = 0;  // it falls away on its own as Renewal ends
+				}
 			}
 			const auto kit = PathsLink::KitOf(member.id, orders->role);
-			if (kit.tree) {
+			if (kit.tree && actor->IsInCombat()) {
 				Brink(member, actor.get(), kit, state);
 			}
 		}
 	}
 
-	void Rest(float a_dt)
-	{
-		if (!PathsLink::Active()) {
-			return;
-		}
-		for (auto& member : Party::Members()) {
-			if (member.summon) {
-				continue;
-			}
-			auto        actor = member.handle.get();
-			const auto* orders = Party::FindOrders(member.id);
-			if (!actor || !orders || orders->role != Role::kArcher || !Game::Usable(actor.get()) || actor->IsInCombat()) {
-				continue;
-			}
-			auto& state = StateOf(member.id);
-			state.fletchIn -= a_dt;
-			if (state.fletchIn > 0.0f) {
-				continue;
-			}
-			state.fletchIn = 20.0f;
-			const auto kit = PathsLink::KitOf(member.id, orders->role);
-			const int  keep = static_cast<int>(kit.Value(Perk::kFletcher));
-			if (keep <= 0) {
-				continue;
-			}
-			auto [bow, ammo] = BowAndArrows(actor.get());
-			if (!bow) {
-				continue;
-			}
-			if (!ammo) {
-				ammo = Forms::Get().ironArrow;
-			}
-			if (!ammo) {
-				continue;
-			}
-			int have = 0;
-			for (const auto& [object, entry] : actor->GetInventory([&](RE::TESBoundObject& a_object) { return &a_object == ammo; })) {
-				have += object ? entry.first : 0;
-			}
-			if (have >= keep) {
-				continue;
-			}
-			const int make = std::min(5, keep - have);
-			actor->AddObjectToContainer(ammo, nullptr, make, nullptr);
-			Log::Info("[Paths] {} fletches {} {} ({} now, keeps {})."sv, member.name, make, ammo->GetName(), have + make, keep);
-			if (const auto now = ::GetTickCount64(); have < 5 && now - state.fletchToldAt > 120000) {
-				state.fletchToldAt = now;
-				Notices::Push(std::format("{} fletches more {}.", member.name, ammo->GetName()), Notices::Kind::kInfo);
-			}
-		}
-	}
 
 	void Clear()
 	{
+        Ripostes::Clear();
+		Berserks::End();
+        Surges::End();
+		StartTime(true);
 		strikes.clear();
+		for (auto& spirit : spirits) {
+			if (spirit.effect) {
+				spirit.effect->lifetime = 0.0f;
+			}
+		}
+		spirits.clear();
 		lastStrengthened.clear();
 		magnusLive = false;
 		pins.clear();
 		bleeds.clear();
 		rains.clear();
 		for (auto& [id, state] : states) {
-			state.berserk = state.riposte = state.deadeye = state.surge = state.renewal = state.magnus = 0.0f;
+			state.berserk = state.riposte = state.surge = state.renewal = state.magnus = 0.0f;
+			state.cloak = 0;  // Cloaks::Clear takes the cloaks themselves
 			state.lastStandSpent = false;
 			state.guardianSpent = false;
 			if (auto was = state.unravelOn.get()) {
@@ -1604,7 +1996,7 @@ namespace FWM::Arts
 				if (clock.requested) {
 					clock.requested = false;
 					if (auto* member = Party::Find(id)) {
-						Party::Answer(*member, "The fight is over.");
+						Party::Answer(*member, Tr("The fight is over."));
 					}
 				}
 			}
@@ -1613,6 +2005,7 @@ namespace FWM::Arts
 
 	void Reset()
 	{
+		ArcherAmmo::Clear();
 		Clear();
 		states.clear();
 		const std::scoped_lock guard(eventLock);
@@ -1622,6 +2015,7 @@ namespace FWM::Arts
 
 	void InstallEvents()
 	{
+		ArcherAmmo::Install();
 		if (auto* events = RE::ScriptEventSourceHolder::GetSingleton()) {
 			events->AddEventSink<RE::TESHitEvent>(&hitSink);
 			events->AddEventSink<RE::TESDeathEvent>(&deathSink);
@@ -1648,23 +2042,39 @@ namespace FWM::Arts
 			}
 			show(a_look);
 		};
+		// Collect all three timers: an immobile target can still have its attacks slowed.
+		std::map<RE::FormID, float> chaosTimes;
+		for (const auto value : { RE::ActorValue::kSpeedMult, RE::ActorValue::kWeaponSpeedMult, RE::ActorValue::kLeftWeaponSpeedMultiply }) {
+			for (const auto& [id, left] : Abilities::BoostTimes(value, Source(Perk::kChaosDown))) chaosTimes[id] = std::max(chaosTimes[id], left);
+		}
+		for (const auto& [id, left] : chaosTimes) add(RE::NiPointer<RE::Actor>(RE::TESForm::LookupByID<RE::Actor>(id)), left);
+		ChaosPulses::Keep(on);  // Keep metadata while visuals are switched off; their controller observes the setting.
+		on.clear();
+		show(Effects::Look::kChaosDown);  // Retire any legacy floating rune art.
 		if (!Settings::Get().abilityEffects) {
 			for (const auto look : { Effects::Look::kBerserk, Effects::Look::kFocus, Effects::Look::kSurge, Effects::Look::kPinned, Effects::Look::kMagnus,
-				Effects::Look::kRiposte, Effects::Look::kRenewal }) {
+				Effects::Look::kRiposte, Effects::Look::kRenewal, Effects::Look::kBleeding, Effects::Look::kChaosDown }) {
 				show(look);
 			}
 			return;
 		}
 		each(&State::berserk, Effects::Look::kBerserk);
-		each(&State::deadeye, Effects::Look::kFocus);
 		each(&State::surge, Effects::Look::kSurge);
 		each(&State::magnus, Effects::Look::kMagnus);
 		each(&State::riposte, Effects::Look::kRiposte);
-		each(&State::renewal, Effects::Look::kRenewal);
+		// Renewal's trance only on a healer whose cloak of water could not show.
+		for (const auto& [id, state] : states) {
+			add(RE::NiPointer<RE::Actor>(RE::TESForm::LookupByID<RE::Actor>(id)), state.cloak ? 0.0f : state.renewal);
+		}
+		show(Effects::Look::kRenewal);
 		for (const auto& pin : pins) {
 			add(pin.enemy.get(), pin.left);
 		}
 		show(Effects::Look::kPinned);
+		for (const auto& bleed : bleeds) {
+			add(bleed.enemy.get(), bleed.left);
+		}
+		show(Effects::Look::kBleeding);
 	}
 
 	StyleTweaks TweaksFor(RE::FormID a_member, const PathsLink::Kit& a_kit)
@@ -1698,19 +2108,12 @@ namespace FWM::Arts
 				tweaks.circle = 1.0f + 0.25f * static_cast<float>(rank);
 			}
 			if (state && state->riposte > 0.0f) {
-				tweaks.defensive += 0.35f;
+				tweaks.defensive += 0.85f;
+                tweaks.offensive -= 0.85f;
 			}
 			break;
 		case Role::kArcher:
-			if (const int rank = a_kit.Rank(Perk::kSkirmisher); rank > 0) {
-				tweaks.fallback = Paths::Value(Perk::kSkirmisher, rank);
-				tweaks.strafe = Paths::Value(Perk::kSkirmisher, rank);
-			}
-			if (state && state->deadeye > 0.0f) {
-				tweaks.fallback *= 0.2f;
-				tweaks.strafe *= 0.3f;
-				tweaks.avoidThreat = 0.3f;
-			}
+
 			break;
 		case Role::kMage:
 			if (state && state->surge > 0.0f) {
@@ -1733,30 +2136,33 @@ namespace FWM::Arts
 		if (it != states.end()) {
 			const auto& s = it->second;
 			if (s.berserk > 0.0f) {
-				a_out.push_back({ "Berserk", "More damage and a power attack at every chance", Paths::Info(Ability::kBerserk).glyph, Tint::kBuff, s.berserk, s.berserkLength });
+				a_out.push_back({ std::string(Tr("Berserk")), std::string(Tr("More damage and a power attack at every chance")), Paths::Info(Ability::kBerserk).glyph, Tint::kBuff, s.berserk, s.berserkLength });
 			}
 			if (s.riposte > 0.0f) {
-				a_out.push_back({ "Riposte", "Every blocked blow staggers whoever struck it", Paths::Info(Ability::kRiposte).glyph, Tint::kArmor, s.riposte, s.riposteLength });
+				a_out.push_back({ std::string(Tr("Riposte")), std::string(Tr("Guarding the next melee blow: counter, knockback and floor impact")), Paths::Info(Ability::kRiposte).glyph, Tint::kArmor, s.riposte, s.riposteLength });
 			}
-			if (s.deadeye > 0.0f) {
-				a_out.push_back({ "Deadeye", "Steady aim: more damage, holding their ground", Paths::Info(Ability::kDeadeye).glyph, Tint::kBuff, s.deadeye, s.deadeyeLength });
-			}
+
 			if (s.surge > 0.0f) {
-				a_out.push_back({ "Arcane Surge", "Magicka flowing back many times as fast", Paths::Info(Ability::kSurge).glyph, Tint::kMagicka, s.surge, s.surgeLength });
+				a_out.push_back({ std::string(Tr("Arcane Surge")), std::string(Tr("Magicka flowing back many times as fast")), Paths::Info(Ability::kSurge).glyph, Tint::kMagicka, s.surge, s.surgeLength });
 			}
 			if (s.magnus > 0.0f) {
-				a_out.push_back({ "Magnus", "Magicka without end", Paths::Info(Ability::kMagnus).glyph, Tint::kMagicka, s.magnus, s.magnusLength });
+				a_out.push_back({ std::string(Tr("Magnus")), std::string(Tr("Magicka without end")), Paths::Info(Ability::kMagnus).glyph, Tint::kMagicka, s.magnus, s.magnusLength });
 			}
 			if (s.renewal > 0.0f) {
-				a_out.push_back({ "Renewal", "Healing everyone near a little every second", Paths::Info(Ability::kRenewal).glyph, Tint::kBuff, s.renewal, s.renewalLength });
+				a_out.push_back({ std::string(Tr("Renewal")), std::string(Tr("Healing everyone near a little every second")), Paths::Info(Ability::kRenewal).glyph, Tint::kBuff, s.renewal, s.renewalLength });
 			}
 		}
-		if (const auto stand = Abilities::BoostOn(a_member, RE::ActorValue::kDamageResist, Source(Perk::kStandFast))) {
-			a_out.push_back({ "Stand Fast", std::format("+{:.0f} armor from a battle cry", stand->amount), Paths::Info(Ability::kStandFast).glyph, Tint::kArmor, stand->left,
-				stand->length });
+		if (const auto will = TankActs::WillOn(a_member); will.left > 0.0f) {
+			a_out.push_back({ std::string(Tr("Weak Will")), Trf("Own and attackers' damage reduced by {:.0f}%", will.percent), Paths::kGlyphSteelHelm, Tint::kArmor, will.left, will.length });
 		}
+		if (const auto bastion = TankActs::BastionOn(a_member); bastion.left > 0.0f) {
+			a_out.push_back({ std::string(Tr("Last Bastion")), Trf("Absorbing {:.0f}% of nearby party damage", bastion.percent), Paths::kGlyphBastion, Tint::kArmor, bastion.left, bastion.length });
+		}
+        if (const auto wind = Abilities::BoostOn(a_member, RE::ActorValue::kSpeedMult, Source(Perk::kPinningShot))) {
+            a_out.push_back({std::string(Tr("Windstep")), Trf("Moving {:.0f}% faster", wind->amount), Paths::Info(Ability::kPinningShot).glyph, Tint::kBuff, wind->left, wind->length});
+        }
 		if (const auto last = Abilities::BoostOn(a_member, RE::ActorValue::kDamageResist, Source(Perk::kLastStand))) {
-			a_out.push_back({ "Last Stand", std::format("+{:.0f} armor", last->amount), 0xF5D7, Tint::kArmor, last->left, last->length });
+			a_out.push_back({ std::string(Tr("Last Stand")), Trf("+{:.0f} armor", last->amount), 0xF5D7, Tint::kArmor, last->left, last->length });
 		}
 	}
 }

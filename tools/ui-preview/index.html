@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fight With Me · UI layout preview</title>
+<style>
+@font-face{font-family:ThemeSilver;src:url('/theme-silver.ttf')}@font-face{font-family:ThemeGothic;src:url('/theme-gothic.ttf')}@font-face{font-family:ThemeStone;src:url('/theme-stone.ttf')}
+@font-face{font-family:MasterSilver;src:url('/master-silver.ttf')}@font-face{font-family:MasterGothic;src:url('/master-gothic.ttf')}@font-face{font-family:MasterStone;src:url('/master-stone.ttf')}
+@font-face{font-family:Skyrim;src:url('/menu.ttf')}@font-face{font-family:Icons;src:url('/icons.ttf')}
+*{box-sizing:border-box}body{margin:0;background:#0b0e11;color:#ecece8;font:15px system-ui,sans-serif}
+header{height:74px;display:flex;align-items:center;gap:14px;padding:0 20px;border-bottom:1px solid #ffffff20;background:#11161b}
+h1{font-size:17px;font-weight:600;margin:0 0 5px}header p{font-size:12px;color:#b5b9b9;margin:0}
+nav{display:flex;gap:7px;margin-left:auto}button,select{border:1px solid #ffffff30;background:#1b232b;color:#ecece8;padding:9px 10px;border-radius:3px;cursor:pointer;font:13px system-ui}
+button.active{border-color:#d0dce4;background:#35414c}button:hover,select:hover{background:#283440}label{color:#b5b9b9;font-size:12px;display:flex;align-items:center;gap:8px}
+main{padding:18px 24px;width:min(100%,calc((100vh - 150px)*1.8795 + 48px));max-width:2000px;margin:auto}#stage{width:100%;display:block;aspect-ratio:1872/996;border:1px solid #d0dce435;background:#090b0d}
+svg text{font-family:Skyrim,serif;dominant-baseline:middle}svg .icon{font-family:Icons}svg g[data-node],svg g[data-role],svg #picker{cursor:pointer}svg g[data-node]:hover .node-rim{stroke:#fff;stroke-width:2}
+.footnote{margin:10px 0 0;color:#8b959c;font-size:12px}.glow{animation:glow 3.14s ease-in-out infinite}@keyframes glow{50%{opacity:.58}}
+.star{animation:starlight 7s ease-in-out infinite;pointer-events:none}.selection-glow{animation:selection-settle .38s ease-out,selection-breathe 3.7s ease-in-out .38s infinite;pointer-events:none}.role-list{animation:unfold .24s ease-out;transform-origin:30px 103px}.perk .node-rim{transition:stroke .2s,stroke-width .2s,filter .25s}.perk:hover .node-rim,.perk:focus-visible .node-rim{filter:drop-shadow(0 0 8px #abcce455)}.perk:focus{outline:none}
+@keyframes starlight{0%,100%{opacity:.35}50%{opacity:1}}@keyframes selection-settle{from{opacity:0}to{opacity:1}}@keyframes selection-breathe{50%{opacity:.85}}@keyframes unfold{from{opacity:0;clip-path:inset(0 0 100% 0)}to{opacity:1;clip-path:inset(0)}}
+.tree-backdrop{animation:art-reveal .65s ease-out}@keyframes art-reveal{from{filter:opacity(0)}to{filter:opacity(1)}}
+@media(prefers-reduced-motion:reduce){.tree-backdrop{animation:none}}
+@media(prefers-reduced-motion:reduce){.star,.selection-glow,.glow,.role-list{animation:none}}
+@media(max-width:800px){header{height:auto;min-height:92px;flex-wrap:wrap;padding:14px;gap:10px}nav{margin:0}main{padding:10px;width:100%}label{display:flex;font-size:11px;gap:5px}}
+
+/* The tree is the screen. Preview settings can be opened over it. */
+main{padding:0!important;width:100vw;max-width:none;height:100vh;margin:0}
+#stage{width:100%;height:100%;aspect-ratio:auto;border:0}.footnote{display:none}
+header{position:fixed;z-index:20;top:46px;left:12px;right:12px;height:auto;min-height:74px;flex-wrap:wrap;padding:14px;display:none;box-shadow:0 8px 40px #000a}
+body.preview-controls header{display:flex}header nav{flex-wrap:wrap}
+#preview-settings{position:fixed;z-index:21;bottom:8px;left:12px;opacity:.55;padding:5px 9px;font-size:11px}#preview-settings:hover{opacity:1}
+#tree-blackout{position:fixed;inset:0;z-index:100;background:#000;pointer-events:none}.tree-label{opacity:0}#battle-tree:hover .tree-label,#battle-tree:focus .tree-label{opacity:1}#battle-tree:hover,#battle-tree:focus{filter:drop-shadow(0 0 10px #ffffff80);outline:0}
+</style>
+<button id="preview-settings" aria-expanded="false" onclick="const open=document.body.classList.toggle('preview-controls');this.setAttribute('aria-expanded',open)">Preview settings</button><header><div><h1>Fight With Me</h1><p>UI layout preview · Sample progression, not an in-game screenshot</p></div><nav><button id="replay-entrance">Replay tree entrance</button><button id="loadouts">Loadout pools</button><button id="battle">Battle menu</button><button id="overview" class="active">Full tree</button><button id="details">Ability details</button><button id="callouts">Battle callouts</button></nav><label>Theme <select id="theme"><option value="vanilla">Vanilla</option><option value="oxblood">Oxblood</option><option value="nordic">Nordic</option></select></label><label>Level <select id="level"><option>24</option><option>25</option><option>34</option><option selected>35</option><option>49</option><option>50</option></select></label><label>Ranks <select id="ranks"><option value="mixed">Mixed progression</option><option value="0">Unlearned</option><option value="2">Rank II</option><option value="3">Rank III</option></select></label><label>Points <select id="points"><option value="4">4 available</option><option value="0">0 available</option><option value="locked">4, no eligible purchase</option></select></label></header>
+<main><svg id="stage" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1872 996" aria-label="Perk tree layout preview"></svg><p class="footnote">Same layout measurements, menu font, icons and palettes as the updated interface. Compare rank II and III, or select a perk and rank it up. Themes change silhouettes throughout the interface.</p></main>
+<script src="/preview.js"></script><script src="/atmosphere.js"></script>
+</html>

@@ -1,4 +1,16 @@
 #include "FWM/Paths.h"
+#include "FWM/WindstepFx.h"
+#include "FWM/ArrowArtsFx.h"
+#include "FWM/RiposteFx.h"
+#include "FWM/DragonBreath.h"
+#include "FWM/RejuvenatePolicy.h"
+#include "FWM/MoonFx.h"
+
+#include "FWM/Blast.h"
+#include "FWM/ChaosDown.h"
+#include "FWM/HealCircle.h"
+
+#include "FWM/Text.h"
 
 #include <algorithm>
 #include <format>
@@ -27,29 +39,29 @@ namespace FWM::Paths
 			return a_record.ranks[static_cast<std::size_t>(a_role)][a_index];
 		}
 
-		// Points a node's ranks above its starting one cost: the first its cost, every one after its step.
+		// Total investment, including each ability rank at its own price.
 		int Bought(const Node& a_node, int a_rank)
 		{
 			int sum = 0;
 			for (int r = a_node.base + 1; r <= a_rank; ++r) {
-				sum += r == 1 ? a_node.cost : a_node.step;
+				sum += RankCost(a_node, r);
 			}
 			return sum;
 		}
 
-		// Every node on the path but the capstone at its highest rank.
-		bool OthersMastered(const Record& a_record, Role a_role)
+		// Every nonempty node other than Magnus needs its first purchased rank.
+		bool OthersUnlocked(const Record& a_record, Role a_role)
 		{
 			const auto& path = PathOf(a_role);
 			for (std::size_t i = 0; i < kNodes; ++i) {
-				if (!path[i].Empty() && !path[i].capstone && RankAt(a_record, a_role, i) < path[i].most) {
+				if (!path[i].Empty() && !path[i].capstone && RankAt(a_record, a_role, i) < 1) {
 					return false;
 				}
 			}
 			return true;
 		}
 
-		// A capstone with a rank needs every other node on its path mastered.
+		// Higher ranks can be refunded, but Magnus requires each other node to stay unlocked.
 		bool CapstoneHolds(const Record& a_record, Role a_role)
 		{
 			const auto& path = PathOf(a_role);
@@ -57,16 +69,16 @@ namespace FWM::Paths
 			for (std::size_t i = 0; i < kNodes; ++i) {
 				capped = capped || (path[i].capstone && RankAt(a_record, a_role, i) > 0);
 			}
-			return !capped || OthersMastered(a_record, a_role);
+			return !capped || OthersUnlocked(a_record, a_role);
 		}
 
-		// Every tier with points in it still has enough spent below it.
+		// Refunds elsewhere never close an ability's level gate.
 		bool TiersHold(const Record& a_record, Role a_role)
 		{
 			const auto& path = PathOf(a_role);
 			for (std::size_t i = 0; i < kNodes; ++i) {
 				const int bought = RankAt(a_record, a_role, i) - path[i].base;
-				if (bought > 0 && SpentBelow(a_record, a_role, path[i].tier) < kTierPoints[path[i].tier]) {
+				if (bought > 0 && path[i].kind != Kind::kTrait && a_record.peak < RequiredLevel(path[i], RankAt(a_record, a_role, i))) {
 					return false;
 				}
 			}
@@ -121,45 +133,50 @@ namespace FWM::Paths
 		Ranks Primary(Perk a_perk)
 		{
 			switch (a_perk) {
+			case Perk::kDragonBreath: return {8,11,14};
+			case Perk::kBreathReach: return {10,20,30};
+			case Perk::kBreathLingering: return {.5f,1,1.5f};
 			case Perk::kTaunt:
 				return { 10, 15, 30 };
 			case Perk::kTauntBrace:
-			case Perk::kBodyguardInterpose:
 			case Perk::kBerserkThickSkull:
 				return { 40, 80, 120 };
 			case Perk::kTauntIntimidate:
-			case Perk::kChallengeDuel:
-			case Perk::kStandFastUnbroken:
-			case Perk::kHealSunsBane:
 			case Perk::kWarCryUnnerve:
 			case Perk::kBerserkBloodlust:
-			case Perk::kSunderShatter:
 			case Perk::kMomentum:
 			case Perk::kVolleyRallyFire:
-			case Perk::kSharpshooter:
 			case Perk::kUnravel:
 				return { 10, 20, 30 };
+			case Perk::kSunderShatter:
+				return { 5, 10, 15 };
 			case Perk::kBodyguard:
-				return { 10, 15, 20 };
+				return { 20, 30, 40 };
+			case Perk::kBodyguardInterpose:
+				return { 2, 4, 6 };
+			case Perk::kStandFastUnbroken:
+				return { 100, 200, 300 };
 			case Perk::kBodyguardRush:
 			case Perk::kRenewalLifeline:
 			case Perk::kEarthshakerAftershock:
 			case Perk::kDisarmSweep:
 			case Perk::kRiposteDisarming:
-			case Perk::kCleaveWhirlwind:
+			case Perk::kWolfMaul:
 			case Perk::kPinningTwin:
 			case Perk::kArrowRainPinning:
 			case Perk::kWardMantle:
 			case Perk::kBurstTwin:
 				return { 1, 1, 1 };
-			case Perk::kChallenge:
-				return { 8, 12, 16 };
-			case Perk::kChallengeHumble:
-				return { 15, 25, 35 };
+			case Perk::kChaosDown:
+				return { 25, 40, 55 };
+			case Perk::kChaosDownWide:
+				return { 50, 100, 150 };
+			case Perk::kChaosDownLingering:
+				return { 2, 4, 6 };
 			case Perk::kStandFast:
-				return { 30, 60, 90 };
+				return { 60, 70, 80 };
 			case Perk::kStandFastBreath:
-				return { 20, 35, 50 };
+				return { 2, 4, 6 };
 			case Perk::kIronHide:
 			case Perk::kSerenity:
 			case Perk::kEndurance:
@@ -170,29 +187,36 @@ namespace FWM::Paths
 			case Perk::kLastStand:
 				return { 15, 25, 35 };
 			case Perk::kHeal:
-				return { 20, 30, 40 };
-			case Perk::kHealSwift:
+				return { 2.5f, 3.5f, 5.0f };  // of each one's health a second, in the circle
+			case Perk::kHealInvigorate:
+				return { 3, 5, 8 };  // of their stamina a second
+			case Perk::kHealWide:
+				return { 60, 120, 180 };  // more radius
 			case Perk::kSecondWindUnyielding:
 				return { 10, 20, 30 };
 			case Perk::kRejuvenate:
-				return { 30, 60, 120 };
+				return { 8, 10, 12 };
 			case Perk::kRejuvenateWellspring:
+				return { 5, 10, 15 };
 			case Perk::kWardSpellward:
+				return { 2, 4, 6 };
 			case Perk::kTriage:
-			case Perk::kBurstSearing:
 				return { 15, 30, 45 };
+			case Perk::kBurstSearing:
+				return { 10, 15, 20 };
 			case Perk::kRejuvenateVigor:
+				return { .5f, 1.0f, 1.5f };
 			case Perk::kSurgeConduit:
 				return { 50, 100, 150 };
 			case Perk::kWard:
-				return { 0, 2, 3 };  // Oakflesh, Ironflesh, Ebonyflesh
+				return { 20, 25, 30 };
 			case Perk::kWardShared:
-				return { 1, 2, 99 };
+				return { 140, 280, 420 };
 			case Perk::kRenewal:
 				return { 2, 3, 4 };
 			case Perk::kRenewalRoots:
-			case Perk::kDeadeyePatience:
 				return { 4, 8, 12 };
+            case Perk::kDeadeyePatience: return {10,20,30};
 			case Perk::kGuardianSpirit:
 				return { 25, 40, 55 };
 			case Perk::kWarCry:
@@ -201,10 +225,10 @@ namespace FWM::Paths
 			case Perk::kExecutioner:
 				return { 15, 30, 45 };
 			case Perk::kBerserk:
-			case Perk::kDeadeye:
-				return { 20, 35, 50 };
+				return { 15, 25, 35 };
+            case Perk::kDeadeye: return {ArrowArtsFx::Damage(1),ArrowArtsFx::Damage(2),ArrowArtsFx::Damage(3)};
 			case Perk::kSunder:
-				return { 60, 120, 180 };
+				return { 40, 80, 120 };
 			case Perk::kSunderCrack:
 				return { 0.4f, 0.7f, 1.0f };
 			case Perk::kEarthshaker:
@@ -212,7 +236,6 @@ namespace FWM::Paths
 			case Perk::kEarthshakerFault:
 				return { 75, 150, 225 };
 			case Perk::kHeavyHands:
-			case Perk::kSkirmisher:
 				return { 1.5f, 2.0f, 2.5f };
 			case Perk::kDisarm:
 				return { 5, 10, 15 };
@@ -226,17 +249,17 @@ namespace FWM::Paths
 				return { 8, 10, 12 };
 			case Perk::kRiposteCounter:
 				return { 0.5f, 1.0f, 1.5f };
-			case Perk::kCleave:
-				return { 1.5f, 2.0f, 2.5f };
-			case Perk::kCleaveLacerate:
-				return { 4, 7, 10 };
+			case Perk::kSpectralWolf:
+				return { 1.5f, 2.0f, 2.5f };  // times their weapon's damage
+			case Perk::kWolfHemorrhage:
+				return { 4, 8, 12 };  // seconds more bleeding
 			case Perk::kFlanker:
 				return { 5, 10, 15 };
 			case Perk::kOpportunist:
-			case Perk::kDeadeyeHawkeye:
 				return { 20, 40, 60 };
+            case Perk::kDeadeyeHawkeye: return {.5f,1.f,1.5f};
 			case Perk::kVolley:
-				return { 3, 5, 7 };
+				return { 3, 4, 5 };
 			case Perk::kVolleyBroadhead:
 				return { 40, 80, 120 };
 			case Perk::kPinningShot:
@@ -244,11 +267,15 @@ namespace FWM::Paths
 			case Perk::kPinningHeavy:
 				return { 1, 2, 3 };
 			case Perk::kArrowRain:
-				return { 8, 12, 16 };
+				return { 6, 9, 12 };
 			case Perk::kArrowRainDownpour:
-				return { 4, 8, 12 };
-			case Perk::kFletcher:
-				return { 15, 30, 50 };
+				return { 2, 4, 6 };
+			case Perk::kFineArrows:
+				return { 1, 2, 3 };
+			case Perk::kSpellTouched:
+				return { 10, 15, 20 };
+			case Perk::kSteadyBreath:
+				return { 25, 50, 75 };
 			case Perk::kSurge:
 				return { 3, 4, 5 };
 			case Perk::kSurgeOverflow:
@@ -267,29 +294,32 @@ namespace FWM::Paths
 		Ranks Secondary(Perk a_perk)
 		{
 			switch (a_perk) {
+			case Perk::kBodyguard:
+				return { 8, 10, 12 };
 			case Perk::kWarCry:
 				return { 0.6f, 0.8f, 1.0f };  // stagger
 			case Perk::kEarthshaker:
-				return { 1.0f, 1.5f, 2.0f };  // times their weapon's damage
+				return { 0.75f, 1.0f, 1.25f };  // times their weapon's damage
 			case Perk::kVolley:
 				return { 6, 8, 10 };  // seconds everyone at range keeps on the target
 			case Perk::kSecondWind:
 				return { 25, 50, 75 };  // stamina, percent
 			case Perk::kPinningHeavy:
-				return { 25, 50, 75 };  // chance a boss is held, percent
+				return {};  // legacy Heavy Pin boss chance no longer used
 			case Perk::kSpellShield:
 				return { 5, 10, 15 };  // spell absorption, percent
 			case Perk::kRejuvenate:
 				return { 100, 100, 100 };  // percent faster
 			case Perk::kMagnus:
-				return { 0, 30, 60 };  // destruction spells strike this much harder, percent
+				return { 0, 15, 30 };  // destruction spells strike this much harder, percent
+			case Perk::kSpectralWolf:
+				return { 6, 9, 12 };  // of the bitten one's health, bled away, percent
 			default:
 				return {};
 			}
 		}
 
-		constexpr std::array<std::string_view, 4> kFlesh{ "Oakflesh", "Stoneflesh", "Ironflesh", "Ebonyflesh" };
-		constexpr std::array<std::string_view, 4> kTiers{ "Novice", "Apprentice", "Adept", "Expert" };
+		constexpr std::array<std::string_view, 4> kTiers{ Ntr("Novice"), Ntr("Apprentice"), Ntr("Adept"), Ntr("Expert") };
 
 		std::string_view Strength(float a_magnitude)
 		{
@@ -378,9 +408,9 @@ namespace FWM::Paths
 		return sum;
 	}
 
-	bool TierOpen(const Record& a_record, Role a_role, int a_tier)
+	bool TierOpen(const Record& a_record, Role, int a_tier)
 	{
-		return a_tier <= 0 || SpentBelow(a_record, a_role, a_tier) >= kTierPoints[static_cast<std::size_t>(std::min(a_tier, 2))];
+		return a_tier <= 0 || a_record.peak >= kAbilityLevels[static_cast<std::size_t>(std::min(a_tier, 2))];
 	}
 
 	int OnTree(const Record& a_record, Role a_role)
@@ -439,43 +469,52 @@ namespace FWM::Paths
 		return Rank(a_record, a_role, a_ability) > 0;
 	}
 
+    std::string Requirement(Block block, const Node& node, int nextRank)
+    {
+        if(block==Block::kParent)return Trf("Requires {} Rank {}",Tr(Info(node.ability).name),nextRank);
+        if(block==Block::kLevel || block==Block::kTier)return Trf("Requires level {}",RequiredLevel(node,nextRank));
+        return std::string(Why(block));
+    }
+
 	std::string_view Why(Block a_block)
 	{
 		switch (a_block) {
 		case Block::kMaxed:
-			return "Already at its highest rank.";
+			return Tr("Maximum rank reached");
 		case Block::kNoPoints:
-			return "No perk points left to spend.";
+			return Tr("Not enough perk points");
 		case Block::kTier:
-			return "Needs more points spent on this path first.";
+			return Tr("Follower level too low");
 		case Block::kParent:
-			return "A branch cannot be ranked above its ability.";
+			return Tr("Requires the matching ability rank");
 		case Block::kDefault:
-			return "Every companion keeps the first rank of this ability.";
+			return Tr("Rank 1 cannot be removed");
 		case Block::kHolds:
-			return "Other ranks on this path depend on it.";
+			return Tr("Refund dependent perks first");
 		case Block::kNotLearned:
-			return "Not learned yet.";
+			return Tr("Ability not unlocked");
 		case Block::kNothing:
-			return "No rank bought here.";
+			return Tr("No ranks to refund");
 		case Block::kBadNode:
-			return "Not on this path.";
+			return Tr("Invalid perk");
 		case Block::kNoRespec:
-			return "Giving points back is switched off (FightWithMePaths.ini).";
+			return "Perk refunds disabled";
 		case Block::kCapstone:
-			return "Every other node on this path must be mastered first, every rank of it.";
+			return Tr("Requires all other perks unlocked");
 		case Block::kNoUnlimited:
-			return "Unlimited points are switched off (FightWithMePaths.ini).";
+			return "Debug Mode disabled";
 		case Block::kNotMastered:
-			return "Points go into the path bonus once every node on this path is mastered.";
+			return Tr("Requires all perks at maximum rank");
+		case Block::kLevel:
+			return Tr("Follower level too low");
 		case Block::kBonusFull:
-			return "The path bonus is at its highest.";
+			return Tr("Maximum path bonus reached");
 		default:
 			return "";
 		}
 	}
 
-	Block CanLearn(const Record& a_record, Role a_role, std::size_t a_index, int a_earned)
+	Block CanLearn(const Record& a_record, Role a_role, std::size_t a_index, int a_earned, bool a_debug)
 	{
 		const auto* node = NodeAt(a_role, a_index);
 		if (!node) {
@@ -485,17 +524,17 @@ namespace FWM::Paths
 		if (rank >= node->most) {
 			return Block::kMaxed;
 		}
-		// A capstone asks for everything else on the path mastered, which opens every tier on the way.
-		if (node->capstone && !OthersMastered(a_record, a_role)) {
-			return Block::kCapstone;
+		if (a_debug) return Block::kNone;
+		if (a_record.peak < RequiredLevel(*node, rank + 1)) {
+			return Block::kLevel;
 		}
-		if (SpentBelow(a_record, a_role, node->tier) < kTierPoints[node->tier]) {
-			return Block::kTier;
+		if (node->capstone && !OthersUnlocked(a_record, a_role)) {
+			return Block::kCapstone;
 		}
 		if (const int parent = ParentOf(a_role, a_index); parent >= 0 && rank + 1 > RankAt(a_record, a_role, static_cast<std::size_t>(parent))) {
 			return Block::kParent;
 		}
-		if (a_earned - Spent(a_record) < (rank + 1 == 1 ? node->cost : node->step)) {
+		if (a_earned - Spent(a_record) < RankCost(*node, rank + 1)) {
 			return Block::kNoPoints;
 		}
 		return Block::kNone;
@@ -524,9 +563,9 @@ namespace FWM::Paths
 		return TiersHold(after, a_role) && CapstoneHolds(after, a_role) ? Block::kNone : Block::kHolds;
 	}
 
-	Block Learn(Record& a_record, Role a_role, std::size_t a_index, int a_earned)
+	Block Learn(Record& a_record, Role a_role, std::size_t a_index, int a_earned, bool a_debug)
 	{
-		const auto block = CanLearn(a_record, a_role, a_index, a_earned);
+		const auto block = CanLearn(a_record, a_role, a_index, a_earned, a_debug);
 		if (block == Block::kNone) {
 			++RankAt(a_record, a_role, a_index);
 			FillSlots(a_record, a_role);
@@ -630,14 +669,26 @@ namespace FWM::Paths
 		}
 	}
 
-	bool Repair(Record& a_record, int a_earned)
+	bool Repair(Record& a_record, int a_earned, bool a_debug)
 	{
 		const Record before = a_record;
+		if (a_debug) {
+			for (std::size_t r=0; r<kRoles; ++r) {
+				const auto role=static_cast<Role>(r);
+				const auto& path=PathOf(role);
+				for (std::size_t i=0; i<kNodes; ++i) a_record.ranks[r][i]=std::clamp(a_record.ranks[r][i],path[i].base,path[i].most);
+				FillSlots(a_record,role);
+			}
+			return a_record != before;
+		}
 		for (std::size_t r = 0; r < kRoles; ++r) {
 			const auto  role = static_cast<Role>(r);
 			const auto& path = PathOf(role);
 			for (std::size_t i = 0; i < kNodes; ++i) {
 				a_record.ranks[r][i] = std::clamp(a_record.ranks[r][i], path[i].base, path[i].most);
+				while (a_record.ranks[r][i] > 0 && a_record.peak < RequiredLevel(path[i], a_record.ranks[r][i])) {
+					--a_record.ranks[r][i];
+				}
 			}
 			for (std::size_t i = 0; i < kNodes; ++i) {
 				if (const int parent = ParentOf(role, i); parent >= 0) {
@@ -648,7 +699,7 @@ namespace FWM::Paths
 			while (!TiersHold(a_record, role)) {
 				bool dropped = false;
 				for (std::size_t i = kNodes; i-- > 0 && !dropped;) {
-					if (a_record.ranks[r][i] > path[i].base && path[i].tier > 0) {
+					if (a_record.ranks[r][i] > path[i].base && path[i].kind != Kind::kTrait && path[i].tier > 0) {
 						--a_record.ranks[r][i];
 						dropped = true;
 					}
@@ -714,6 +765,7 @@ namespace FWM::Paths
 				hash *= 16777619u;
 			}
 		};
+		mix(kRecordVersion);
 		mix(static_cast<std::uint32_t>(kAbilityCount));
 		mix(static_cast<std::uint32_t>(kPerkCount));
 		for (const auto& path : paths) {
@@ -723,9 +775,13 @@ namespace FWM::Paths
 				mix(static_cast<std::uint32_t>(node.cost) | static_cast<std::uint32_t>(node.step) << 8 | static_cast<std::uint32_t>(node.capstone) << 16);
 			}
 		}
-		for (const int points : kTierPoints) {
-			mix(static_cast<std::uint32_t>(points));
+		for (const int level : kTraitLevels) {
+			mix(static_cast<std::uint32_t>(level));
 		}
+		for (const int level : kAbilityLevels) {
+			mix(static_cast<std::uint32_t>(level));
+		}
+		mix(1); // Magnus requires unlocked nodes rather than fully mastered nodes.
 		return hash;
 	}
 
@@ -842,6 +898,24 @@ namespace FWM::Paths
 				}
 			}
 		}
+		if (a_version < 3) {
+			// Both active records and unlimited-point snapshots migrate, so old ranks cannot return.
+			for (auto& [id, record] : out) {
+				const auto peak = record.peak;
+				record = Fresh();
+				record.peak = peak;
+			}
+		}
+        if (a_version == 3) {
+            for (auto& [id, record] : out) {
+                for (const auto perk : { Perk::kWard, Perk::kWardShared, Perk::kWardSpellward }) {
+                    const auto index = IndexOf(Role::kHealer, perk);
+                    if (index >= 0) record.ranks[static_cast<std::size_t>(Role::kHealer)][static_cast<std::size_t>(index)] = 0;
+                }
+                // Spent() is derived from ranks, so removing Ward refunds its purchases.
+                FillSlots(record, Role::kHealer);
+            }
+        }
 		return out;
 	}
 
@@ -884,7 +958,7 @@ namespace FWM::Paths
 	int Book::Unspent(std::uint32_t a_id) const
 	{
 		const auto* record = Find(a_id);
-		return record ? std::max(Earned(a_id) - Spent(*record), 0) : 0;
+		return Unlimited(a_id) ? kUnlimited : record ? std::max(Earned(a_id) - Spent(*record), 0) : 0;
 	}
 
 	bool Book::Unlimited(std::uint32_t a_id) const
@@ -895,7 +969,7 @@ namespace FWM::Paths
 	Block Book::Learn(std::uint32_t a_id, Role a_role, std::size_t a_node)
 	{
 		const auto it = records.find(a_id);
-		return it == records.end() ? Block::kBadNode : Paths::Learn(it->second, a_role, a_node, Earned(a_id));
+		return it == records.end() ? Block::kBadNode : Paths::Learn(it->second, a_role, a_node, Earned(a_id), Unlimited(a_id));
 	}
 
 	Block Book::Forget(std::uint32_t a_id, Role a_role, std::size_t a_node)
@@ -995,7 +1069,7 @@ namespace FWM::Paths
 			if (!id) {
 				continue;
 			}
-			repaired += Repair(record, before.contains(id) ? kUnlimited : EarnedAt(record.peak)) ? 1 : 0;
+			repaired += Repair(record, before.contains(id) ? kUnlimited : EarnedAt(record.peak), before.contains(id)) ? 1 : 0;
 			records[id] = record;
 		}
 		std::erase_if(before, [&](const auto& a_entry) { return !records.contains(a_entry.first); });
@@ -1026,7 +1100,7 @@ namespace FWM::Paths
 	int CostOf(Role a_role, std::size_t a_index, int a_rank)
 	{
 		const auto* node = NodeAt(a_role, a_index);
-		return node ? (a_rank <= 1 ? node->cost : node->step) : 0;
+		return node && a_rank >= 1 && a_rank <= node->most ? RankCost(*node, a_rank) : 0;
 	}
 
 	int Mastery(Role a_role)
@@ -1046,27 +1120,30 @@ namespace FWM::Paths
 		case Ability::kTaunt:
 			return rank == 1 ? 16.0f : (rank == 2 ? 13.0f : 10.0f);
 		case Ability::kBodyguard:
+			return 40.0f;
 		case Ability::kWarCry:
 		case Ability::kRiposte:
-		case Ability::kCleave:
 			return 30.0f;
-		case Ability::kChallenge:
+		case Ability::kChaosDown:
 		case Ability::kSunder:
 		case Ability::kPinningShot:
 			return 25.0f;
 		case Ability::kStandFast:
+			return 60.0f;
 		case Ability::kWard:
+			return 90.0f;
 		case Ability::kRenewal:
 		case Ability::kBerserk:
 		case Ability::kVolley:
 			return 45.0f;
 		case Ability::kHeal:
-			return 60.0f - branch(Perk::kHealSwift);
+			return 40.0f;
 		case Ability::kRejuvenate:
-			return 2.0f * Value(Perk::kRejuvenate, rank);
+			return RejuvenatePolicy::Cooldown(Value(Perk::kRejuvenate, rank));
 		case Ability::kEarthshaker:
 		case Ability::kDeadeye:
 		case Ability::kSurge:
+		case Ability::kSpectralWolf:
 			return 40.0f;
 		case Ability::kDisarm:
 			return rank == 1 ? 40.0f : (rank == 2 ? 35.0f : 30.0f);
@@ -1074,8 +1151,10 @@ namespace FWM::Paths
 			return 60.0f - branch(Perk::kSecondWindUnyielding);
 		case Ability::kArrowRain:
 			return 50.0f;
+		case Ability::kDragonBreath:
+			return 38.0f;
 		case Ability::kBurst:
-			return 20.0f;
+			return 30.0f;
 		case Ability::kMagnus:
 			return 120.0f;
 		default:
@@ -1091,133 +1170,147 @@ namespace FWM::Paths
 		const auto  n = Number(v);
 		switch (a_perk) {
 		case Perk::kTauntBrace:
-		case Perk::kBodyguardInterpose:
-		case Perk::kStandFast:
 		case Perk::kIronHide:
 		case Perk::kBerserkThickSkull:
 		case Perk::kSecondWindResolve:
-			return std::format("+{} armor", n);
+			return Trf("+{} armor", n);
 		case Perk::kSunder:
 		case Perk::kDisarmExpose:
+        case Perk::kDeadeye: return Trf("{} damage",n);
+        case Perk::kDeadeyeHawkeye: return Trf("+{} m",n);
 		case Perk::kVolleyBroadhead:
-			return std::format("-{} armor", n);
+			return Trf("-{} armor", n);
 		case Perk::kTauntIntimidate:
-		case Perk::kChallengeHumble:
 		case Perk::kWarCryUnnerve:
-			return std::format("-{}% damage", n);
-		case Perk::kChallengeDuel:
+			return Trf("-{}% damage", n);
 		case Perk::kBerserk:
 		case Perk::kExecutioner:
 		case Perk::kFlanker:
 		case Perk::kOpportunist:
 		case Perk::kVolleyRallyFire:
-		case Perk::kDeadeye:
-		case Perk::kDeadeyeHawkeye:
-		case Perk::kSharpshooter:
+		case Perk::kDeadeyePatience:
 		case Perk::kTriage:
 			return std::format("+{}%", n);
 		case Perk::kTaunt:
-		case Perk::kBodyguard:
-		case Perk::kChallenge:
 		case Perk::kRejuvenate:
 		case Perk::kRiposte:
 		case Perk::kPinningShot:
 			return std::format("{} s", n);
+		case Perk::kBodyguardInterpose:
+		case Perk::kStandFastBreath:
 		case Perk::kRenewalRoots:
-		case Perk::kDeadeyePatience:
+		case Perk::kChaosDownLingering:
 		case Perk::kPinningHeavy:
 			return std::format("+{} s", n);
-		case Perk::kHealSwift:
 		case Perk::kSecondWindUnyielding:
 			return std::format("-{} s", n);
 		case Perk::kHeal:
+			return Trf("{}% health a second", n);
+		case Perk::kHealInvigorate:
+			return Trf("{}% stamina a second", n);
+		case Perk::kHealWide:
+		case Perk::kChaosDownWide:
+			return Trf("+{} wide", n);
+		case Perk::kChaosDown:
+			return Trf("-{}% movement and attack speed", n);
 		case Perk::kSecondWind:
 		case Perk::kGuardianSpirit:
 		case Perk::kLastStand:
 		case Perk::kBerserkBloodlust:
 		case Perk::kMomentum:
-			return std::format("{}% health", n);
-		case Perk::kHealSunsBane:
-			return std::format("-{}% undead", n);
+			return Trf("{}% health", n);
 		case Perk::kRejuvenateWellspring:
 		case Perk::kSurgeOverflow:
-			return std::format("{}% magicka", n);
-		case Perk::kStandFastBreath:
+			return Trf("{}% magicka", n);
 		case Perk::kWarCryRally:
-			return std::format("{}% stamina", n);
+			return Trf("{}% stamina", n);
 		case Perk::kRejuvenateVigor:
+			return Trf("{:.1f}% stamina/s", v);
 		case Perk::kEndurance:
-			return std::format("+{}% stamina", n);
+			return Trf("+{}% stamina", n);
 		case Perk::kSerenity:
 		case Perk::kArcaneFlow:
 		case Perk::kSurgeConduit:
-			return std::format("+{}% magicka", n);
+			return Trf("+{}% magicka", n);
 		case Perk::kWard:
-			return std::string(kFlesh[static_cast<std::size_t>(std::clamp(static_cast<int>(v), 0, 3))]);
+			return Trf("{}% protection chance", n);
 		case Perk::kWardShared:
-			return v >= 99.0f ? "everyone"s : std::format("{} more", n);
+			return Trf("+{:g} m reach", v / 70.0f);
 		case Perk::kWardSpellward:
-		case Perk::kStandFastUnbroken:
-			return std::format("+{}% resist", n);
+			return Trf("+{} s blessing", n);
 		case Perk::kRenewal:
-			return std::format("{}% a second", n);
+			return Trf("{}% a second", n);
 		case Perk::kWarCry:
 		case Perk::kEarthshaker:
-			return std::format("{} reach", n);
+			return Trf("{} reach", n);
+		case Perk::kStandFastUnbroken:
 		case Perk::kEarthshakerFault:
-			return std::format("+{} reach", n);
+			return Trf("+{} reach", n);
 		case Perk::kSunderCrack:
-			return v < 0.55f ? "light stagger"s : (v < 0.85f ? "firm stagger"s : "heavy stagger"s);
+			return v < 0.55f ? std::string(Tr("light stagger")) : (v < 0.85f ? std::string(Tr("firm stagger")) : std::string(Tr("heavy stagger")));
 		case Perk::kSunderShatter:
 		case Perk::kBurstSearing:
 		case Perk::kUnravel:
-			return std::format("-{}% resists", n);
+			return Trf("-{}% resists", n);
 		case Perk::kHeavyHands:
 		case Perk::kShieldMaster:
-		case Perk::kSkirmisher:
-			return std::format("{}x as often", n);
+			return Trf("{}x as often", n);
 		case Perk::kDisarm:
-			return std::format("+{} levels", n);
+			return Trf("+{} levels", n);
 		case Perk::kRiposteCounter:
-		case Perk::kCleave:
-			return std::format("{}x damage", n);
-		case Perk::kCleaveLacerate:
-			return std::format("{} a second", n);
+			return Trf("{}x damage", n);
+		case Perk::kSpectralWolf:
+			return Trf("{}x  Â·  {}% bleed", n, Number(s));
+		case Perk::kWolfHemorrhage:
+			return Trf("+{} s bleed", n);
 		case Perk::kVolley:
-			return std::format("{} arrows, {} s", n, Number(s));
+			return Trf("{} arrows, {} s", n, Number(s));
 		case Perk::kArrowRain:
-		case Perk::kFletcher:
-			return std::format("{} arrows", n);
+			return Trf("{} arrows", n);
+		case Perk::kFineArrows:
+			return std::string(v < 1.5f ? Tr("Steel arrows") : (v < 2.5f ? Tr("Elven arrows") : Tr("Ebony arrows")));
+		case Perk::kSpellTouched:
+			return Trf("{}% elemental chance", n);
+		case Perk::kSteadyBreath:
+			return Trf("+{}% stamina recovery", n);
 		case Perk::kArrowRainDownpour:
-			return std::format("+{} arrows", n);
+			return Trf("+{} arrows", n);
 		case Perk::kSurge:
-			return std::format("{}x magicka", n);
+			return Trf("{}x magicka", n);
+		case Perk::kDragonBreath: return Trf("{} damage/s Â· {} reach", n, Number(DragonBreath::Reach(r)));
+		case Perk::kBreathReach: return Trf("+{}% reach", n);
+		case Perk::kBreathLingering: return Trf("+{} s", n);
 		case Perk::kBurst:
-			return std::string(kTiers[static_cast<std::size_t>(std::clamp(static_cast<int>(v), 0, 3))]);
+			return Trf("{}  Â·  {} reach", Tr(kTiers[static_cast<std::size_t>(std::clamp(static_cast<int>(v), 0, 3))]),
+				Number(Blast::kRadius[static_cast<std::size_t>(std::clamp(static_cast<int>(v), 1, 3) - 1)]));
 		case Perk::kMagnus:
-			return r == 1 ? std::format("{} s", n) : (r == 2 ? std::format("{} s  ·  +{}%", n, Number(s)) : std::format("{} s  ·  +{}%  ·  ward", n, Number(s)));
+			return r == 1 ? std::format("{} s", n) : (r == 2 ? std::format("{} s  Â·  +{}%", n, Number(s)) : Trf("{} s  Â·  +{}%  Â·  ward", n, Number(s)));
 		case Perk::kSpellShield:
 			return std::format("{}% / {}%", n, Number(s));
+		case Perk::kBodyguard:
+			return Trf("-{}% damage, {} s", n, Number(s));
+		case Perk::kStandFast:
+			return Trf("{}% absorbed", n);
 		case Perk::kBodyguardRush:
-			return "staggers"s;
+			return "+4 s"s;
 		case Perk::kRenewalLifeline:
-			return "back up"s;
+			return std::string(Tr("back up"));
 		case Perk::kEarthshakerAftershock:
-			return "a second tremor"s;
+			return std::string(Tr("a second tremor"));
 		case Perk::kDisarmSweep:
-			return "knocked down"s;
+			return std::string(Tr("knocked down"));
 		case Perk::kRiposteDisarming:
 			return "disarms"s;
-		case Perk::kCleaveWhirlwind:
-			return "all around"s;
+		case Perk::kWolfMaul:
+			return Trf("+{:.1f} s frozen", kWolfMaulHold);
 		case Perk::kPinningTwin:
-			return "a second arrow"s;
+			return std::string(Tr("+10% speed"));
 		case Perk::kArrowRainPinning:
 			return "staggers"s;
 		case Perk::kWardMantle:
-			return "Flame Cloak"s;
+			return std::string(Tr("Flame Cloak"));
 		case Perk::kBurstTwin:
-			return "twice"s;
+			return Trf("second burst: {}%", Number(kBurstEchoShare * 100.0f));
 		default:
 			return n;
 		}
@@ -1232,192 +1325,198 @@ namespace FWM::Paths
 		switch (a_perk) {
 		// Tank
 		case Perk::kTaunt:
-			return std::format("Challenges every enemy in reach. Those it holds turn on them for {} s.", n);
+			return Trf("Challenges every enemy in reach. Those it holds turn on them for {} s.", n);
 		case Perk::kTauntBrace:
-			return std::format("Each taunt braces them with +{} armor for as long as it holds.", n);
+			return Trf("Each taunt braces them with +{} armor for as long as it holds.", n);
 		case Perk::kTauntIntimidate:
-			return std::format("Enemies a taunt holds deal {}% less damage.", n);
+			return Trf("Enemies a taunt holds deal {}% less damage.", n);
 		case Perk::kBodyguard:
-			return std::format("Runs to your side when you are in trouble and takes on whoever is on you, for {} s.", n);
+			return Trf("For {:.0f} s, they and enemies who strike them deal {}% less weapon and spell damage. Enemy weakness lasts {:.0f} s after striking; the strongest Weak Will applies. The spectral helmet fades into lingering wisps.", s, n, s);
 		case Perk::kBodyguardInterpose:
-			return std::format("While they guard you, you have +{} armor.", n);
+			return Trf("Weak Will remains active for {} s longer.", n);
 		case Perk::kBodyguardRush:
-			return std::format("Arriving at your side, they stagger every enemy within {:.0f} of you.", kRushReach);
-		case Perk::kChallenge:
-			return std::format("One enemy, any level, bosses too: it turns on them and stays on them for {} s.", n);
-		case Perk::kChallengeHumble:
-			return std::format("The challenged enemy deals {}% less damage while it holds.", n);
-		case Perk::kChallengeDuel:
-			return std::format("While their challenge holds, they deal {}% more damage.", n);
+			return std::string(Tr("Enemies struck by Weak Will remain weakened for 4 s longer after their last attack."));
+		case Perk::kChaosDown:
+			return Trf("Slows movement and weapon attacks of enemies within {:.0f} of the tank by {}% for {:.0f} s. Repeated casts refresh the slow instead of stacking it.", ChaosDown::kReach, n, ChaosDown::kSeconds);
+		case Perk::kChaosDownWide:
+			return Trf("Chaos Down reaches {} further around the tank.", n);
+		case Perk::kChaosDownLingering:
+			return Trf("Chaos Down slows enemies for {} s longer.", n);
 		case Perk::kStandFast:
-			return std::format("A battle cry that steels the party: everyone within {:.0f} has +{} armor for {:.0f} s.", kStandFastReach, n, kStandFastSeconds);
+			return Trf("When a living ally within {:.0f} falls below 25% health in combat, become their guardian for {:.0f} s. Absorbs {}% of nearby party damage after their defenses. Only one Last Bastion can protect the party at a time; absorbed damage can down or kill the tank.", kStandFastReach, kStandFastSeconds, n);
 		case Perk::kStandFastUnbroken:
-			return std::format("Stand Fast also gives {}% resistance to magic.", n);
+			return Trf("Last Bastion protects allies {} further away.", n);
 		case Perk::kStandFastBreath:
-			return std::format("Stand Fast also gives back {}% of everyone's stamina.", n);
+			return Trf("Last Bastion lasts {} s longer.", n);
 		case Perk::kIronHide:
-			return std::format("+{} armor while they fight.", n);
+			return Trf("+{} armor while they fight.", n);
 		case Perk::kShieldMaster:
-			return std::format("They bash {}x as often and raise the shield sooner.", n);
+			return Trf("They bash {}x as often and raise the shield sooner.", n);
 		case Perk::kLastStand:
-			return std::format("Once a fight, falling below a quarter of their health, they recover {}% of it and gain +{:.0f} armor for {:.0f} s.", n,
+			return Trf("Once a fight, falling below a quarter of their health, they recover {}% of it and gain +{:.0f} armor for {:.0f} s.", n,
 				kLastStandArmor, kLastStandSeconds);
 		// Healer
 		case Perk::kHeal:
-			return std::format("Heals you, every companion and their summons within reach by {}% of each one's health. Not a spell: no magicka.", n);
-		case Perk::kHealSwift:
-			return std::format("Heal is ready {} s sooner.", n);
-		case Perk::kHealSunsBane:
-			return std::format("Undead within reach of a heal lose {}% of their health to it (a boss half that).", n);
+			return Trf("Raises a circle of healing light on the ground where it helps most, for {:.0f} s: you, the companions and their summons in it heal {}% of their health a second, the undead in it burn for 1/1.5/2% a second by rank (a boss half), and hurt companions walk into it. Spends magicka when activated.",
+				HealCircle::kSeconds, n);
+		case Perk::kHealInvigorate:
+			return Trf("In the circle, stamina comes back {}% of its most a second too.", n);
+		case Perk::kHealWide:
+			return Trf("The circle reaches {} further.", n);
 		case Perk::kRejuvenate:
-			return std::format("Your magicka and every companion's comes back twice as fast for {} s.", n);
+			return Trf("Restores {:g}% of maximum magicka each second (up to {:.0f}) while inside the circle for {} s. Overlapping circles do not stack.", RejuvenatePolicy::Rate(r)*100, RejuvenatePolicy::Cap(r), n);
 		case Perk::kRejuvenateWellspring:
-			return std::format("Rejuvenate also restores {}% of everyone's magicka at once.", n);
+			return Trf("Rejuvenate restores {}% magicka at once to nearby allies, up to 30. Allies already in a circle do not receive another burst.", n);
 		case Perk::kRejuvenateVigor:
-			return std::format("While Rejuvenate lasts, stamina comes back {}% faster too.", n);
+			return Trf("Inside Rejuvenate, restores {:.1f}% maximum stamina per second too, up to 6.", v);
 		case Perk::kWard:
-			return std::format("Hardens your skin with {} for {:.0f} s.", kFlesh[static_cast<std::size_t>(std::clamp(static_cast<int>(v), 0, 3))], kWardSeconds);
+			return Trf("A spectral Wispmother blesses you and companions within {:g} m for {:g} s. Each hostile hit has a {}% chance to deal no damage. Blessings do not stack.", MoonFx::Radius(r)/70.0f, MoonFx::Duration(r), n);
 		case Perk::kWardShared:
-			return v >= 99.0f ? "Every companion is warded too."s :
-			                    std::format("{} other {} warded too, the most hurt first.", n, v > 1.0f ? "companions are" : "companion is");
+			return Trf("Azura's Moon reaches {:g} m farther.", v / 70.0f);
 		case Perk::kWardSpellward:
-			return std::format("Whoever is warded resists magic by {}% while it lasts.", n);
+			return Trf("Azura's blessing lasts {} s longer.", n);
 		case Perk::kWardMantle:
-			return std::format("Whoever is warded is also wrapped in Flame Cloak for {:.0f} s.", kWardSeconds);
+			return Trf("Whoever is warded is also wrapped in Flame Cloak for {:.0f} s.", kWardSeconds);
 		case Perk::kRenewal:
-			return std::format("Everyone within reach regains {}% of their health every second for {:.0f} s.", n, kRenewalSeconds);
+			return Trf("Everyone within reach regains {}% of their health every second for {:.0f} s.", n, kRenewalSeconds);
 		case Perk::kRenewalRoots:
-			return std::format("Renewal lasts {} s longer.", n);
+			return Trf("Renewal lasts {} s longer.", n);
 		case Perk::kRenewalLifeline:
-			return "Anyone down within reach when Renewal starts gets straight back up with a third of their health."s;
+			return std::string(Tr("Anyone down within reach when Renewal starts gets straight back up with a third of their health."));
 		case Perk::kTriage:
-			return std::format("Heal and Renewal give {}% more to anyone below a third of their health.", n);
+			return Trf("The healing circle and Renewal give {}% more to anyone below a third of their health.", n);
 		case Perk::kSerenity:
-			return std::format("Their own magicka comes back {}% faster while they fight.", n);
+			return Trf("Their own magicka comes back {}% faster while they fight.", n);
 		case Perk::kGuardianSpirit:
-			return std::format("Once a fight, when your health falls below {:.0f}%, they heal you for {}% of it at once, wherever they are.", kGuardianLine * 100.0f, n);
+			return Trf("Once a fight, when your health falls below {:.0f}%, they heal you for {}% of it at once, wherever they are.", kGuardianLine * 100.0f, n);
 		// Bruiser
 		case Perk::kWarCry:
-			return std::format("A roar that staggers every enemy within {} {}.", n, Strength(s));
+			return Trf("A roar that staggers every enemy within {} {}.", n, Strength(s));
 		case Perk::kWarCryRally:
-			return std::format("The roar gives allies within {:.0f} back {}% of their stamina.", kRallyReach, n);
+			return Trf("The roar gives allies within {:.0f} back {}% of their stamina.", kRallyReach, n);
 		case Perk::kWarCryUnnerve:
-			return std::format("Enemies it staggers deal {}% less damage for {:.0f} s.", n, kUnnerveSeconds);
+			return Trf("Enemies it staggers deal {}% less damage for {:.0f} s.", n, kUnnerveSeconds);
 		case Perk::kBerserk:
-			return std::format("{:.0f} s of fury: {}% more damage, and a power attack at every chance.", kBerserkSeconds, n);
+			return Trf("{:.0f} s of fury: {}% more damage, and a power attack at every chance.", kBerserkSeconds, n);
 		case Perk::kBerserkBloodlust:
-			return std::format("Each kill while berserk heals {}% of their health and adds 3 s.", n);
+			return Trf("Each kill while berserk heals {}% of their health and adds 3 s.", n);
 		case Perk::kBerserkThickSkull:
-			return std::format("+{} armor while berserk.", n);
+			return Trf("+{} armor while berserk.", n);
 		case Perk::kSunder:
-			return std::format("A blow that breaks their target's guard: {} less armor for {:.0f} s, so everyone hits it harder.", n, kSunderSeconds);
+			return Trf("A blow that breaks their target's guard: {} less armor for {:.0f} s, so everyone hits it harder.", n, kSunderSeconds);
 		case Perk::kSunderCrack:
-			return std::format("The blow also staggers them {}.", Strength(v));
+			return Trf("The blow also staggers them {}.", Strength(v));
 		case Perk::kSunderShatter:
-			return std::format("Sunder also strips {}% of its resistance to magic, fire, frost and shock.", n);
+			return Trf("Sunder also strips {}% of its resistance to magic, fire, frost and shock.", n);
 		case Perk::kEarthshaker:
-			return std::format("Slams the ground: every enemy within {} is knocked off their feet and takes {}x their weapon's damage.", n, Number(s));
+			return Trf("Slams the ground and rocks burst out of it: every enemy within {} falls and takes {}x their weapon's damage, and stays down a while.", n, Number(s)) +
+				(r == 3 ? " "s + std::string(Tr("Those light enough are thrown into the air.")) : ""s);
 		case Perk::kEarthshakerAftershock:
-			return "A second tremor 1.5 s later staggers everyone still standing."s;
+			return std::string(Tr("A second tremor 1.5 s later staggers everyone still standing."));
 		case Perk::kEarthshakerFault:
-			return std::format("Earthshaker reaches {} further.", n);
+			return Trf("Earthshaker reaches {} further.", n);
 		case Perk::kHeavyHands:
-			return std::format("They power attack {}x as often.", n);
+			return Trf("They power attack {}x as often.", n);
 		case Perk::kMomentum:
-			return std::format("Each kill heals {}% of their health.", n);
+			return Trf("Each kill heals {}% of their health.", n);
 		case Perk::kExecutioner:
-			return std::format("{}% more damage against enemies below {:.0f}% health.", n, kExecuteLine * 100.0f);
+			return Trf("{}% more damage against enemies below {:.0f}% health.", n, kExecuteLine * 100.0f);
 		// Fighter
 		case Perk::kDisarm:
-			return std::format("Knocks the weapon out of their opponent's hands, up to {} levels above their own.", n);
+			return Trf("Knocks the weapon out of their opponent's hands, up to {} levels above their own.", n);
 		case Perk::kDisarmExpose:
-			return std::format("A disarmed enemy has {} less armor for {:.0f} s.", n, kExposeSeconds);
+			return Trf("A disarmed enemy has {} less armor for {:.0f} s.", n, kExposeSeconds);
 		case Perk::kDisarmSweep:
-			return "Disarm also sweeps them off their feet."s;
+			return std::string(Tr("Disarm also sweeps them off their feet."));
 		case Perk::kSecondWind:
-			return std::format("Catches their breath mid-fight: {}% of their health and {}% of their stamina back.", n, Number(s));
+			return Trf("Catches their breath mid-fight: {}% of their health and {}% of their stamina back.", n, Number(s));
 		case Perk::kSecondWindResolve:
-			return std::format("+{} armor for {:.0f} s after.", n, kResolveSeconds);
+			return Trf("+{} armor for {:.0f} s after.", n, kResolveSeconds);
 		case Perk::kSecondWindUnyielding:
-			return std::format("Second Wind is ready {} s sooner.", n);
+			return Trf("Second Wind is ready {} s sooner.", n);
 		case Perk::kRiposte:
-			return std::format("For {} s, every blow they block staggers whoever struck it.", n);
+			return Trf("Guard the next melee blow for up to {} s. Counter and push the attacker down for {} s, dealing {}x weapon base damage on landing.", n, RiposteFx::DownSeconds(a_rank), RiposteFx::ImpactMultiplier(a_rank));
 		case Perk::kRiposteCounter:
-			return std::format("Each riposte also deals {}x their weapon's damage.", n);
+			return Trf("The counter strike also deals {}x weapon base damage before the knockback.", n);
 		case Perk::kRiposteDisarming:
-			return "The first blow they turn aside also disarms the attacker, if the weapon can be taken."s;
-		case Perk::kCleave:
-			return std::format("A sweeping power attack: every enemy within {:.0f} in front of them takes {}x their weapon's damage and staggers.", kCleaveReach, n);
-		case Perk::kCleaveWhirlwind:
-			return "Cleave hits all around them, not only in front."s;
-		case Perk::kCleaveLacerate:
-			return std::format("Everyone Cleave hits bleeds {} health a second for {:.0f} s.", n, kLacerateSeconds);
+			return std::string(Tr("The first blow they turn aside also disarms the attacker, if the weapon can be taken."));
+		case Perk::kSpectralWolf:
+			return Trf("Only while they stand before their target: a giant spectral wolf's head takes shape in front of it, jaws open round it, and bites down. Whatever its jaws close on takes {}x their weapon's damage, is held frozen mid-stagger in a ghostly smoke for {:.1f} s, and bleeds {}% of its health over {:.0f} s (a boss half as long and half as much).", n, kWolfHold[static_cast<std::size_t>(r - 1)], Number(s), kWolfBleedSeconds);
+		case Perk::kWolfMaul:
+			return Trf("The wolf's bite holds whoever it catches frozen {:.1f} s longer.", kWolfMaulHold);
+		case Perk::kWolfHemorrhage:
+			return Trf("The wolf's wounds bleed {} s longer, as fast as ever.", n);
 		case Perk::kFlanker:
-			return std::format("They work round to their opponent's side, and deal {}% more damage.", n);
+			return Trf("They work round to their opponent's side, and deal {}% more damage.", n);
 		case Perk::kEndurance:
-			return std::format("Stamina comes back {}% faster while they fight.", n);
+			return Trf("Stamina comes back {}% faster while they fight.", n);
 		case Perk::kOpportunist:
-			return std::format("{}% more damage against an opponent who is staggered or disarmed.", n);
+			return Trf("{}% more damage against an opponent who is staggered or disarmed.", n);
 		// Archer
 		case Perk::kVolley:
-			return std::format("Looses {} arrows in quick succession at their target; every archer and mage turns on it for {} s.", n, Number(s));
+			return Trf("Looses {} arrows in quick succession at their target; every archer and mage turns on it for {} s.", n, Number(s));
 		case Perk::kVolleyRallyFire:
-			return std::format("You and the party deal {}% more weapon damage while a volley lasts.", n);
+			return Trf("You and the party deal {}% more weapon damage while a volley lasts.", n);
 		case Perk::kVolleyBroadhead:
-			return std::format("The volley's target has {} less armor while it lasts.", n);
+			return Trf("The volley's target has {} less armor while it lasts.", n);
 		case Perk::kDeadeye:
-			return std::format("{:.0f} s of steady aim: {}% more damage, and they hold their ground.", kDeadeyeSeconds, n);
+			return Trf("Primes the next bow shot for 12 s. The arrow explodes wherever it lands, dealing up to {} magic damage and staggering enemies within {:.1f} m. Damage falls with distance and magic resistance.", n, ArrowArtsFx::Radius(a_rank)/70.f);
 		case Perk::kDeadeyeHawkeye:
-			return std::format("While Deadeye lasts, {}% more on top against casters and archers.", n);
+			return Trf("The explosion reaches {} m farther.", n);
 		case Perk::kDeadeyePatience:
-			return std::format("Deadeye lasts {} s longer.", n);
+			return Trf("Explosive Arrow deals {}% more explosion damage.", n);
 		case Perk::kPinningShot:
-			return std::format("An arrow that pins their target in place, staggering it again and again for {} s. A boss shrugs it off.", n);
+			return Trf("Retreats up to {:.1f} m. A spectral archer distracts enemies attacking them for {:.0f} s, then fades. Moves 30% faster for {} s and takes {:.0f}% less damage. Rank III ends with a nearby stagger gust.", WindstepFx::Reach(a_rank)/70.f, WindstepFx::EchoHold(a_rank), n, WindstepFx::Protection(a_rank)*100);
 		case Perk::kPinningHeavy:
-			return std::format("The pin lasts {} s longer, and holds a boss {}% of the time.", n, Number(s));
+			return Trf("Windstep movement speed and protection last {} s longer.", n);
 		case Perk::kPinningTwin:
-			return "A second arrow pins the nearest enemy beside the first."s;
+			return std::string(Tr("Windstep grants 40% movement speed instead of 30%."));
 		case Perk::kArrowRain:
-			return std::format("{} arrows fall around their target over {:.0f} s, within {:.0f}. Conjured: none leave the quiver.", n, kRainSeconds, kRainRadius);
+			return Trf("{} arrows fall around their target over {:.0f} s, within {:.0f}, each at someone under them; one that misses still grazes whoever it lands beside for half its blow. Conjured: none leave the quiver.", n, kRainSeconds, kRainRadius);
 		case Perk::kArrowRainDownpour:
-			return std::format("{} more arrows fall.", n);
+			return Trf("{} more arrows fall.", n);
 		case Perk::kArrowRainPinning:
-			return "Every enemy under the rain staggers."s;
-		case Perk::kFletcher:
-			return std::format("Out of a fight, they make arrows of the kind they shoot until they carry {}.", n);
-		case Perk::kSkirmisher:
-			return std::format("They step back from melee to keep shooting, {}x as readily.", n);
-		case Perk::kSharpshooter:
-			return std::format("{}% more weapon damage while they fight.", n);
+			return std::string(Tr("Every enemy under the rain staggers."));
+		case Perk::kSteadyBreath:
+			return Trf("Stamina recovers {}% faster in combat, helping them keep shooting and repositioning.", n);
+		case Perk::kFineArrows:
+			return Trf("Provides unlimited {} for their bow. Better arrows you give them are kept.", v < 1.5f ? Tr("steel arrows") : (v < 2.5f ? Tr("elven arrows") : Tr("ebony arrows")));
+		case Perk::kSpellTouched:
+			return Trf("Arrows have a {}% chance to carry fire, frost or lightning in flight. An unblocked hit deals 8 extra damage of that element, reduced by resistance.", n);
 		// Mage
 		case Perk::kSurge:
-			return std::format("{:.0f} s of arcane surge: their magicka flows back {}x as fast.", kSurgeSeconds, n);
+			return Trf("{:.0f} s of arcane surge: their magicka flows back {}x as fast.", kSurgeSeconds, n);
 		case Perk::kSurgeOverflow:
-			return std::format("Arcane Surge also restores {}% of their magicka at once.", n);
+			return Trf("Arcane Surge also restores {}% of their magicka at once.", n);
 		case Perk::kSurgeConduit:
-			return std::format("While it lasts, your magicka and the party's flows back {}% faster too.", n);
+			return Trf("While it lasts, your magicka and the party's flows back {}% faster too.", n);
+		case Perk::kDragonBreath:
+			return Trf("A spectral dragon opens its jaws and breathes their element for {} s, reaching {} and dealing {} damage per second to enemies inside the stream. Frost also drains stamina; lightning drains magicka. Rank III summons red Alduin.", Number(DragonBreath::Duration(r)), Number(DragonBreath::Reach(r)), n);
+		case Perk::kBreathReach: return Trf("Dragon's Breath reaches {}% farther, widening with its reach.", n);
+		case Perk::kBreathLingering: return Trf("Dragon's Breath continues for {} additional seconds.", n);
 		case Perk::kBurst:
-			return std::format("Hurls a free {} destruction spell of their element at their target: fire, frost or shock.",
-				kTiers[static_cast<std::size_t>(std::clamp(static_cast<int>(v), 0, 3))]);
+			return Trf("A spark of their element flies to the target's feet and bursts in fire, frost or lightning, striking every enemy within {} for {} damage at the middle, falling off toward the edge.",
+				Number(Blast::kRadius[static_cast<std::size_t>(std::clamp(static_cast<int>(v), 1, 3) - 1)]), Number(kBurstDamage[static_cast<std::size_t>(r - 1)])) +
+				(r == 3 ? " "s + std::string(Tr("Grand: a giant fireball ringed by smaller explosions with sparks flying over it, a huge crystal of ice in the middle, or a second thunderbolt.")) : ""s);
 		case Perk::kBurstSearing:
-			return std::format("The enemy it strikes loses {}% of its fire, frost and shock resistance for {:.0f} s.", n, kSearingSeconds);
+			return Trf("After the hit, every enemy struck loses {}% of its fire, frost and shock resistance for {:.0f} s.", n, kSearingSeconds);
 		case Perk::kBurstTwin:
-			return "Casts it twice, the second at another enemy if one is near."s;
+			return Trf("A second burst follows for {}% damage, at another enemy if one is near.", Number(kBurstEchoShare * 100.0f));
 		case Perk::kMagnus:
 			if (r == 1) {
-				return std::format("The power of Magnus: for {} s their magicka never runs dry.", n);
+				return Trf("The power of Magnus: for {} s their magicka never runs dry.", n);
 			}
 			if (r == 2) {
-				return std::format("For {} s their magicka never runs dry, and their destruction spells strike {}% harder.", n, Number(s));
+				return Trf("For {} s their magicka never runs dry, and their destruction spells strike {}% harder.", n, Number(s));
 			}
-			return std::format("For {} s their magicka never runs dry, their destruction spells strike {}% harder, and they resist magic by {}%.", n, Number(s),
+			return Trf("For {} s their magicka never runs dry, their destruction spells strike {}% harder, and they resist magic by {}%.", n, Number(s),
 				Number(Third(a_perk, r)));
 		case Perk::kArcaneFlow:
-			return std::format("Magicka comes back {}% faster while they fight.", n);
+			return Trf("Magicka comes back {}% faster while they fight.", n);
 		case Perk::kSpellShield:
-			return std::format("Resists magic by {}%, and absorbs {}% of the spells cast at them.", n, Number(s));
+			return Trf("Resists magic by {}%, and absorbs {}% of the spells cast at them.", n, Number(s));
 		case Perk::kUnravel:
-			return std::format("Whoever they fight loses {}% of its fire, frost and shock resistance while they do.", n);
+			return Trf("Whoever they fight loses {}% of its fire, frost and shock resistance while they do.", n);
 		default:
 			return {};
 		}

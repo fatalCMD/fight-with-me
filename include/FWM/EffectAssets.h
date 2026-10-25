@@ -1,61 +1,37 @@
 #pragma once
-
 #include "FWM/Effects.h"
 
-// Paths in the required mods, not files shipped by Fight With Me. Keep these explicit:
-// tools/VerifyEffectAssets.py checks them against the installed plugins and archives.
+// All supporting art is authored by Fight With Me. No external effect plugin is queried.
 namespace FWM::Effects::Assets
 {
-	enum class Source : std::uint8_t { kTriumvirate, kElemental, kVibrant, kCount };
-	inline constexpr std::array plugins{
-		"Triumvirate - Mage Archetypes.esp", "Elemental Destruction Magic Redux.esp", "Vibrant weapons.esl"
-	};
-	struct Art
-	{
-		Look look;
-		Source source;
-		const char* model;
-		const char* bone{ nullptr };  // null: use the mesh's own attachment instructions
-		float groundSeconds{ 0.0f };  // area-effect mesh: spawn in the cell, not as actor hit art
-	};
-	inline constexpr std::array art{
-		Art{ Look::kBraced, Source::kTriumvirate, R"(Triumvirate\Auras_Art_Buff_1.nif)" },
-		Art{ Look::kTaunt, Source::kElemental, R"(magic\windexp01.nif)", nullptr, 2.3f },
-		Art{ Look::kVolley, Source::kTriumvirate, R"(Diviner\illusiondiviner_art_buffshield.nif)" },
-		Art{ Look::kQuarry, Source::kTriumvirate, R"(Triumvirate\Primal_Art_HuntersMark.nif)" },
-		Art{ Look::kGuard, Source::kTriumvirate, R"(Triumvirate\Auras_Art_Barrier.nif)" },
-		Art{ Look::kHealAura, Source::kTriumvirate, R"(ApocNew\RestorationPeace_Art_WildHealing.nif)" },
-		Art{ Look::kRejuvenateAura, Source::kElemental, R"(magic\fxwatercloak01.nif)" },
-		Art{ Look::kWardAura, Source::kTriumvirate, R"(Triumvirate\Auras_Art_Barrier.nif)" },
-		Art{ Look::kRally, Source::kTriumvirate, R"(Triumvirate\Auras_Art_Buff_3.nif)" },
-		Art{ Look::kPinned, Source::kTriumvirate, R"(Triumvirate\Violence_Art_Chained.nif)" },
-		Art{ Look::kFocus, Source::kTriumvirate, R"(Diviner\illusiondiviner_art_buffshield.nif)" },
-		Art{ Look::kSurge, Source::kTriumvirate, R"(Triumvirate\Rift_Art_Buff.nif)" },
-		Art{ Look::kMagnus, Source::kTriumvirate, R"(Triumvirate\Auras_Art_Resurrect.nif)" },
-		Art{ Look::kWarCry, Source::kElemental, R"(magic\windexp01.nif)", nullptr, 2.3f },
-		Art{ Look::kEarthshaker, Source::kElemental, R"(magic\EarthRockExplosion01.nif)", nullptr, 7.0f },
-		Art{ Look::kSunderImpact, Source::kElemental, R"(effects\impacteffects\impactrock02.nif)", "NPC Spine2 [Spn2]" },
-		Art{ Look::kRenewal, Source::kTriumvirate, R"(Triumvirate\Violence_Art_HealingTrance.nif)" },
-		Art{ Look::kSecondWind, Source::kTriumvirate, R"(Triumvirate\Auras_Art_Buff_2.nif)" },
-		Art{ Look::kStandFast, Source::kTriumvirate, R"(Triumvirate\Violence_Art_Buffshield_1.nif)" },
-		Art{ Look::kChallenge, Source::kTriumvirate, R"(Triumvirate\Senua_Art_Runes_Persistent.nif)" },
-		Art{ Look::kArrowRain, Source::kElemental, R"(magic\fxwindcloak01.nif)" }
-	};
-	struct Weapon
-	{
-		Look look;
-		const char* element;
-	};
-	inline constexpr std::array weapons{
-		Weapon{ Look::kStrike, "Shock" },
-		Weapon{ Look::kBerserk, "Fire" },
-		Weapon{ Look::kCleave, "FireShock" },
-		Weapon{ Look::kRiposte, "Frost" }
-	};
-	// The left meshes attach themselves to SHIELD, right/two-handed ones to WEAPON.
-	// Use the matching hand and weapon shape; never attach a sword effect to a bow or staff.
-	inline constexpr std::array weaponShapes{
-		"SwordR", "SwordL", "DaggerR", "DaggerL", "WarAxeR", "WarAxeL",
-		"MaceR", "MaceL", "Greatsword", "Battleaxe", "Warhammer"
-	};
+    struct Art { Look look; const char* model; const char* bone{ "NPC Root [Root]" }; float groundSeconds{ 0.0f }; };
+    inline constexpr std::array art{
+        Art{ Look::kBraced, R"(FightWithMe\Support\Guard.nif)" },
+        Art{ Look::kTaunt, R"(FightWithMe\Support\Wind.nif)" },
+        Art{ Look::kVolley, R"(FightWithMe\Support\Focus.nif)" },
+        Art{ Look::kQuarry, R"(FightWithMe\Support\Mark.nif)" },
+        Art{ Look::kGuard, R"(FightWithMe\Support\Guard.nif)" },
+        Art{ Look::kHealAura, R"(FightWithMe\Support\Vitality.nif)" },
+        Art{ Look::kRejuvenateAura, R"(FightWithMe\Support\Vitality.nif)" },
+        Art{ Look::kWardAura, R"(FightWithMe\Support\Guard.nif)" },
+        Art{ Look::kRally, R"(FightWithMe\Support\Rally.nif)" },
+        Art{ Look::kPinned, R"(FightWithMe\Support\Binding.nif)" },
+        Art{ Look::kFocus, R"(FightWithMe\Support\Focus.nif)" },
+        Art{ Look::kSurge, R"(FightWithMe\Support\Surge.nif)" },
+        Art{ Look::kWarCry, R"(FightWithMe\Support\Wind.nif)" },
+        Art{ Look::kSunderImpact, R"(FightWithMe\Support\Impact.nif)" },
+        Art{ Look::kRenewal, R"(FightWithMe\Support\Vitality.nif)" },
+        Art{ Look::kSecondWind, R"(FightWithMe\Support\Vitality.nif)" },
+        Art{ Look::kLevelUp, R"(FightWithMe\Support\LevelUp.nif)" }
+    };
+    struct Weapon { Look look; const char* element; };
+    inline constexpr std::array weapons{
+        Weapon{ Look::kStrike, "Steel" }, Weapon{ Look::kBerserk, "Fire" },
+        Weapon{ Look::kSpiritWolf, "Spirit" }, Weapon{ Look::kRiposte, "Steel" }
+    };
+    // Indices match WeaponShape(); left/right share geometry, not an attachment bone.
+    inline constexpr std::array weaponShapes{
+        "Sword", "Sword", "Dagger", "Dagger", "WarAxe", "WarAxe",
+        "Mace", "Mace", "Greatsword", "Battleaxe", "Warhammer"
+    };
 }

@@ -37,18 +37,18 @@ namespace FWM::Rules
 		float tauntArmorPerLevel{ 1.5f };
 		float tauntArmorMax{ 120.0f };
 
-		// Heal: the whole party at once, not a spell
+		// Heal: a circle of healing light on the ground, not a spell
 		float healCooldown{ 60.0f };
-		float healAmountBase{ 40.0f };     // health given to each, before level
+		float healAmountBase{ 40.0f };     // health the circle gives someone in it all along, before level
 		float healAmountPerLevel{ 3.5f };  // more for each of the healer's levels
 		float healAmountMax{ 400.0f };
-		float healReach{ 4000.0f };        // everyone in the party this close to the healer
+		float healReach{ 4000.0f };        // how far from the healer it may be raised
 
-		// Rejuvenate: everyone's magicka comes back faster
-		float rejuvenateSeconds{ 30.0f };
-		float rejuvenateSecondsAt30{ 60.0f };   // from healer level 30
-		float rejuvenateSecondsAt60{ 180.0f };  // from healer level 60
-		float rejuvenateBonus{ 100.0f };        // percent faster
+		// Rejuvenate: direct restoration while inside the circle.
+		float rejuvenateSeconds{ 8.0f };
+		float rejuvenateSecondsAt30{ 10.0f };   // from healer level 30
+		float rejuvenateSecondsAt60{ 12.0f };  // from healer level 60
+		float rejuvenateBonus{ 100.0f };        // retained for old INI compatibility; unused
 
 		// Targeting
 		float engageRange{ 2500.0f };    // distance counts against a candidate up to here; it rules nobody out
@@ -65,7 +65,7 @@ namespace FWM::Rules
 		float bonusDamageTaken{ 1.0f };  // tank: less damage from every blow and harmful spell
 		float bonusHealing{ 1.0f };      // healer
 		float bonusDamage{ 1.0f };       // bruiser
-		float bonusArrowsKept{ 1.0f };   // archer: the chance an arrow shot is not used up
+		float bonusArcherStamina{ 1.0f };   // archer: faster stamina recovery in combat
 		float bonusMagickaCost{ 1.0f };  // mage: less magicka for every spell
 	};
 
@@ -144,11 +144,11 @@ namespace FWM::Rules
 	// their levels, never past healAmountMax.
 	[[nodiscard]] float TeamHealAmount(int a_level, const Tuning& a_tuning);
 
-	// How long Rejuvenate quickens everyone's magicka: rejuvenateSeconds, longer from healer
+	// How long the Rejuvenate circle lasts: rejuvenateSeconds, longer from healer
 	// level 30 and again from 60.
 	[[nodiscard]] float RejuvenateSeconds(int a_level, const Tuning& a_tuning);
 
-	// Twice as long as it lasts.
+	// Thirty seconds plus 2.5 times the circle's duration.
 	[[nodiscard]] float RejuvenateCooldown(int a_level, const Tuning& a_tuning);
 
 	// --- Targeting ---------------------------------------------------------
@@ -205,6 +205,13 @@ namespace FWM::Rules
 		return a_clearFor >= a_after && !a_playerDrawn;
 	}
 
+	// Wildlife that keeps to itself (unaggressive and fighting nobody) never comes at you,
+	// even though the game's hostility test counts a fox or an elk as hostile.
+	[[nodiscard]] constexpr bool KeepsToItself(bool a_wildlife, float a_aggression, bool a_inCombat)
+	{
+		return a_wildlife && a_aggression < 1.0f && !a_inCombat;
+	}
+
 	// --- Danger ------------------------------------------------------------
 
 	enum class Danger : std::uint8_t
@@ -230,9 +237,9 @@ namespace FWM::Rules
 	// what the role is for, a percent per point:
 	//   Fighter  attack speed            Tank     less damage taken (75% at most)
 	//   Healer   healing                 Bruiser  damage
-	//   Archer   the chance an arrow shot is not used up (90% at most)
+	//   Archer   stamina recovery in combat (+90% at most)
 	//   Mage     less magicka for every spell (75% off at most)
-	inline constexpr float kMostArrowsKept = 90.0f;
+	inline constexpr float kMostArcherStamina = 90.0f;
 	inline constexpr float kMostCostCut = 75.0f;
 	inline constexpr float kMostDamageCut = 75.0f;
 	inline constexpr float kMostOtherBonus = 1000.0f;
@@ -248,10 +255,10 @@ namespace FWM::Rules
 
 	// A percent as the bonus shows it: whole when it is whole, else to a tenth.
 	[[nodiscard]] std::string Percent(float a_percent);
-	// The number with its sign: "+17%", "17%" (arrows kept), "-17%" (damage taken, magicka cost).
+	// The number with its sign: "+17%", "-17%" (damage taken, magicka cost).
 	[[nodiscard]] std::string PathBonusNumber(Role a_role, float a_percent);
-	// What it is: "attack speed", "damage taken", "healing", "damage", "arrows kept", "magicka cost".
+	// What it is: "attack speed", "damage taken", "healing", "damage", "stamina recovery", "magicka cost".
 	[[nodiscard]] std::string_view PathBonusName(Role a_role);
-	// Both: "+17% attack speed", "17% arrows kept", "-17% damage taken".
+	// Both: "+17% attack speed", "+17% stamina recovery", "-17% damage taken".
 	[[nodiscard]] std::string PathBonusText(Role a_role, float a_percent);
 }

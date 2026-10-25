@@ -343,6 +343,7 @@ namespace FWM::Game
 			}
 			if (const auto* weapon = object->As<RE::TESObjectWEAP>()) {
 				note(weapon);
+                arsenal.twoHanded |= !weapon->IsBound() && (weapon->IsTwoHandedSword() || weapon->IsTwoHandedAxe());
 			} else if (auto* ammo = object->As<RE::TESAmmo>()) {
 				(ammo->IsBolt() ? bolts : arrows) = true;
 			}
@@ -390,5 +391,34 @@ namespace FWM::Game
 			return std::nullopt;
 		}
 		return std::pair{ x, 1.0f - y };
+	}
+
+	bool Landed(Arrow& a_arrow, float a_flown, float a_dt, RE::ObjectRefHandle* a_struck)
+	{
+		constexpr float kLongest = 2.5f;  // still up after this, it struck somewhere unseen
+		auto            projectile = a_arrow.handle.get();
+		if (!projectile || a_flown > kLongest) {
+			return true;
+		}
+		auto&        data = projectile->GetProjectileRuntimeData();  // its list cannot be walked through a const reference
+		const auto   at = projectile->GetPosition();
+		const float  moved = at.GetDistance(a_arrow.at);
+		RE::NiPoint3 velocity;
+		projectile->GetLinearVelocity(velocity);
+		if (velocity.Length() < 1.0f && a_dt > 0.0f && moved > 0.5f) {
+			velocity = (at - a_arrow.at) / a_dt;
+		}
+		if (velocity.Length() > 1.0f) {
+			a_arrow.velocity = velocity;
+		}
+		a_arrow.at = at;
+		if (a_struck) {
+			for (auto* impact : data.impacts) {
+				if (impact && impact->collidee) {
+					*a_struck = impact->collidee;
+				}
+			}
+		}
+		return !data.impacts.empty() || data.flags.any(RE::Projectile::Flags::kProcessedImpacts, RE::Projectile::Flags::kDestroyed) || (a_flown > 0.08f && moved < 0.5f);
 	}
 }

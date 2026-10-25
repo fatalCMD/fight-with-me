@@ -48,17 +48,21 @@ namespace FWM
 		static constexpr std::uint32_t kAllowDualWielding = 1 << 2;
 	};
 
-	// a_weight is how far each value is pulled toward the role's target (0 keeps the
-	// follower exactly as they were, 1 replaces their style). Score multipliers are
-	// scaled rather than pulled, so a follower who never casts does not start to.
+	// A role and a position only move a follower: how far they keep, whether they circle,
+	// fall back, work round to the side or press in. What they attack with and how stays
+	// their own. a_weight is how far each value is pulled toward the role's target (0 keeps
+	// the follower exactly as they were, 1 replaces those values outright).
 	[[nodiscard]] StyleData Layer(const StyleData& a_base, Role a_role, Position a_position, float a_weight);
 
 	// What a companion's path and the abilities running on them change in how they fight:
 	// Shield Master bashes more, Heavy Hands and Berserk power attack more, a Flanker goes
-	// round to the side, a Skirmisher steps back from melee, Riposte and Deadeye hold their
+	// round to the side, Riposte and Deadeye hold their
 	// ground. Multipliers, plus offensive and defensive added on top.
 	struct StyleTweaks
 	{
+        bool caster{ false };  // spell roles never fall back to punching
+        bool magickaRecovery{ false };
+		bool recovery{ false };  // prioritize returning to a healing area
 		float bash{ 1.0f };
 		float power{ 1.0f };
 		float flank{ 1.0f };
@@ -73,6 +77,11 @@ namespace FWM
 	};
 
 	[[nodiscard]] StyleData Tweaked(const StyleData& a_style, const StyleTweaks& a_tweaks);
+
+	// A melee fighter explicitly sent to the front closes instead of orbiting their target.
+	// Applied after path tweaks; keeps their blocking, attacks and equipment preferences.
+	// Ranged roles, other positions and a style weight below 0.5 retain their own movement.
+	[[nodiscard]] StyleData PositionIntent(const StyleData& a_style, Role a_role, Position a_position, float a_weight);
 
 	// Committed to one enemy: a companion sent after them, or an enemy a taunt holds on the
 	// tank. Straight at them and stay on them: no circling or flanking while waiting a turn,

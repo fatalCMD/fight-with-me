@@ -20,13 +20,15 @@ namespace FWM::Camera
 	void Install();            // kDataLoaded
 
 	// Main thread.
-	void Begin();
+	void Begin(bool a_treeOnly = false);
 	void End();
 	void Reset();  // a load or new game: let go at once
 
 	// Any thread: the companion to frame, or 0 for the player's own view. A portrait is
 	// face to face and close, for when no fight is on.
 	void Focus(RE::FormID a_actor, bool a_portrait = false) noexcept;
+	// Any thread: upward perk-tree entrance, without altering the saved camera orbit.
+	void TreeLift(float a_amount) noexcept;
 
 	// Any thread. Turns the view by these angles in radians (yaw to the right, pitch up),
 	// and zooms by steps (positive is closer).

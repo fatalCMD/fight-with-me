@@ -1,0 +1,9 @@
+Elemental Burst ice texture
+
+Generated with the built-in image_gen tool on 2026-10-22. Source: ElementalIce.png.
+Production: assets/textures/FightWithMe/ElementalIce.dds, BC7_UNORM, 1024 x 1024 with a full mip chain.
+Convert with Texconvx64.exe -nologo -y -f BC7_UNORM -w 1024 -h 1024 -m 0 -o <assets/textures/FightWithMe> ElementalIce.png.
+The texture is opaque; vertex opacity, view falloff, and runtime alpha fade give the ice its translucency.
+
+Prompt:
+Use case: photorealistic-natural. Asset type: square seamless tileable albedo texture for natural fractured glacier ice on 3D ice slabs in a fantasy game. A flat orthographic macro scan of dense translucent blue-white ice filling the entire square. Rich layered cloudy frozen inclusions, fine branching subsurface fracture veins, small trapped bubbles, delicate grainy rime patches, irregular clear deeper steel-blue ice windows. Natural organic variation with medium-size sparse branching cracks and fine microtexture, no obvious repeated cells. Cool pale glacier blue and muted slate blue with soft milky frost, controlled highlights, not glowing. Even diffuse neutral lighting with no cast shadows, no perspective, no visible slab outline or object silhouette, no text, no logo, no borders. Seamless texture continuing across all four edges. The image is a material surface, not a rendered object. Preserve clear blue midtones and small bright frost details so multiplying a game shader tint still retains the grain and fractures.

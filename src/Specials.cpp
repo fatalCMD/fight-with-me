@@ -1,7 +1,16 @@
+#include "FWM/Disarms.h"
+#include "FWM/AbilityAuto.h"
+#include "FWM/AbilityPolicy.h"
 #include "FWM/Specials.h"
+#include "FWM/ArrowArts.h"
+#include "FWM/Loadouts.h"
 
 #include "FWM/Abilities.h"
+#include "FWM/AzurasMoon.h"
+#include "FWM/ArcherAmmo.h"
 #include "FWM/Effects.h"
+#include "FWM/TauntBears.h"
+#include "FWM/EffectAudio.h"
 #include "FWM/Enemies.h"
 #include "FWM/Forms.h"
 #include "FWM/Game.h"
@@ -10,11 +19,15 @@
 #include "FWM/Party.h"
 #include "FWM/PathsLink.h"
 #include "FWM/Settings.h"
+#include "FWM/Text.h"
+#include "FWM/TankActs.h"
 
 namespace FWM::Specials
 {
 	namespace
 	{
+		struct DebugVolley { RE::ActorHandle actor; RE::NiPoint3 point; int left; float in; };
+		std::vector<DebugVolley> debugVolleys;
 		struct Volley
 		{
 			RE::ActorHandle target;
@@ -23,7 +36,6 @@ namespace FWM::Specials
 		};
 		Volley volley;
 
-		float wardLeft{ 0.0f };  // the ward on the player: one at a time, whoever cast it
 
 		// A disarm handed to the engine, checked a moment later for the log: the engine drops
 		// the weapon on its own task queue, not while we wait.
@@ -37,7 +49,6 @@ namespace FWM::Specials
 		std::vector<Disarming> disarming;
 
 		constexpr float kVolleySeconds = 10.0f;
-		constexpr float kWardSeconds = 60.0f;  // as long as the flesh spells last
 
 		std::mt19937 rng{ std::random_device{}() };
 
@@ -48,7 +59,7 @@ namespace FWM::Specials
 			std::string text;
 		};
 
-		Result Refused(std::string a_why) { return { false, std::move(a_why) }; }
+		Result Refused(std::string_view a_why) { return { false, std::string(a_why) }; }
 
 		// Specials happen in the thick of it: mid-swing is no reason to wait (a fighter in a fight
 		// almost always is), only being knocked about, down or in a kill move.
@@ -56,6 +67,12 @@ namespace FWM::Specials
 		{
 			auto* state = a_actor->AsActorState();
 			return state->IsStaggered() || state->IsBleedingOut() || a_actor->IsInRagdollState() || a_actor->IsInKillMove();
+		}
+
+		// For the player: a number and the noun, so a translation needs only its two forms.
+		std::string CountSaid(int a_count)
+		{
+			return a_count == 0 ? std::string(Tr("no enemy")) : Trn(a_count, "{} enemy", "{} enemies");
 		}
 
 		std::string CountOf(int a_count)
@@ -80,18 +97,6 @@ namespace FWM::Specials
 			return Game::Usable(a_actor) && !state->IsBleedingOut() && !a_actor->IsInRagdollState();
 		}
 
-		int OnPlayer()
-		{
-			const auto player = RE::PlayerCharacter::GetSingleton()->GetHandle();
-			int        count = 0;
-			for (const auto& profile : Enemies::All()) {
-				auto enemy = profile.handle.get();
-				if (enemy && Game::Usable(enemy.get()) && profile.target == player) {
-					++count;
-				}
-			}
-			return count;
-		}
 
 		// The one of the five specials a path has slotted, if any (two can never both be).
 		Special CarriedSpecial(const PathsLink::Kit& a_kit)
@@ -104,75 +109,20 @@ namespace FWM::Specials
 			return Special::kNone;
 		}
 
-		// --- Bodyguard: to your side, a challenge on arrival -----------------
-
-		float GuardSeconds(const PathsLink::Kit& a_kit)
-		{
-			return a_kit.tree ? Paths::Value(Paths::Perk::kBodyguard, std::max(a_kit.Rank(Paths::Ability::kBodyguard), 1)) : kGuardSeconds;
-		}
-
-		// Shield Rush: arriving at your side, everyone close around you staggers.
-		void ShieldRush(Party::Member& a_member, RE::Actor* a_tank)
-		{
-			auto* player = RE::PlayerCharacter::GetSingleton();
-			int   staggered = 0;
-			for (const auto& profile : Enemies::All()) {
-				auto enemy = profile.handle.get();
-				if (enemy && Standing(enemy.get()) && Game::Distance(player, enemy.get()) <= Paths::kRushReach && Game::Stagger(enemy.get(), 0.6f, a_tank)) {
-					Effects::Flash(enemy.get(), Effects::Look::kShaken);
-					++staggered;
-				}
-			}
-			if (staggered > 0) {
-				Log::Info("[Special] {} arrives with a shield rush: {} staggered."sv, a_member.name, CountOf(staggered));
-			}
-		}
+		// --- Weak Will: attackers lose the force behind their attacks --------
 
 		Result Bodyguard(Party::Member& a_member, RE::Actor* a_tank, bool a_asked, const PathsLink::Kit& a_kit)
 		{
-			auto*       player = RE::PlayerCharacter::GetSingleton();
-			const int   on = OnPlayer();
-			const float health = Game::Fraction(player, RE::ActorValue::kHealth);
-			if (!a_asked && !(health < 0.4f && on > 0)) {
-				return {};
+			if (!TankActs::WeakWill(a_tank, a_kit)) {
+				return a_asked ? Refused(Tr("Weak Will is already active, or they cannot fight.")) : Result{};
 			}
-			if (Game::Fraction(a_tank, RE::ActorValue::kHealth) < 0.25f) {
-				return Refused("Too hurt to stand in front of you.");
-			}
-			a_member.guardFor = GuardSeconds(a_kit);
-			if (const float armor = a_kit.Value(Paths::Perk::kBodyguardInterpose); armor > 0.0f) {
-				Abilities::Lift(player->GetFormID(), RE::ActorValue::kDamageResist, armor, a_member.guardFor, static_cast<std::uint16_t>(Paths::Perk::kBodyguardInterpose));
-			}
-			a_member.guardTaunted = false;
-			Effects::Flash(a_tank, Effects::Look::kGuard);
-			Notices::Push(std::format("{} rushes to your side.", a_member.name), Notices::Kind::kOrder);
-			Log::Info("[Special] {} guards you: {} on you, your health {:.0f}%, {:.0f} away."sv, a_member.name, CountOf(on), health * 100.0f,
-				Game::Distance(a_tank, player));
-			return { true, on > 0 ? "On the way to you." : "At your side; nobody is on you yet." };
-		}
-
-		// While guarding: the taunt on arrival, and back to their post once you are safe or the
-		// moment has passed.
-		void Guard(Party::Member& a_member, RE::Actor* a_tank, float a_dt, const PathsLink::Kit& a_kit)
-		{
-			if (a_member.guardFor <= 0.0f) {
-				return;
-			}
-			auto* player = RE::PlayerCharacter::GetSingleton();
-			a_member.guardFor -= a_dt;
-			if (!a_member.guardTaunted && Game::Distance(a_tank, player) < 450.0f) {
-				a_member.guardTaunted = true;
-				if (a_kit.Rank(Paths::Perk::kBodyguardRush) > 0) {
-					ShieldRush(a_member, a_tank);
-				}
-				a_member.tauntReady = 0.0f;  // a bodyguard arrives with a challenge
-				a_member.tauntRequested = true;
-				a_member.askedAt = ::GetTickCount64();
-			}
-			if (a_member.guardFor <= 0.0f || (a_member.guardTaunted && Game::Fraction(player, RE::ActorValue::kHealth) > 0.75f)) {
-				a_member.guardFor = 0.0f;
-				Log::Info("[Special] {} goes back to their post."sv, a_member.name);
-			}
+			a_member.guardFor = 0.0f;  // the saved Bodyguard slot no longer changes positioning
+			Abilities::Challenge(a_tank);
+			Abilities::Play(Forms::Get().tauntSound, a_tank);
+			const auto status = TankActs::WillOn(a_member.id);
+			Notices::Used(Trf("{}: \"Your strength fails you!\" They and their attackers deal {:.0f}% less damage.", a_member.name, status.percent), Paths::Ability::kBodyguard, Notices::Kind::kOrder);
+			Log::Info("[Tank] {} invokes Weak Will: caster and attackers deal {:.0f}% less damage, stance {:.0f} s."sv, a_member.name, status.percent, status.length);
+			return { true, Trf("Weak Will: they and their attackers deal {:.0f}% less damage.", status.percent) };
 		}
 
 		// --- Volley: everyone at range on one enemy --------------------------
@@ -191,11 +141,11 @@ namespace FWM::Specials
 			const int                level = a_archer->GetLevel();
 			for (const auto& profile : Enemies::All()) {
 				auto enemy = profile.handle.get();
-				if (!enemy || !Game::Usable(enemy.get()) || !(profile.boss || profile.level >= level + 5)) {
+				if (!enemy || !Game::Usable(enemy.get()) || Game::Fraction(enemy.get(), RE::ActorValue::kHealth) <= 0.35f || !(profile.boss || profile.level >= level + 5)) {
 					continue;
 				}
 				bool unused = false;
-				if (Game::Distance(a_archer, enemy.get()) > 3500.0f || !a_archer->HasLineOfSight(enemy.get(), unused)) {
+				if (Game::Distance(a_archer, enemy.get()) > AbilityPolicy::kEnemyReach || !a_archer->HasLineOfSight(enemy.get(), unused)) {
 					continue;
 				}
 				const int weight = profile.level + (profile.boss ? 100 : 0);
@@ -214,10 +164,11 @@ namespace FWM::Specials
 			}
 			auto target = VolleyPick(a_member, a_archer, a_asked);
 			if (!target) {
-				return a_asked ? Refused("Nobody to fire at.") : Result{};
+				return a_asked ? Refused(Tr("Nobody to fire at.")) : Result{};
 			}
-			if (!(a_member.arsenal.ranged && a_member.arsenal.ammo)) {
-				return Refused("Nothing to shoot with.");
+			const auto loadout=Loadouts::Ranged(a_archer);
+			if (!loadout.first || !loadout.second) {
+				return Refused(Tr("Nothing to shoot with."));
 			}
 			const auto  name = Game::Name(target.get());
 			const int   rank = std::max(a_kit.Rank(Paths::Ability::kVolley), 1);
@@ -229,53 +180,35 @@ namespace FWM::Specials
 			a_member.burstLeft = arrows;
 			a_member.burstIn = 0.0f;
 			volley = { target->GetHandle(), a_member.id, seconds };
-			Effects::Flash(a_archer, Effects::Look::kVolley);
+			ArrowArts::VolleyWindow(a_archer,rank,seconds);
 			// Rally Fire: everyone hits harder while it flies. Broadhead: its target's armor gives.
 			if (const float rally = a_kit.Value(Paths::Perk::kVolleyRallyFire) / 100.0f; rally > 0.0f) {
 				const auto source = static_cast<std::uint16_t>(Paths::Perk::kVolleyRallyFire);
-				Abilities::Lift(RE::PlayerCharacter::GetSingleton()->GetFormID(), RE::ActorValue::kAttackDamageMult, rally, seconds, source);
+				auto* player = RE::PlayerCharacter::GetSingleton();
+				if (AbilityAuto::Visible(a_archer, player, AbilityPolicy::kSupportReach))
+					Abilities::Lift(player->GetFormID(), RE::ActorValue::kAttackDamageMult, rally, seconds, source);
 				for (const auto& each : Party::Members()) {
-					Abilities::Lift(each.id, RE::ActorValue::kAttackDamageMult, rally, seconds, source);
+					const auto ally = each.handle.get();
+					if (AbilityAuto::Visible(a_archer, ally.get(), AbilityPolicy::kSupportReach))
+						Abilities::Lift(each.id, RE::ActorValue::kAttackDamageMult, rally, seconds, source);
 				}
 			}
 			if (const float broadhead = a_kit.Value(Paths::Perk::kVolleyBroadhead); broadhead > 0.0f) {
 				Abilities::Lift(target->GetFormID(), RE::ActorValue::kDamageResist, -broadhead, seconds, static_cast<std::uint16_t>(Paths::Perk::kVolleyBroadhead));
 			}
 			const auto count = arrows == 5 ? "five"s : std::format("{}", arrows);
-			Notices::Push(std::format("Volley! {} looses {} arrows at {}.", a_member.name, count, name), Notices::Kind::kOrder);
+			Notices::Used(Trf("Volley! {} looses {} arrows at {}.", a_member.name, count, name), Paths::Ability::kVolley, Notices::Kind::kOrder);
 			Log::Info("[Special] {} calls a volley at {} (level {}, {:.0f} away): {} arrows, {:.0f} s."sv, a_member.name, name, target->GetLevel(),
 				Game::Distance(a_archer, target.get()), arrows, seconds);
-			return { true, std::format("Volley: {} arrows at {}.", count, name) };
+			return { true, Trf("Volley: {} arrows at {}.", count, name) };
 		}
 
 		// One arrow from the bow in hand (or the best carried), at the target's chest, a little
 		// high for the drop. It costs an arrow from the quiver, like any other.
 		bool Loose(RE::Actor* a_archer, RE::Actor* a_target)
 		{
-			RE::TESObjectWEAP* bow = nullptr;
-			if (auto* right = a_archer->GetEquippedObject(false)) {
-				if (auto* weapon = right->As<RE::TESObjectWEAP>(); weapon && weapon->IsBow()) {
-					bow = weapon;
-				}
-			}
-			RE::TESAmmo* ammo = a_archer->GetCurrentAmmo();
-			std::int32_t have = 0;
-			const auto   items = a_archer->GetInventory([](RE::TESBoundObject& a_object) { return a_object.IsWeapon() || a_object.IsAmmo(); });
-			for (const auto& [object, entry] : items) {
-				if (!object || entry.first <= 0) {
-					continue;
-				}
-				if (auto* weapon = object->As<RE::TESObjectWEAP>(); !bow && weapon && weapon->IsBow()) {
-					bow = weapon;
-				}
-				if (auto* arrows = object->As<RE::TESAmmo>(); arrows && !arrows->IsBolt() && (!ammo || ammo->IsBolt() || arrows == ammo)) {
-					ammo = arrows;
-					have = entry.first;
-				}
-			}
-			if (!bow || !ammo || ammo->IsBolt() || have <= 0) {
-				return false;
-			}
+            const auto [bow,ammo]=Loadouts::Ranged(a_archer);
+            if(!bow || !ammo)return false;
 			auto*        model = a_archer->Get3D();
 			auto*        hand = model ? model->GetObjectByName("NPC L Hand [LHnd]") : nullptr;
 			RE::NiPoint3 origin = hand ? hand->world.translate : a_archer->GetPosition() + RE::NiPoint3{ 0.0f, 0.0f, 110.0f };
@@ -287,7 +220,7 @@ namespace FWM::Specials
 			a_archer->SetHeading(rotation.z);
 			RE::ProjectileHandle handle;
 			RE::Projectile::LaunchArrow(&handle, a_archer, ammo, bow, origin, rotation);
-			a_archer->RemoveItem(ammo, 1, RE::ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
+			if (!ArcherAmmo::Unlimited(a_archer)) a_archer->RemoveItem(ammo, 1, RE::ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
 			return true;
 		}
 
@@ -309,12 +242,14 @@ namespace FWM::Specials
 			if (!a_asked && !(close.size() >= 3 || (close.size() >= 2 && health < 0.4f))) {
 				return {};
 			}
-			if (close.empty()) {
-				return Refused("Nobody close enough to stagger.");
+			if (close.empty() && !PathsLink::DebugCasting(a_member.id)) {
+				return Refused(Tr("Nobody close enough to stagger."));
 			}
 			Abilities::Challenge(a_bruiser);
-			Abilities::Play(Forms::Get().tauntSound, a_bruiser);
-			Effects::Flash(a_bruiser, Effects::Look::kWarCry);
+			if (!TauntBears::WarCry(a_bruiser, rank)) {
+				Effects::Flash(a_bruiser, Effects::Look::kWarCry);
+				EffectAudio::Begin(Soundscape::Kind::WarCry, a_bruiser, a_bruiser->GetPosition(), 3.0f, rank, true);
+			}
 			int                                   staggered = 0;
 			std::uniform_real_distribution<float> roll(0.0f, 1.0f);
 			for (auto& enemy : close) {
@@ -351,116 +286,21 @@ namespace FWM::Specials
 					}
 				}
 			}
-			Notices::Push(std::format("{}'s war cry staggers {}.", a_member.name, CountOf(staggered)), Notices::Kind::kTaunt);
+			Notices::Used(Trf("{}'s war cry staggers {}.", a_member.name, CountSaid(staggered)), Paths::Ability::kWarCry, Notices::Kind::kTaunt);
 			Log::Info("[Special] {} war cry: {} of {} close by staggered."sv, a_member.name, staggered, close.size());
-			return { true, staggered > 0 ? std::format("War cry: {} staggered.", CountOf(staggered)) : "War cry, but nobody staggered."s };
+			return { true, staggered > 0 ? Trf("War cry: {} staggered.", CountSaid(staggered)) : std::string(Tr("War cry, but nobody staggered.")) };
 		}
 
-		// --- Ward: alteration on the player ----------------------------------
-
-		// The flesh spells reach only the one who casts them: cast through the warded one's own
-		// hands, on them, with the companion to blame. True if it took.
-		bool WardOne(RE::Actor* a_warded, RE::SpellItem* a_spell, RE::Actor* a_by)
-		{
-			auto* caster = a_warded ? a_warded->GetMagicCaster(RE::MagicSystem::CastingSource::kInstant) : nullptr;
-			if (!caster || !a_spell) {
-				return false;
-			}
-			caster->CastSpellImmediate(a_spell, false, a_warded, 1.0f, false, 0.0f, a_by);
-			auto* effect = a_spell->effects.empty() || !a_spell->effects[0] ? nullptr : a_spell->effects[0]->baseEffect;
-			auto* target = a_warded->AsMagicTarget();
-			return effect && target && target->HasMagicEffect(effect);
-		}
-
-		// What a path adds to each ward: Spellward's resistance, Flame Mantle's cloak.
-		void WardExtras(RE::Actor* a_warded, RE::Actor* a_by, const PathsLink::Kit& a_kit)
-		{
-			if (const float spellward = a_kit.Value(Paths::Perk::kWardSpellward); spellward > 0.0f) {
-				Abilities::Lift(a_warded->GetFormID(), RE::ActorValue::kResistMagic, spellward, Paths::kWardSeconds,
-					static_cast<std::uint16_t>(Paths::Perk::kWardSpellward));
-			}
-			if (a_kit.Rank(Paths::Perk::kWardMantle) > 0) {
-				WardOne(a_warded, Forms::Get().flameCloak, a_by);
-			}
-		}
-
-		Result Ward(Party::Member& a_member, RE::Actor* a_caster, bool a_asked, const PathsLink::Kit& a_kit)
-		{
-			auto* player = RE::PlayerCharacter::GetSingleton();
-			if (wardLeft > 0.0f) {
-				return a_asked ? Refused(std::format("Your ward is still up ({:.0f} s).", std::ceil(wardLeft))) : Result{};
-			}
-			const int   on = OnPlayer();
-			const float health = Game::Fraction(player, RE::ActorValue::kHealth);
-			if (!a_asked && !(on >= 2 || (on >= 1 && health < 0.6f))) {
-				return {};
-			}
-			// Oakflesh, then Stone, Iron and Ebony as they rise in level; on a path, Oak, Iron and
-			// Ebony by rank.
-			const auto&    flesh = Forms::Get().flesh;
-			const int      level = a_caster->GetLevel();
-			RE::SpellItem* spell = nullptr;
-			int            used = a_kit.tree ? static_cast<int>(Paths::Value(Paths::Perk::kWard, std::max(a_kit.Rank(Paths::Ability::kWard), 1))) :
-			                                   (level < 15 ? 0 : (level < 30 ? 1 : (level < 45 ? 2 : 3)));
-			for (; used >= 0 && !spell; --used) {
-				spell = flesh[static_cast<std::size_t>(used)];
-			}
-			++used;  // the tier the spell came from
-			if (!spell) {
-				return Refused("No ward spell found in Skyrim.esm.");
-			}
-			const float cost = std::min(spell->CalculateMagickaCost(a_caster), 0.5f * Game::Maximum(a_caster, RE::ActorValue::kMagicka));
-			if (Game::Current(a_caster, RE::ActorValue::kMagicka) < cost) {
-				return Refused(std::format("Not enough magicka for {} ({:.0f}).", spell->GetName(), cost));
-			}
-			// Through the player's own hands, on them, with the companion to blame (and to pay).
-			if (!WardOne(player, spell, a_caster)) {
-				Log::Info("[Special] {}'s {} did not take on you."sv, a_member.name, spell->GetName());
-				return Refused(std::format("{} did not take on you.", spell->GetName()));
-			}
-			a_caster->AsActorValueOwner()->DamageActorValue(RE::ActorValue::kMagicka, cost);
-			WardExtras(player, a_caster, a_kit);
-			// Shared Ward: the most hurt of the others too, or all of them.
-			int shared = 0;
-			if (const int others = static_cast<int>(a_kit.Value(Paths::Perk::kWardShared)); others > 0) {
-				std::vector<std::pair<float, RE::NiPointer<RE::Actor>>> hurt;
-				for (const auto& each : Party::Members()) {
-					auto ally = each.handle.get();
-					if (ally && !each.summon && Game::Usable(ally.get()) && Game::Distance(a_caster, ally.get()) <= 4000.0f) {
-						hurt.emplace_back(Game::Fraction(ally.get(), RE::ActorValue::kHealth), std::move(ally));
-					}
-				}
-				std::sort(hurt.begin(), hurt.end(), [](const auto& a_a, const auto& a_b) { return a_a.first < a_b.first; });
-				for (auto& [fraction, ally] : hurt) {
-					if (shared >= others) {
-						break;
-					}
-					if (WardOne(ally.get(), spell, a_caster)) {
-						WardExtras(ally.get(), a_caster, a_kit);
-						Effects::Flash(ally.get(), Effects::Look::kWardAura, 2.0f);
-						++shared;
-					}
-				}
-			}
-			// A protective barrier on the caster and everyone who receives the ward.
-			if (Settings::Get().abilityEffects) {
-				Abilities::CastGesture(a_caster);
-				Effects::Flash(a_caster, Effects::Look::kWardAura);
-			}
-			Abilities::HandGlow(a_caster, spell, 1.2f);
-			Effects::Flash(player, Effects::Look::kWardAura);
-			// The skin it gives, plainly: bark, stone, iron or ebony over you for a few seconds.
-			if (auto* skin = Forms::Get().fleshShaders[static_cast<std::size_t>(std::clamp(used, 0, 3))]; skin && Settings::Get().abilityEffects) {
-				player->ApplyEffectShader(skin, 4.0f);
-			}
-			wardLeft = kWardSeconds;
-			Notices::Push(shared > 0 ? std::format("{} wards you and {} more: {}.", a_member.name, shared, spell->GetName()) :
-			                           std::format("{} wards you: {}.", a_member.name, spell->GetName()),
-				Notices::Kind::kHeal);
-			Log::Info("[Special] {} casts {} on you ({:.0f} magicka; {} on you, your health {:.0f}%)."sv, a_member.name, spell->GetName(), cost, CountOf(on),
-				health * 100.0f);
-			return { true, std::format("{} on you.", spell->GetName()) };
-		}
+        // kWard is the saved ability ID now occupied by Azura's Moon.
+        Result Ward(Party::Member& member, RE::Actor* caster, bool asked, const PathsLink::Kit& kit)
+        {
+            const int rank = kit.tree ? std::max(kit.Rank(Paths::Ability::kWard), 1) : (caster->GetLevel() >= 60 ? 3 : caster->GetLevel() >= 30 ? 2 : 1);
+            if (!AzurasMoon::Cast(caster, rank, kit.Value(Paths::Perk::kWardShared), kit.Value(Paths::Perk::kWardSpellward), asked))
+                return asked ? Refused(Tr("Azura's blessing is already active or unavailable.")) : Result{};
+            Abilities::CastGesture(caster);
+            Notices::Used(Trf("{} invokes Azura's Moon.", member.name), Paths::Ability::kWard, Notices::Kind::kHeal);
+            return { true, std::string(Tr("Azura's blessing is spreading.")) };
+        }
 
 		// --- Disarm: the weapon out of their hands -----------------------------
 
@@ -494,16 +334,16 @@ namespace FWM::Specials
 		{
 			auto target = Opponent(a_fighter);
 			if (!target || !Standing(target.get())) {
-				return a_asked ? Refused("Nobody to disarm.") : Result{};
+				return a_asked ? Refused(Tr("Nobody to disarm.")) : Result{};
 			}
 			const auto  name = Game::Name(target.get());
 			const float d = Game::Distance(a_fighter, target.get());
 			if (d > 450.0f) {
-				return a_asked ? Refused(std::format("{} is too far ({:.0f} away).", name, d)) : Result{};
+				return a_asked ? Refused(Trf("{} is too far ({:.0f} away).", name, d)) : Result{};
 			}
 			const auto* weapon = Disarmable(target.get());
 			if (!weapon) {
-				return a_asked ? Refused(std::format("{} holds no weapon to take.", name)) : Result{};
+				return a_asked ? Refused(Trf("{} holds no weapon to take.", name)) : Result{};
 			}
 			if (!a_asked) {
 				const auto* profile = Enemies::Find(target->GetFormID());
@@ -517,13 +357,13 @@ namespace FWM::Specials
 			// boss holds on half the time.
 			const int above = a_kit.tree ? static_cast<int>(Paths::Value(Paths::Perk::kDisarm, std::max(a_kit.Rank(Paths::Ability::kDisarm), 1))) : 10;
 			if (target->GetLevel() > a_fighter->GetLevel() + above) {
-				return a_asked ? Refused(std::format("{} is too strong to disarm (level {}).", name, target->GetLevel())) : Result{};
+				return a_asked ? Refused(Trf("{} is too strong to disarm (level {}).", name, target->GetLevel())) : Result{};
 			}
 			const auto* profile = Enemies::Find(target->GetFormID());
 			if (profile && profile->boss && std::uniform_real_distribution<float>(0.0f, 1.0f)(rng) < 0.5f) {
-				Effects::Flash(a_fighter, Effects::Look::kStrike);
+				Disarms::Strike(target.get(), a_kit.Rank(Paths::Ability::kDisarm));
 				Log::Info("[Special] {} goes for {}'s {}, who holds on."sv, a_member.name, name, weapon->GetName());
-				return { true, std::format("{} held on to the {}.", name, weapon->GetName()) };
+				return { true, Trf("{} held on to the {}.", name, weapon->GetName()) };
 			}
 			// As the shout does it: a stagger first, and the weapon goes only if they reel. The
 			// engine then drops it from their hand on its own task queue, at a safe point in the
@@ -531,23 +371,21 @@ namespace FWM::Specials
 			const std::string what = weapon->GetName();
 			auto*             tasks = RE::TaskQueueInterface::GetSingleton();
 			if (!tasks) {
-				return Refused("Could not disarm right now.");
+				return Refused(Tr("Could not disarm right now."));
 			}
-			Effects::Flash(a_fighter, Effects::Look::kStrike);
+			Disarms::Strike(target.get(), a_kit.Rank(Paths::Ability::kDisarm));
 			if (!Game::Stagger(target.get(), 0.5f, a_fighter)) {
 				Log::Info("[Special] {} goes for {}'s {}, who keeps their feet."sv, a_member.name, name, what);
-				return { true, std::format("{} kept their feet and the {}.", name, what) };
+				return { true, Trf("{} kept their feet and the {}.", name, what) };
 			}
 			auto targetHandle = target->GetHandle();
 			auto fighterHandle = a_fighter->GetHandle();
 			tasks->QueueActorDisarm(targetHandle, fighterHandle);
-			Effects::Flash(target.get(), Effects::Look::kShaken);
-			Effects::Sparks(target.get());
 			disarming.push_back({ targetHandle, weapon, a_member.name, 1.5f });
 			DisarmExtras(target.get(), a_fighter, a_kit);
-			Notices::Push(std::format("{} knocks the {} out of {}'s hands.", a_member.name, what, name), Notices::Kind::kTaunt);
+			Notices::Used(Trf("{} knocks the {} out of {}'s hands.", a_member.name, what, name), Paths::Ability::kDisarm, Notices::Kind::kTaunt);
 			Log::Info("[Special] {} disarms {} (level {}, {:.0f} away): the {}."sv, a_member.name, name, target->GetLevel(), d, what);
-			return { true, std::format("Disarmed {}: the {} is on the ground.", name, what) };
+			return { true, Trf("Disarmed {}: the {} is on the ground.", name, what) };
 		}
 
 		// Whether the engine took the weapon, once it has had a moment to.
@@ -581,8 +419,8 @@ namespace FWM::Specials
 		}
 		auto targetHandle = a_target->GetHandle();
 		auto byHandle = a_by->GetHandle();
+		Disarms::Strike(a_target, 1);
 		tasks->QueueActorDisarm(targetHandle, byHandle);
-		Effects::Sparks(a_target);
 		disarming.push_back({ targetHandle, weapon, Game::Name(a_by), 1.5f });
 		return true;
 	}
@@ -592,10 +430,58 @@ namespace FWM::Specials
 		return SpecialCooldown(a_special);
 	}
 
+	std::pair<RE::TESObjectWEAP*, RE::TESAmmo*> DebugRanged(RE::Actor* actor)
+	{
+		auto ranged=Loadouts::Ranged(actor);
+		if(ranged.first && ranged.second) return ranged;
+		// Tests copy forms without adding equipment to the follower's inventory.
+		if(auto* data=RE::TESDataHandler::GetSingleton()) {
+			for(auto* weapon:data->GetFormArray<RE::TESObjectWEAP>()) {
+				if(weapon && weapon->IsBow()) return {weapon,Forms::Get().ironArrow};
+			}
+		}
+		return {};
+	}
+	bool LooseArrowAt(RE::Actor* actor, const RE::NiPoint3& point)
+	{
+		if(!actor || !actor->Get3D()) return false;
+		const auto [bow,ammo]=DebugRanged(actor);
+		if(!bow || !ammo) return false;
+		auto* hand=actor->Get3D()->GetObjectByName("NPC L Hand [LHnd]");
+		const auto origin=hand?hand->world.translate:actor->GetPosition()+RE::NiPoint3{0,0,110};
+		auto aim=point;const float flat=std::hypot(aim.x-origin.x,aim.y-origin.y);aim.z+=6.0e-6f*flat*flat;
+		const auto dir=aim-origin;
+		RE::Projectile::ProjectileRot rotation{-std::atan2(dir.z,std::hypot(dir.x,dir.y)),std::atan2(dir.x,dir.y)};
+		RE::ProjectileHandle handle;RE::Projectile::LaunchArrow(&handle,actor,ammo,bow,origin,rotation);
+		return static_cast<bool>(handle);
+	}
+
+	void DebugActivate(Party::Member& member, RE::Actor* actor, const PathsLink::Kit& kit, Paths::Ability ability)
+	{
+		if (!PathsLink::DebugCasting(member.id)) return;
+		Result result;
+		switch(Paths::SpecialFor(ability)) {
+		case Special::kBodyguard: result=Bodyguard(member,actor,true,kit); break;
+		case Special::kVolley: {
+			const auto ranged=DebugRanged(actor);
+			if(!ranged.first || !ranged.second) { result=Refused(Tr("No bow and arrow forms available.")); break; }
+			const auto point=PathsLink::DebugAim(actor)+RE::NiPoint3{0,0,70};
+			const int count=static_cast<int>(Paths::Value(Paths::Perk::kVolley,kit.Rank(ability)));
+			debugVolleys.push_back({actor->GetHandle(),point,count,0});
+			ArrowArts::VolleyWindow(actor,std::max(1,kit.Rank(ability)),static_cast<float>(count)*.28f+.5f);
+			result={true,std::string(Tr("Volley: 10 m ahead."))}; break;
+		}
+		case Special::kWarCry: result=WarCry(member,actor,true,kit); break;
+		case Special::kWard: result=Ward(member,actor,true,kit); break;
+		case Special::kDisarm: Abilities::Challenge(actor); result={Disarms::Strike(actor,kit.Rank(ability)),std::string(Tr("Disarm effect activated."))}; break;
+		default: break;
+		}
+		Party::Answer(member,result.text.empty()?std::string(Tr("Nothing to do right now.")):result.text,result.done);
+		if(result.done) Abilities::Used(member.id,actor,ability,true);
+	}
+
 	void Update(float a_dt)
 	{
-		wardLeft = std::max(wardLeft - a_dt, 0.0f);
-		CheckDisarms(a_dt);
 		if (volley.remaining > 0.0f) {
 			volley.remaining -= a_dt;
 			auto target = volley.target.get();
@@ -607,11 +493,11 @@ namespace FWM::Specials
 
 		const auto& settings = Settings::Get();
 		for (auto& member : Party::Members()) {
-			if (member.summon) {
+			if (!member.CanTakeRole()) {
 				continue;
 			}
 			const bool asked = member.specialRequested;
-			auto       answer = [&](std::string a_text, bool a_done = false) {
+			auto       answer = [&](std::string_view a_text, bool a_done = false) {
 				if (asked) {
 					member.specialRequested = false;
 					Party::Answer(member, std::move(a_text), a_done);
@@ -621,7 +507,7 @@ namespace FWM::Specials
 			if (!actor || !Game::Usable(actor.get()) || !actor->IsInCombat()) {
 				member.guardFor = 0.0f;
 				member.burstLeft = 0;
-				answer("Only in a fight.");
+				answer(Tr("Only in a fight."));
 				continue;
 			}
 			const auto* orders = Party::FindOrders(member.id);
@@ -631,35 +517,34 @@ namespace FWM::Specials
 			// On a path, the special is whichever of them the path has slotted, if any.
 			const auto kit = PathsLink::KitOf(member.id, orders->role);
 			const auto special = kit.tree ? CarriedSpecial(kit) : SpecialOf(orders->role);
-			if (special != Special::kBodyguard) {
-				member.guardFor = 0.0f;
-			}
-			Guard(member, actor.get(), a_dt, kit);
+			member.guardFor = 0.0f;
 			if (special == Special::kNone) {
-				answer("They carry no special ability right now.");
+				answer(Tr("They carry no special ability right now."));
 				continue;
 			}
 			if (!asked && (!settings.specials || !PathsLink::AutoOn(*orders, kit, Paths::AbilityOf(special)))) {
 				continue;
 			}
 			if (!settings.specials) {
-				answer("Specials are switched off (Battle plan settings).");
+				answer(Tr("Specials are switched off (Battle plan settings)."));
 				continue;
 			}
 			if (member.specialReady > 0.0f) {
-				answer(std::format("Not yet: ready in {:.0f} s.", std::ceil(member.specialReady)));
+				answer(Trf("Not yet: ready in {:.0f} s.", std::ceil(member.specialReady)));
 				continue;
 			}
 			if (actor->AsActorState()->IsBleedingOut()) {
-				answer("Down themselves.");
+				answer(Tr("Down themselves."));
 				continue;
 			}
 			if (Stunned(actor.get())) {
 				if (asked && Abilities::WaitedTooLong(member)) {
-					answer("Knocked about; could not.");
+					answer(Tr("Knocked about; could not."));
 				}
 				continue;
 			}
+			if (!asked && !AbilityAuto::Allow(member, actor.get(), Paths::AbilityOf(special))) continue;
+			if (const auto block=Abilities::ResourceBlock(actor.get(),Paths::AbilityOf(special)); !block.empty()) { answer(block); continue; }
 			Result result;
 			switch (special) {
 			case Special::kBodyguard:
@@ -680,9 +565,9 @@ namespace FWM::Specials
 			default:
 				break;
 			}
-			answer(result.text.empty() ? "Nothing to do right now."s : result.text, result.done);
+			answer(result.text.empty() ? std::string(Tr("Nothing to do right now.")) : result.text, result.done);
 			if (result.done) {
-				Abilities::Used(member.id, actor.get());
+				Abilities::Used(member.id, actor.get(), Paths::AbilityOf(special), asked);
 				member.specialCooldown = kit.tree ? kit.Cooldown(Paths::AbilityOf(special)) : Cooldown(special);
 				member.specialReady = member.specialCooldown;
 			}
@@ -691,6 +576,14 @@ namespace FWM::Specials
 
 	void Tick(float a_dt)
 	{
+		CheckDisarms(a_dt);
+		std::erase_if(debugVolleys,[&](DebugVolley& shot) {
+			auto actor=shot.actor.get();
+			if(!actor || !Game::Usable(actor.get()) || !PathsLink::Unlimited(actor->GetFormID())) return true;
+			shot.in-=a_dt;
+			if(shot.in<=0) { if(!LooseArrowAt(actor.get(),shot.point)) return true; --shot.left; shot.in=.28f; }
+			return shot.left<=0;
+		});
 		for (auto& member : Party::Members()) {
 			if (member.burstLeft <= 0) {
 				continue;
@@ -711,12 +604,13 @@ namespace FWM::Specials
 				continue;
 			}
 			--member.burstLeft;
-			member.burstIn = 0.14f;
+			member.burstIn = 0.28f;
 		}
 	}
 
 	void Clear()
 	{
+		debugVolleys.clear();
 		volley = {};
 		disarming.clear();
 		for (auto& member : Party::Members()) {
@@ -724,7 +618,7 @@ namespace FWM::Specials
 			member.burstLeft = 0;
 			if (member.specialRequested) {
 				member.specialRequested = false;
-				Party::Answer(member, "The fight is over.");
+				Party::Answer(member, Tr("The fight is over."));
 			}
 		}
 	}

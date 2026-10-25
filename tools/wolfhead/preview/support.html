@@ -1,0 +1,158 @@
+<!doctype html>
+
+<html lang="en"><meta charset="utf-8"><title>Fight With Me · Supporting effects</title>
+
+<style>body{margin:0;background:#14181d;color:#e4ded3;font:15px Georgia,serif}canvas{display:block}nav{position:absolute;top:22px;left:24px;padding:18px 22px;background:#171b22e8;border:1px solid #4c535d;border-radius:8px}h1{font-size:21px;margin:0 0 12px}select,button,a{font:14px system-ui;color:#ddd5c5;background:#292e37;border:1px solid #59606c;border-radius:4px;padding:8px;cursor:pointer}p{max-width:360px;line-height:1.5;color:#aaa}#status{color:#b5dbc7}</style>
+
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
+<style>body{display:grid;grid-template-columns:340px minmax(0,1fr);height:100vh;overflow:hidden}nav{position:relative;top:auto;left:auto;margin:12px;padding:18px;overflow:auto;grid-column:1;grid-row:1}#stage{min-width:0;min-height:0;grid-column:2;grid-row:1}select,button{margin-bottom:6px}@media(max-width:950px){body{grid-template-columns:1fr;grid-template-rows:minmax(220px,1fr) 250px}nav{grid-column:1;grid-row:2;margin:0 12px 12px}#stage{grid-column:1;grid-row:1}h1{font-size:18px}p{max-width:none;margin:8px 0}}</style>
+
+<nav><h1>Supporting effects</h1><p><a href="surge.html">Arcane Surge � full effect</a></p><select id="effect"></select> <button id="replay">Replay</button> <button id="pause">Pause</button>
+<p style="display:flex;gap:6px;flex-wrap:wrap"><span style="width:100%">Elemental Burst previews</span><a href="/?scene=blast&amp;element=fire">Fire</a><a href="/?scene=blast&amp;element=frost">Frost</a><a href="/?scene=blast&amp;element=shock">Lightning</a></p>
+
+<p>Original effect meshes with Skyrim particle textures. Drag to orbit; scroll to zoom. Shown on a scale reference.</p>
+
+<p id="usage"></p><p id="motion"></p><input id="timeline" type="range" min="0" max="8" step=".01" value="0" aria-label="Animation time" style="width:100%"><span id="time"></span><p id="status">Loading…</p><a href="/?scene=wolf">Signature effects →</a></nav>
+
+<main id="stage"></main><script type="module">
+
+import * as THREE from 'three';
+
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+
+const styles={Guard:[.68,.8,1],Vitality:[.28,.92,.43],Focus:[.59,.92,1],Mark:[1,.47,.18],Binding:[.88,.94,1],Surge:[.73,.47,1],Rally:[1,.78,.43],Wind:[.9,.86,.75],Impact:[.82,.67,.41],LevelUp:[1,.83,.47],FireSword:[1,.72,.24],SteelSword:[.8,.87,1],SpiritSword:[.3,.65,1]};
+
+const usage={
+
+ Guard:['Taunt’s protective state, Riposte activation, and Ward recipients.','Protective ribs breathe softly while mist circles the body.'],
+
+ Vitality:['Healing Circle caster/recipients, Rejuvenation casting glow, Second Wind and Guardian Spirit. Renewal uses this only if its water cloak fails to appear.','Wisps turn slowly; individual motes rise, fade, and renew. Colours follow the ability in-game.'],
+
+ Focus:['Volley’s casting glow and Deadeye’s sustained buff on the archer.','Focus arcs and mist rotate in opposite directions.'],
+
+ Mark:['The enemy marked as Volley’s target.','Targeting brackets pulse while motes drift upward.'],
+
+ Binding:['Legacy binding support art; Windstep uses its own spectral retreat.','Coils draw inward, then hold with a subtle pulse and low drifting motes.'],
+
+ Surge:['Arcane Surge�s retained body aura. See surge.html for the complete following circle.','Counter-rotating arcane strands, flowing texture and rising motes.'],
+
+ Rally:['War Cry’s Rally perk on nearby allies; the tank’s Last Stand passive.','Warm light expands and contracts with rising sparks.'],
+
+ Wind:['Fallback for Taunt and War Cry if their spectral head cannot load.','A brief outward rush of wind that expands and fades.'],
+
+ Impact:['Sunder’s fallback only, if the main armor-fracture effect cannot load or no copy is free.','A short expanding impact flash with a quick fade.'],
+
+ LevelUp:['A follower gaining a level.','Faster rising light and independently fading motes.'],
+
+ FireSword:['Berserk’s supporting weapon fire; the full rage mantle is at berserk.html. It does not add fire damage.','Flame tongues lick off the weapon with rising embers and flowing fire underneath.'],
+
+ SteelSword:['Disarm, Sunder and Earthshaker weapon flashes; Riposte’s sustained weapon effect.','Steel highlights travel along the blade without suggesting elemental damage.'],
+
+ SpiritSword:['The caster’s weapon flash when Kynareth’s Maw activates.','Ghostly vapour flows along the weapon, matching the spirit wolf.']
+
+};
+
+const animation=await fetch('out/support-look.json').then(r=>{if(!r.ok)throw Error('Animation samples unavailable');return r.json()});
+
+const labels={FireSword:'Berserk — weapon fire',SteelSword:'Steel weapon glints',SpiritSword:'Spirit weapon vapour'};
+const pick=document.querySelector('#effect');for(const name of Object.keys(styles))pick.add(new Option(labels[name]||name,name));
+
+pick.value=new URL(location.href).searchParams.get('effect')||'Guard';
+
+const scene=new THREE.Scene();scene.background=new THREE.Color('#14181d');
+
+const camera=new THREE.PerspectiveCamera(42,innerWidth/innerHeight,.1,2000);camera.up.set(0,0,1);camera.position.set(230,-300,190);
+
+const stage=document.querySelector('#stage');
+const renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));stage.append(renderer.domElement);
+function resize(){const width=stage.clientWidth,height=stage.clientHeight;renderer.setSize(width,height);camera.aspect=width/height;camera.updateProjectionMatrix();}resize();
+
+const controls=new OrbitControls(camera,renderer.domElement);controls.target.set(0,0,78);controls.update();
+
+scene.add(new THREE.HemisphereLight(0xcad9ec,0x22242b,2));const lamp=new THREE.DirectionalLight(0xe9ddcf,2);lamp.position.set(-100,-100,230);scene.add(lamp);
+
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(1300,1300),new THREE.MeshStandardMaterial({color:0x292e34,roughness:1}));scene.add(floor);
+
+const grid=new THREE.GridHelper(800,32,0x424953,0x303740);grid.rotation.x=Math.PI/2;grid.position.z=.1;scene.add(grid);
+
+const figure=new THREE.Group();scene.add(figure);const mat=new THREE.MeshStandardMaterial({color:0x444b56,roughness:.8});
+
+function body(radius,length,z,x=0){const mesh=new THREE.Mesh(new THREE.CapsuleGeometry(radius,length,6,16),mat);mesh.rotation.x=Math.PI/2;mesh.position.set(x,0,z);figure.add(mesh);}
+
+body(17,31,92);body(11,6,142);body(8,48,38,-11);body(8,48,38,11);body(6,43,91,-28);body(6,43,91,28);
+
+const blade=new THREE.Mesh(new THREE.BoxGeometry(4,78,1.5),mat);blade.position.set(0,47,65);blade.visible=false;scene.add(blade);
+
+const loader=new THREE.TextureLoader(),cache=new Map();
+
+async function tex(file){if(!cache.has(file)){const t=await loader.loadAsync('out/'+file);t.wrapS=t.wrapT=THREE.RepeatWrapping;cache.set(file,t);}return cache.get(file);}
+
+let root=null,nodes={},billboards=[],elapsed=0,last=performance.now(),paused=false,generation=0,duration=8;
+
+const slider=document.querySelector('#timeline'),pause=document.querySelector('#pause');
+
+async function load(){const request=++generation;document.querySelector('#status').textContent='Loading…';const name=pick.value;
+
+ const data=await fetch('out/support-'+name+'.json').then(r=>{if(!r.ok)throw Error(r.status);return r.json()});
+
+ const next=new THREE.Group(),map={},facing=[];
+
+ for(const n of data.nodes){const g=new THREE.Group();g.position.fromArray(n.translate);g.name=n.name;g.userData.origin=g.position.clone();map[n.name]=g;if(n.billboard)facing.push(g);}
+
+ for(const n of data.nodes)(map[n.parent]||next).add(map[n.name]);
+
+ for(const s of data.shapes){const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(s.positions,3));geometry.setAttribute('uv',new THREE.Float32BufferAttribute(s.uvs,2));geometry.setAttribute('shade',new THREE.Float32BufferAttribute(s.colors,4));geometry.setIndex(s.indices);
+
+ const material=new THREE.ShaderMaterial({uniforms:{map:{value:await tex(s.diffuse)},tint:{value:new THREE.Vector3(...styles[name])},power:{value:0},drift:{value:0}},vertexShader:'attribute vec4 shade; varying vec2 vUv; varying vec4 vShade; void main(){vUv=uv;vShade=shade;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',fragmentShader:'uniform sampler2D map; uniform vec3 tint; uniform float power; uniform float drift; varying vec2 vUv; varying vec4 vShade; void main(){vec4 t=texture2D(map,vUv+vec2(0.,drift));gl_FragColor=vec4(t.rgb*tint*vShade.rgb*power,t.a*vShade.a);}',transparent:true,depthWrite:false,side:THREE.DoubleSide,blending:THREE.AdditiveBlending});
+
+ material.userData.scale=s.effect.scale;material.userData.drifting=/fxfirescrolltilegrey|cloudtile\.dds|cloudtilefrostsmall|darkswirls|darkswirlsstrip|fxembers/i.test(s.source);const mesh=new THREE.Mesh(geometry,material);mesh.position.fromArray(s.transform.translate);map[s.node].add(mesh);}
+
+ if(request!==generation){next.traverse(o=>{o.geometry?.dispose();o.material?.dispose()});return;}
+
+ if(root){scene.remove(root);root.traverse(o=>{o.geometry?.dispose();o.material?.dispose()});}
+
+ root=next;nodes=map;billboards=facing;scene.add(root);const weapon=name.endsWith('Sword');figure.visible=!weapon;blade.visible=weapon;if(weapon)root.position.z=65;
+
+ duration=animation.effects[name].duration;slider.max=duration;elapsed=0;
+ document.querySelector('#usage').textContent='Appears on: '+usage[name][0];
+ document.querySelector('#motion').textContent=usage[name][1];
+ document.querySelector('#status').textContent='Fight With Me art · Skyrim textures';
+
+}
+
+pick.onchange=()=>load().catch(e=>document.querySelector('#status').textContent=e.message);
+
+document.querySelector('#replay').onclick=()=>{elapsed=0;paused=false;pause.textContent='Pause'};
+
+pause.onclick=()=>{paused=!paused;pause.textContent=paused?'Play':'Pause'};
+
+slider.oninput=()=>{elapsed=Number(slider.value);paused=true;pause.textContent='Play'};
+
+function frameAt(t){const frames=animation.effects[pick.value].frames,at=Math.min(t*animation.fps,frames.length-1),i=Math.floor(at),f=at-i,a=frames[i],b=frames[Math.min(i+1,frames.length-1)];
+
+ const out={};for(const key of ['alpha','turn','drift','scale','coreTurn','coreScale','coreDrift'])out[key]=a[key]+(b[key]-a[key])*f;
+
+ out.motes=a.motes.map((m,k)=>m.map((x,j)=>x+(b.motes[k][j]-x)*f));return out;}
+
+function draw(){requestAnimationFrame(draw);const now=performance.now(),dt=Math.min((now-last)/1000,.1);last=now;if(!paused)elapsed=(elapsed+dt)%(duration+.8);
+
+ const age=Math.min(elapsed,duration),frame=frameAt(age);slider.value=age;document.querySelector('#time').textContent=age.toFixed(2)+' / '+duration.toFixed(1)+' s';
+
+ if(root){root.traverse(o=>{if(o.material?.uniforms)o.material.uniforms.power.value=frame.alpha*o.material.userData.scale});
+
+ for(const [key,angle,scale,drift] of [['FWM_Core',frame.coreTurn,frame.coreScale,frame.coreDrift],['FWM_Wisps',frame.turn,frame.scale,frame.drift]]){
+
+  const part=nodes[key];if(part){part.rotation.z=angle;part.scale.setScalar(scale);part.traverse(o=>{if(o.material?.uniforms&&o.material.userData.drifting)o.material.uniforms.drift.value=drift;});}}
+
+ frame.motes.forEach(([angle,rise,alpha,scale],i)=>{const node=nodes['MoteAt'+i];if(!node)return;const o=node.userData.origin,c=Math.cos(angle),sn=Math.sin(angle);node.position.set(c*o.x-sn*o.y,sn*o.x+c*o.y,o.z+rise);node.scale.setScalar(scale);node.traverse(m=>{if(m.material?.uniforms)m.material.uniforms.power.value=alpha*m.material.userData.scale;});});
+
+ for(const g of billboards){const q=new THREE.Quaternion();g.parent.getWorldQuaternion(q);g.quaternion.copy(q.invert().multiply(camera.quaternion));}}
+
+ renderer.render(scene,camera);
+
+}addEventListener('resize',resize);
+
+load().catch(e=>document.querySelector('#status').textContent=e.message);draw();
+
+</script></html>
+

@@ -1,7 +1,11 @@
 #include "FWM/Paths.h"
+#include "FWM/DebugAbility.h"
+#include "FWM/Archery.h"
+#include "FWM/ChaosDown.h"
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <set>
 
 namespace
@@ -26,6 +30,166 @@ namespace
 	using namespace FWM::Paths;
 
 	std::size_t At(Role a_role, Perk a_perk) { return static_cast<std::size_t>(IndexOf(a_role, a_perk)); }
+
+	void SteadyBreathRules()
+	{
+		// Fletcher's original serialized key and node position must remain usable.
+		static_assert(static_cast<int>(Perk::kSteadyBreath) == 73);
+		CHECK(PathOf(Role::kArcher)[12].perk == Perk::kSteadyBreath);
+		CHECK(PathOf(Role::kArcher)[12].name == "Steady Breath");
+		CHECK(Value(Perk::kSteadyBreath, 0) == 0);
+		for (int rank = 1; rank <= 3; ++rank) {
+			CHECK(Value(Perk::kSteadyBreath, rank) == 25.0f * rank);
+			auto record = Fresh();
+			record.peak = 50;
+			for (int i = 0; i < rank; ++i) {
+				CHECK(Learn(record, Role::kArcher, At(Role::kArcher, static_cast<Perk>(73)), 99) == Block::kNone);
+			}
+			const auto decoded = Decode(Encode(std::vector<Entry>{ { 0x1234u, record } }), kRecordVersion);
+			CHECK(decoded.size() == 1);
+			if (!decoded.empty()) {
+				CHECK(Rank(decoded.front().second, Role::kArcher, Perk::kSteadyBreath) == rank);
+				CHECK(Spent(decoded.front().second) == Spent(record));
+			}
+		}
+	}
+
+	void ArcherTraitRules()
+	{
+		for (int element = 0; element < 3; ++element) {
+			Archery::Shot arrow{ element, false };
+			CHECK(arrow.Resolve(true) == element);
+			CHECK(arrow.Resolve(true) == -1);
+			Archery::Shot blocked{ element, false };
+			CHECK(blocked.Resolve(false) == -1);
+			CHECK(blocked.Resolve(true) == -1);
+		}
+		Archery::Shot ordinary;
+		CHECK(ordinary.Resolve(true) == -1);
+		// Preserve the former Skirmisher/Sharpshooter saved slots and investment.
+		static_assert(static_cast<int>(Perk::kFineArrows) == 74);
+		static_assert(static_cast<int>(Perk::kSpellTouched) == 75);
+		CHECK(PathOf(Role::kArcher)[13].name == "Fine Arrows");
+		CHECK(PathOf(Role::kArcher)[14].name == "Spell-Touched");
+		auto record = Fresh();
+		record.peak = 50;
+		for (std::size_t i = 0; i < kNodes; ++i) {
+			for (int rank = 0; rank < 3; ++rank) Learn(record, Role::kArcher, i, kUnlimited);
+		}
+		const auto decoded = Decode(Encode(std::vector<Entry>{ { 0x1234u, record } }), kRecordVersion);
+		CHECK(decoded.size() == 1);
+		if (!decoded.empty()) {
+			CHECK(Rank(decoded.front().second, Role::kArcher, static_cast<Perk>(74)) == 3);
+			CHECK(Rank(decoded.front().second, Role::kArcher, static_cast<Perk>(75)) == 3);
+			CHECK(Spent(decoded.front().second) == Spent(record));
+		}
+		for (int rank = 1; rank <= 3; ++rank) {
+			CHECK(Value(Perk::kFineArrows, rank) == static_cast<float>(rank));
+			const float chance = Value(Perk::kSpellTouched, rank);
+			CHECK((chance == std::array{ 10.0f, 15.0f, 20.0f }[rank - 1]));
+			CHECK(Archery::Imbued(chance, 0));
+			CHECK(Archery::Imbued(chance, chance - 0.01f));
+			CHECK(!Archery::Imbued(chance, chance));
+		}
+		CHECK(!Archery::Imbued(0, 0));
+		CHECK(!Archery::Imbued(20, -1));
+		CHECK(!Archery::Imbued(20, std::numeric_limits<float>::quiet_NaN()));
+		CHECK(Near(Archery::ElementalDamage(0, 0), 8));
+		CHECK(Near(Archery::ElementalDamage(50, 50), 2));
+		CHECK(Archery::ElementalDamage(0, 100) == 0);
+		CHECK(Archery::ElementalDamage(100, 0) == 0);
+		CHECK(Archery::ElementalDamage(0, 150) == 0);
+		CHECK(Near(Archery::ElementalDamage(0, -50), 12));
+		CHECK(Archery::ElementalDamage(std::numeric_limits<float>::infinity(), 0) == 0);
+	}
+
+	void ChaosDownRules()
+	{
+		// These numeric keys are in existing Challenge/Humble/Duel saves and equipped slots.
+		static_assert(static_cast<int>(Ability::kChaosDown) == 3);
+		static_assert(static_cast<int>(Perk::kChaosDown) == 7);
+		static_assert(static_cast<int>(Perk::kChaosDownWide) == 8);
+		static_assert(static_cast<int>(Perk::kChaosDownLingering) == 9);
+		CHECK(Info(Ability::kChaosDown).name == "Chaos Down");
+		const auto tank = Role::kTank;
+		const auto& path = PathOf(tank);
+		CHECK(path[6].perk == Perk::kChaosDown && path[6].tier == 1);
+		CHECK(path[7].name == "Widening Chaos" && path[8].name == "Lingering Chaos");
+		for (int rank = 1; rank <= 3; ++rank) {
+			CHECK(Near(Value(Perk::kChaosDown, rank), std::array{ 25.0f, 40.0f, 55.0f }[rank - 1]));
+			CHECK(Near(Value(Perk::kChaosDownWide, rank), 50.0f * rank));
+			CHECK(Near(Value(Perk::kChaosDownLingering, rank), 2.0f * rank));
+		}
+		CHECK(Near(Cooldown(Fresh(), tank, Ability::kChaosDown), 25.0f));
+		CHECK(Near(ChaosDown::kReach + Value(Perk::kChaosDownWide, 3), 400.0f));
+		CHECK(Near(ChaosDown::kSeconds + Value(Perk::kChaosDownLingering, 3), 14.0f));
+
+		auto record = Fresh();
+		record.peak = 35;
+		for (const auto perk : { Perk::kTaunt, Perk::kTaunt, Perk::kTaunt, Perk::kTauntBrace, Perk::kTauntBrace, Perk::kTauntBrace,
+			Perk::kChaosDown, Perk::kChaosDown, Perk::kChaosDown, Perk::kChaosDownWide, Perk::kChaosDownWide, Perk::kChaosDownLingering }) {
+			CHECK(Learn(record, tank, At(tank, perk), 99) == Block::kNone);
+		}
+		// The old saved slot value (3) equips the replacement; no refund, respec or extra cost.
+		CHECK(Equip(record, tank, 1, static_cast<Ability>(3)) == Block::kNone);
+		const auto decoded = Decode(Encode(std::vector<Entry>{ { 0x1234u, record } }), kRecordVersion);
+		CHECK(decoded.size() == 1);
+		if (!decoded.empty()) {
+			const auto& saved = decoded.front().second;
+			CHECK(saved == record && Spent(saved) == Spent(record));
+			CHECK(Rank(saved, tank, Ability::kChaosDown) == 3);
+			CHECK(Rank(saved, tank, Perk::kChaosDownWide) == 2 && Rank(saved, tank, Perk::kChaosDownLingering) == 1);
+		}
+
+		const auto first = ChaosDown::Combine(100, 0, 0, 25, 8);
+		CHECK(Near(first.amount, -25) && Near(first.seconds, 8));
+		const auto repeat = ChaosDown::Combine(75, first.amount, 3, 25, 8);
+		CHECK(Near(repeat.amount, -25) && Near(repeat.seconds, 8));
+		const auto stronger = ChaosDown::Combine(75, -25, 3, 55, 8);
+		CHECK(Near(stronger.amount, -55));
+		const auto weaker = ChaosDown::Combine(45, -55, 12, 25, 8);
+		CHECK(Near(weaker.amount, -55) && Near(weaker.seconds, 12));
+		CHECK(Near(ChaosDown::Combine(150, 0, 0, 40, 8).amount, -60));
+		// A separate speed change stays in place when our own contribution is removed.
+		const auto modified = ChaosDown::Combine(60, -25, 3, 40, 8);
+		CHECK(Near(modified.amount, -34));
+		CHECK(Near(60 + (modified.amount - (-25)) - modified.amount, 85));
+		CHECK(ChaosDown::Combine(0, 0, 0, 55, 8).amount == 0);
+		CHECK(ChaosDown::Combine(100, 0, 0, 55, 0).amount == 0);
+		CHECK(ChaosDown::Combine(std::numeric_limits<float>::quiet_NaN(), 0, 0, 55, 8).amount == 0);
+		const auto attack = ChaosDown::CombineAttack(1, 0, 0, 25, 8);
+		CHECK(Near(1 + attack.amount, 0.75f));
+		const auto unset = ChaosDown::CombineAttack(0, 0, 0, 55, 8);
+		CHECK(Near(unset.amount, 0.45f));
+		const auto unsetRepeat = ChaosDown::CombineAttack(0.45f, unset.amount, 4, 25, 8);
+		CHECK(Near(unsetRepeat.amount, 0.45f) && Near(unsetRepeat.seconds, 8));
+		// A separate modifier being added then removed can leave one ULP above our
+		// positive contribution on an initially unset multiplier. It is still unset.
+		const float residueCurrent = std::nextafter(unset.amount, 1.0f);
+		const auto residueRepeat = ChaosDown::CombineAttack(residueCurrent, unset.amount, 4, 25, 8);
+		CHECK(Near(residueRepeat.amount, 0.45f));
+		CHECK(residueCurrent + residueRepeat.amount - unset.amount > 0.44f);
+		const float remaining = residueCurrent - unset.amount;
+		CHECK(remaining + ChaosDown::AttackUnsetCorrection(remaining) == 0.0f);
+		CHECK(-remaining + ChaosDown::AttackUnsetCorrection(-remaining) == 0.0f);
+		CHECK(ChaosDown::AttackUnsetCorrection(0.1f) == 0.0f);
+		CHECK(ChaosDown::AttackUnsetCorrection(1.2f) == 0.0f);
+		CHECK(ChaosDown::AttackUnsetCorrection(std::numeric_limits<float>::quiet_NaN()) == 0.0f);
+		const auto attackRepeat = ChaosDown::CombineAttack(0.75f, attack.amount, 4, 25, 8);
+		CHECK(Near(attackRepeat.amount, -0.25f));
+		const auto attackStronger = ChaosDown::CombineAttack(0.75f, -0.25f, 4, 55, 8);
+		CHECK(Near(attackStronger.amount, -0.55f));
+		const auto attackWeaker = ChaosDown::CombineAttack(0.45f, -0.55f, 12, 25, 8);
+		CHECK(Near(attackWeaker.amount, -0.55f) && Near(attackWeaker.seconds, 12));
+		const auto quickened = ChaosDown::CombineAttack(1.5f, 0, 0, 40, 8);
+		CHECK(Near(1.5f + quickened.amount, 0.9f));
+		const auto otherMod = ChaosDown::CombineAttack(0.95f, -0.25f, 4, 40, 8);
+		CHECK(Near(otherMod.amount, -0.48f));
+		CHECK(Near(0.95f + (otherMod.amount - (-0.25f)) - otherMod.amount, 1.2f));
+		CHECK(Near(ChaosDown::CombineAttack(0, 0, 0, 500, 8).amount, 0.1f));
+		CHECK(ChaosDown::CombineAttack(1, 0, 0, 55, 0).seconds == 0);
+		CHECK(ChaosDown::CombineAttack(std::numeric_limits<float>::quiet_NaN(), 0, 0, 55, 8).seconds == 0);
+	}
 
 	void Shape()
 	{
@@ -72,10 +236,10 @@ namespace
 			}
 			CHECK(abilityCount == static_cast<int>(kAbilitiesPerPath));
 			CHECK(traits == static_cast<int>(kTraitsPerPath));
-			CHECK(defaults == 2);
+			CHECK(defaults == 0);
 			CHECK(capstones == (role == Role::kMage ? 1 : 0));
 			const auto d = Defaults(role);
-			CHECK(d[0] != Ability::kNone && d[1] != Ability::kNone && d[0] != d[1]);
+			CHECK(d[0] == Ability::kNone && d[1] == Ability::kNone);
 		}
 		// Every ability lives on at least one path (Ward on two), but the retired Atronach.
 		for (std::size_t a = 1; a < kAbilityCount; ++a) {
@@ -93,9 +257,48 @@ namespace
 			CHECK(!Info(static_cast<Ability>(a)).name.empty());
 			CHECK(Info(static_cast<Ability>(a)).glyph != 0);
 		}
-		CHECK(IndexOf(Role::kHealer, Ability::kWard) >= 0 && IndexOf(Role::kMage, Ability::kWard) >= 0);
+		CHECK(IndexOf(Role::kHealer, Ability::kWard) >= 0 && IndexOf(Role::kMage, Ability::kWard) < 0);
 		CHECK(Signature() != 0);
 	}
+
+	void MageRework()
+    {
+        std::vector<std::uint8_t> bytes;
+        const auto put=[&](std::uint32_t value,int count){for(int i=0;i<count;i++)bytes.push_back(static_cast<std::uint8_t>(value>>(8*i)));};
+        put(1,4);put(0x14,4);put(50,2);put(static_cast<std::uint32_t>(kRoles),1);
+        for(std::size_t r=0;r<kRoles;r++) {
+            const bool mage=r==static_cast<std::size_t>(Role::kMage), healer=r==static_cast<std::size_t>(Role::kHealer);
+            put(mage||healer?static_cast<std::uint32_t>(Ability::kWard):0,1);put(mage?static_cast<std::uint32_t>(Ability::kBurst):0,1);
+            put(mage?6:healer?2:0,1);
+            if(mage) for(const auto& [perk,rank]:std::array<std::pair<Perk,int>,6>{{{Perk::kWard,3},{Perk::kWardSpellward,3},{Perk::kWardMantle,1},{Perk::kBurst,3},{Perk::kBurstSearing,2},{Perk::kBurstTwin,1}}}) {put(static_cast<std::uint32_t>(perk),1);put(rank,1);}
+            if(healer) {put(static_cast<std::uint32_t>(Perk::kWard),1);put(2,1);put(static_cast<std::uint32_t>(Perk::kHeal),1);put(3,1);}
+        }
+        put(0,4);
+        auto decoded=Decode(bytes,kRecordVersion);
+        CHECK(decoded.size()==1);
+        if(decoded.empty()) return;
+        auto& record=decoded[0].second;
+        Repair(record,99);
+        CHECK(IndexOf(Role::kMage,Ability::kBurst)==3 && IndexOf(Role::kMage,Ability::kDragonBreath)==6);
+        CHECK(Rank(record,Role::kMage,Ability::kBurst)==3 && Rank(record,Role::kMage,Perk::kBurstSearing)==2 && Rank(record,Role::kMage,Perk::kBurstTwin)==1);
+        CHECK(Rank(record,Role::kMage,Ability::kDragonBreath)==0 && Rank(record,Role::kMage,Ability::kWard)==0);
+        CHECK(Rank(record,Role::kHealer,Ability::kWard)==2);
+        CHECK(Spent(record,Role::kMage)==9);
+        const auto& slots=record.slots[static_cast<std::size_t>(Role::kMage)];
+        CHECK(slots[0]==Ability::kNone && slots[1]==Ability::kBurst);
+        auto old=Decode(bytes,3);
+        CHECK(old.size()==1);
+        if(!old.empty()) {
+            CHECK(Rank(old[0].second,Role::kHealer,Ability::kWard)==0);
+            CHECK(Rank(old[0].second,Role::kHealer,Ability::kHeal)==3);
+            CHECK(Spent(old[0].second,Role::kHealer)==6);
+        }
+        CHECK(IndexOf(Role::kHealer,Ability::kRenewal)==3);
+        CHECK(IndexOf(Role::kHealer,Ability::kRejuvenate)==6);
+        CHECK(IndexOf(Role::kHealer,Ability::kWard)==9);
+        CHECK(RequiredLevel(PathOf(Role::kHealer)[6],1)==35);
+        CHECK(RequiredLevel(PathOf(Role::kHealer)[9],1)==50);
+    }
 
 	void Words()
 	{
@@ -106,16 +309,17 @@ namespace
 				}
 			}
 		}
-		CHECK(Describe(Perk::kWard, 1).find("Oakflesh") != std::string::npos);
-		CHECK(Describe(Perk::kWard, 3).find("Ebonyflesh") != std::string::npos);
+		CHECK(Describe(Perk::kWard, 1).find("20%") != std::string::npos);
+		CHECK(Describe(Perk::kWard, 3).find("30%") != std::string::npos);
 		CHECK(Describe(Perk::kMagnus, 1).find("never runs dry") != std::string::npos);
 		CHECK(Describe(Perk::kMagnus, 3).find("50%") != std::string::npos);
 		CHECK(Near(Third(Perk::kMagnus, 3), 50.0f) && Near(Third(Perk::kMagnus, 2), 0.0f));
-		CHECK(Describe(Perk::kWardShared, 3).find("Every companion") != std::string::npos);
+		CHECK(Describe(Perk::kWardShared, 3).find("6 m farther") != std::string::npos);
 		CHECK(Near(Value(Perk::kTaunt, 1), 10.0f) && Near(Value(Perk::kTaunt, 2), 15.0f) && Near(Value(Perk::kTaunt, 3), 30.0f));
 		CHECK(Near(Value(Perk::kTaunt, 0), 0.0f));
 		CHECK(Near(Second(Perk::kWarCry, 3), 1.0f));
 	}
+
 
 	void Points()
 	{
@@ -125,67 +329,135 @@ namespace
 		CHECK(Earned(50, 10) == 40);
 		CHECK(Earned(50, 0) == 50);
 		CHECK(Earned(50, -3) == 50);
-
-		auto record = Fresh();
+		const auto record = Fresh();
 		CHECK(Spent(record) == 0);
-		CHECK(Rank(record, Role::kTank, Ability::kTaunt) == 1);
-		CHECK(Rank(record, Role::kTank, Ability::kChallenge) == 0);
-		CHECK(record.slots[static_cast<std::size_t>(Role::kTank)][0] == Ability::kTaunt);
-		CHECK(record.slots[static_cast<std::size_t>(Role::kTank)][1] == Ability::kBodyguard);
-		CHECK(record.slots[static_cast<std::size_t>(Role::kHealer)][0] == Ability::kHeal);
-		CHECK(record.slots[static_cast<std::size_t>(Role::kMage)][1] == Ability::kWard);
+		for (std::size_t r = 0; r < kRoles; ++r) {
+			CHECK(record.slots[r][0] == Ability::kNone && record.slots[r][1] == Ability::kNone);
+			for (std::size_t i = 0; i < kNodes; ++i) {
+				CHECK(record.ranks[r][i] == 0);
+				const auto role = static_cast<Role>(r);
+				const auto& node = PathOf(role)[i];
+				for (int rank = 1; rank <= node.most; ++rank)
+					CHECK(CostOf(role, i, rank) == (node.kind == Kind::kAbility ? rank : 1));
+			}
+		}
 	}
+
 
 	void Learning()
 	{
 		const auto tank = Role::kTank;
-		auto       record = Fresh();
-		const int  earned = 20;
+		auto record = Fresh();
+		const auto taunt = At(tank, Perk::kTaunt), brace = At(tank, Perk::kTauntBrace), chaos = At(tank, Perk::kChaosDown);
+		CHECK(CanLearn(record, tank, chaos, 99) == Block::kLevel);
+		CHECK(CanLearn(record, tank, brace, 99) == Block::kParent);
+		CHECK(CanLearn(record, tank, taunt, 0) == Block::kNoPoints);
+		CHECK(Learn(record, tank, taunt, 1) == Block::kNone);
+		CHECK(Spent(record) == 1);
+		CHECK(CanLearn(record, tank, taunt, 2) == Block::kNoPoints);
+		CHECK(Learn(record, tank, taunt, 3) == Block::kNone);
+		CHECK(CanLearn(record, tank, taunt, 5) == Block::kNoPoints);
+		CHECK(Learn(record, tank, taunt, 6) == Block::kNone);
+		CHECK(CanLearn(record, tank, taunt, 99) == Block::kMaxed);
+		CHECK(Spent(record) == 6);
+		record.peak = 35;
+		CHECK(Learn(record, tank, chaos, 7) == Block::kNone);
+		CHECK(CanLearn(record, tank, At(tank, Perk::kStandFast), 99) == Block::kLevel);
+		CHECK(CanForget(record, tank, taunt) == Block::kNone);
+		CHECK(Forget(record, tank, chaos) == Block::kNone);
+		for (int rank = 1; rank <= 3; ++rank) CHECK(Learn(record, tank, brace, 99) == Block::kNone);
+		CHECK(CanForget(record, tank, taunt) == Block::kHolds);
+		CHECK(Forget(record, tank, brace) == Block::kNone);
+		CHECK(Forget(record, tank, taunt) == Block::kNone);
+		CHECK(Spent(record) == 5); // Refund III's three points, plus one branch rank.
+		CHECK(CanLearn(record, Role::kArcher, 12, 5) == Block::kNoPoints);
+		CHECK(Learn(record, Role::kArcher, 12, 6) == Block::kNone);
+		Reset(record, tank);
+		CHECK(Spent(record) == 1 && Spent(record, tank) == 0);
+		CHECK(Rank(record, tank, Ability::kTaunt) == 0);
+		CHECK(record.slots[static_cast<std::size_t>(tank)][0] == Ability::kNone);
+	}
 
-		// Tier two waits for five points on the path.
-		CHECK(CanLearn(record, tank, At(tank, Perk::kChallenge), earned) == Block::kTier);
-		// A branch never outranks its ability.
-		CHECK(Learn(record, tank, At(tank, Perk::kTauntBrace), earned) == Block::kNone);
-		CHECK(CanLearn(record, tank, At(tank, Perk::kTauntBrace), earned) == Block::kParent);
-		CHECK(Learn(record, tank, At(tank, Perk::kTaunt), earned) == Block::kNone);
-		CHECK(Learn(record, tank, At(tank, Perk::kTaunt), earned) == Block::kNone);
-		CHECK(CanLearn(record, tank, At(tank, Perk::kTaunt), earned) == Block::kMaxed);
-		CHECK(Learn(record, tank, At(tank, Perk::kTauntBrace), earned) == Block::kNone);
-		CHECK(Spent(record, tank) == 4);
-		CHECK(CanLearn(record, tank, At(tank, Perk::kChallenge), earned) == Block::kTier);
-		CHECK(Learn(record, tank, At(tank, Perk::kIronHide), earned) == Block::kNone);
-		CHECK(Spent(record, tank) == 5);
-		CHECK(Learn(record, tank, At(tank, Perk::kChallenge), earned) == Block::kNone);
-		CHECK(Rank(record, tank, Ability::kChallenge) == 1);
-		// Tier three waits for ten below it.
-		CHECK(CanLearn(record, tank, At(tank, Perk::kStandFast), earned) == Block::kTier);
+    void AbilityLevels()
+    {
+        for(std::size_t r=0;r<kRoles;++r){
+            const auto role=static_cast<Role>(r);const auto& path=PathOf(role);
+            for(const auto index:{std::size_t{6},std::size_t{9}}){
+                auto record=Fresh();const int required=index==6?35:50;
+                record.peak=static_cast<std::uint16_t>(required-1);
+                CHECK(CanLearn(record,role,index,kUnlimited)==Block::kLevel);
+                record.peak=static_cast<std::uint16_t>(required);
+                if(path[index].capstone)continue;
+                CHECK(CanLearn(record,role,index,0)==Block::kNoPoints);
+                CHECK(Learn(record,role,index,1)==Block::kNone);
+                CHECK(Spent(record)==1); // No earlier ability purchases.
+                CHECK(Repair(record,99)==false);
+                CHECK(Learn(record,role,index+1,2)==Block::kNone);
+                CHECK(CanForget(record,role,index)==Block::kHolds); // Its own branch still depends on it.
+                auto loaded=Decode(Encode(std::vector<Entry>{{42,record}}),kRecordVersion);
+                CHECK(loaded.size()==1 && !Repair(loaded[0].second,99));
+                CHECK(Rank(loaded[0].second,role,path[index].ability)==1);
+                record.peak=static_cast<std::uint16_t>(required-1);
+                CHECK(Repair(record,99));
+                CHECK(Spent(record)==0); // Refund only newly level-locked purchases and branches.
+            }
+        }
+        CHECK(Why(Block::kNoPoints)=="Not enough perk points");
+        CHECK(Why(Block::kHolds)=="Refund dependent perks first");
+        CHECK(Why(Block::kNotMastered)=="Requires all perks at maximum rank");
+        for(std::size_t role=0;role<kRoles;++role)for(const auto& node:PathOf(static_cast<Role>(role))) {
+            if(node.kind!=Kind::kBranch)continue;
+            for(int rank=1;rank<=3;++rank) {
+                const auto expected=std::string("Requires ")+std::string(Info(node.ability).name)+" Rank "+std::to_string(rank);
+                CHECK(Requirement(Block::kParent,node,rank)==expected);
+            }
+        }
 
-		// Giving back.
-		CHECK(CanForget(record, tank, At(tank, Perk::kBodyguard)) == Block::kDefault);
-		CHECK(CanForget(record, tank, At(tank, Perk::kStandFast)) == Block::kNothing);
-		// Iron Hide is one of the five that open tier two, which has a point in it.
-		CHECK(CanForget(record, tank, At(tank, Perk::kIronHide)) == Block::kHolds);
-		// Taunt at 3 holds Brace at 2.
-		CHECK(Learn(record, tank, At(tank, Perk::kTauntBrace), earned) == Block::kNone);
-		CHECK(CanForget(record, tank, At(tank, Perk::kTaunt)) == Block::kHolds);
-		CHECK(Forget(record, tank, At(tank, Perk::kChallenge)) == Block::kNone);
-		CHECK(Forget(record, tank, At(tank, Perk::kIronHide)) == Block::kNone);
+    }
 
-		// Out of points.
-		auto poor = Fresh();
-		CHECK(CanLearn(poor, tank, At(tank, Perk::kTaunt), 0) == Block::kNoPoints);
-		CHECK(Learn(poor, tank, At(tank, Perk::kTaunt), 1) == Block::kNone);
-		CHECK(CanLearn(poor, tank, At(tank, Perk::kTaunt), 1) == Block::kNoPoints);
-		// Points are shared by every path.
-		CHECK(CanLearn(poor, Role::kArcher, At(Role::kArcher, Perk::kFletcher), 1) == Block::kNoPoints);
-		CHECK(CanLearn(poor, Role::kArcher, At(Role::kArcher, Perk::kFletcher), 2) == Block::kNone);
+	void TraitLevels()
+	{
+		for (std::size_t r = 0; r < kRoles; ++r) {
+			const auto role = static_cast<Role>(r);
+			for (std::size_t i = 12; i < kNodes; ++i) {
+				auto record = Fresh(); record.peak = 1;
+				CHECK(Learn(record, role, i, 1) == Block::kNone);
+				record.peak = 24;
+				CHECK(CanLearn(record, role, i, kUnlimited) == Block::kLevel);
+				record.peak = 25;
+				CHECK(Learn(record, role, i, 2) == Block::kNone);
+				record.peak = 49;
+				CHECK(CanLearn(record, role, i, kUnlimited) == Block::kLevel);
+				record.peak = 50;
+				CHECK(Learn(record, role, i, 3) == Block::kNone);
+				CHECK(Spent(record) == 3);
+				record.peak = 24;
+				CHECK(Repair(record, kUnlimited));
+				CHECK(record.ranks[r][i] == 1 && Spent(record) == 1);
+			}
+		}
+	}
 
-		// Reset gives everything on a path back and leaves the others.
-		Learn(poor, Role::kArcher, At(Role::kArcher, Perk::kFletcher), 2);
-		Reset(poor, tank);
-		CHECK(Spent(poor, tank) == 0);
-		CHECK(Spent(poor) == 1);
-		CHECK(Rank(poor, tank, Ability::kTaunt) == 1);
+	void ProgressionMigration()
+	{
+		auto record = Fresh(); record.peak = 60;
+		Learn(record, Role::kTank, 0, 99); Learn(record, Role::kTank, 0, 99);
+		record.bonus[0] = 7;
+		const auto bytes = Encode(std::vector<Entry>{{42, record}});
+		for (const auto version : {1u, 2u}) {
+			const auto migrated = Decode(bytes, version);
+			CHECK(migrated.size() == 1);
+			CHECK(migrated[0].second.peak == 60 && Spent(migrated[0].second) == 0);
+			CHECK(migrated[0].second.slots == Fresh().slots);
+			Book book;
+			book.Load(migrated, migrated); // Unlimited backup must migrate as well.
+			CHECK(book.SetUnlimited(42, false) == Block::kNone);
+			CHECK(book.Unspent(42) == 50);
+			CHECK(book.Learn(42, Role::kTank, 0) == Block::kNone);
+			const auto saved = Decode(Encode(book.Records()), kRecordVersion);
+			CHECK(Rank(saved[0].second, Role::kTank, Ability::kTaunt) == 1);
+			CHECK(saved[0].second.peak == 60); // New saves keep purchases, no repeat reset.
+		}
 	}
 
 	void Slots()
@@ -195,17 +467,20 @@ namespace
 		const auto f = static_cast<std::size_t>(fighter);
 		CHECK(Equip(record, fighter, 0, Ability::kRiposte) == Block::kNotLearned);
 		CHECK(Equip(record, fighter, 0, Ability::kVolley) == Block::kBadNode);
+		CHECK(Learn(record, fighter, At(fighter, Perk::kDisarm), 30) == Block::kNone);
+		CHECK(Learn(record, fighter, At(fighter, Perk::kSecondWind), 30) == Block::kNone);
 		// Swapping the two.
 		CHECK(Equip(record, fighter, 0, Ability::kSecondWind) == Block::kNone);
 		CHECK(record.slots[f][0] == Ability::kSecondWind && record.slots[f][1] == Ability::kDisarm);
 
-		// Learn Riposte (five in tier one first), carry it, then forget it: the slot refills.
+		// Learn Riposte at level 35, carry it, then forget it: the slot refills.
+		record.peak = 35;
 		for (int i = 0; i < 2; ++i) {
 			Learn(record, fighter, At(fighter, Perk::kDisarm), 30);
 			Learn(record, fighter, At(fighter, Perk::kSecondWind), 30);
 		}
 		Learn(record, fighter, At(fighter, Perk::kFlanker), 30);
-		CHECK(Spent(record, fighter) == 5);
+		CHECK(Spent(record, fighter) == 13);
 		CHECK(Learn(record, fighter, At(fighter, Perk::kRiposte), 30) == Block::kNone);
 		CHECK(Equip(record, fighter, 1, Ability::kRiposte) == Block::kNone);
 		CHECK(record.slots[f][1] == Ability::kRiposte);
@@ -219,13 +494,14 @@ namespace
 		const auto m = static_cast<std::size_t>(mage);
 		auto       record = Fresh();
 		record.ranks[m][At(mage, Perk::kSurge)] = 9;           // past its highest rank
-		record.ranks[m][At(mage, Perk::kWard)] = 0;            // below a default's
-		record.ranks[m][At(mage, Perk::kWardMantle)] = 1;      // above a parent at 1 is fine
+		record.ranks[m][At(mage, Perk::kBurst)] = 0;            // below a default's
+		record.ranks[m][At(mage, Perk::kBurstTwin)] = 1;      // above a parent at 1 is fine
 		record.ranks[m][At(mage, Perk::kMagnus)] = 2;          // a capstone with nothing under it
 		record.slots[m] = { Ability::kAtronachRetired, Ability::kMagnus };
 		CHECK(Repair(record, 40));
 		CHECK(Rank(record, mage, Ability::kSurge) == 3);
-		CHECK(Rank(record, mage, Ability::kWard) == 1);
+		CHECK(Rank(record, mage, Ability::kBurst) == 0);
+		CHECK(Rank(record, mage, Perk::kBurstTwin) == 0);
 		CHECK(Rank(record, mage, Ability::kMagnus) == 0);
 		CHECK(record.slots[m][1] != Ability::kMagnus);
 		CHECK(record.slots[m][0] != Ability::kAtronachRetired && record.slots[m][0] != Ability::kNone && record.slots[m][1] != record.slots[m][0]);
@@ -233,6 +509,7 @@ namespace
 
 		// Overspent (the level limit went up): the fullest path gives back until it fits.
 		auto rich = Fresh();
+		rich.peak = 50;
 		for (std::size_t i = 0; i < kNodes; ++i) {
 			for (int k = 0; k < 3; ++k) {
 				Learn(rich, Role::kArcher, i, 100);
@@ -241,7 +518,7 @@ namespace
 		const int all = Spent(rich, Role::kArcher);
 		CHECK(all > 30);
 		CHECK(Repair(rich, 12));
-		CHECK(Spent(rich) == 12);
+		CHECK(Spent(rich) <= 12);
 		CHECK(Repair(rich, 0));
 		CHECK(Spent(rich) == 0);
 	}
@@ -249,14 +526,23 @@ namespace
 	void Cooldowns()
 	{
 		auto record = Fresh();
+		CHECK(Near(Cooldown(record, Role::kMage, Ability::kBurst), 30.0f));
+		// Searing stays a support debuff; the other branches sharing its old table stay intact.
+		CHECK(Near(Value(Perk::kBurstSearing, 1), 10.0f));
+		CHECK(Near(Value(Perk::kBurstSearing, 2), 15.0f));
+		CHECK(Near(Value(Perk::kBurstSearing, 3), 20.0f));
+		CHECK(Near(Value(Perk::kTriage, 3), 45.0f));
+		CHECK(Near(Value(Perk::kWardSpellward, 3), 6.0f));
+		CHECK(Describe(Perk::kBurstTwin, 1).find("50% damage") != std::string::npos);
 		CHECK(Near(Cooldown(record, Role::kTank, Ability::kTaunt), 16.0f));
-		CHECK(Near(Cooldown(record, Role::kHealer, Ability::kHeal), 60.0f));
-		CHECK(Near(Cooldown(record, Role::kHealer, Ability::kRejuvenate), 60.0f));
+		// The healing circle waits the same at every rank: Invigorate brings stamina, not speed.
+		CHECK(Near(Cooldown(record, Role::kHealer, Ability::kHeal), 40.0f));
+		CHECK(Near(Cooldown(record, Role::kHealer, Ability::kRejuvenate), 50.0f));
 		for (int i = 0; i < 2; ++i) {
 			Learn(record, Role::kHealer, At(Role::kHealer, Perk::kHeal), 30);
 		}
-		Learn(record, Role::kHealer, At(Role::kHealer, Perk::kHealSwift), 30);
-		Learn(record, Role::kHealer, At(Role::kHealer, Perk::kHealSwift), 30);
+		Learn(record, Role::kHealer, At(Role::kHealer, Perk::kHealInvigorate), 30);
+		Learn(record, Role::kHealer, At(Role::kHealer, Perk::kHealInvigorate), 30);
 		CHECK(Near(Cooldown(record, Role::kHealer, Ability::kHeal), 40.0f));
 		for (std::size_t a = 1; a < kAbilityCount; ++a) {
 			for (std::size_t r = 0; r < kRoles; ++r) {
@@ -298,6 +584,7 @@ namespace
 	// Every node of a path at its highest rank, capstone included.
 	void MasterPath(Record& a_record, Role a_role)
 	{
+		a_record.peak = std::max<std::uint16_t>(a_record.peak, 50);
 		for (int pass = 0; pass < 4; ++pass) {
 			for (std::size_t i = 0; i < kNodes; ++i) {
 				for (int k = 0; k < 3; ++k) {
@@ -346,7 +633,7 @@ namespace
 		auto partial = Fresh();
 		partial.bonus[static_cast<std::size_t>(tank)] = 9;
 		CHECK(!TierOpen(partial, tank, 1));
-		CHECK(CanLearn(partial, tank, At(tank, Perk::kChallenge), 99) == Block::kTier);
+		CHECK(CanLearn(partial, tank, At(tank, Perk::kChaosDown), 99) == Block::kLevel);
 		// Back out one at a time, and all of them when the path starts over.
 		CHECK(Divest(record, archer) == Block::kNone);
 		CHECK(Invested(record, archer) == 1);
@@ -367,7 +654,7 @@ namespace
 		auto kept = Fresh();
 		MasterPath(kept, archer);
 		kept.bonus[a] = 3;
-		Forget(kept, archer, At(archer, Perk::kSharpshooter));
+		Forget(kept, archer, At(archer, Perk::kSpellTouched));
 		CHECK(!Repair(kept, 99));
 		CHECK(Invested(kept, archer) == 3);
 		// Unlimited points and back: the bonus as it was before.
@@ -388,7 +675,7 @@ namespace
 		const auto               out = Decode(bytes, kRecordVersion);
 		CHECK(out.size() == 2 && out[0].second == saved && out[1].second == Fresh());
 		const auto old = Decode(bytes, 1);
-		CHECK(old.size() == 2 && old[0].second.ranks == saved.ranks && old[0].second.bonus[a] == 0);
+		CHECK(old.size() == 2 && old[0].second.ranks == Fresh().ranks && old[0].second.bonus[a] == 0 && old[0].second.peak == saved.peak);
 		// A version 1 record loads as it always did.
 		auto plain = Fresh();
 		plain.bonus = {};
@@ -415,12 +702,12 @@ namespace
 		// Spending is theirs alone.
 		CHECK(book.Learn(lydia, tank, At(tank, Perk::kTaunt)) == Block::kNone);
 		CHECK(book.Unspent(lydia) == 19 && book.Unspent(aela) == 4);
-		for (const auto perk : { Perk::kVolley, Perk::kVolley, Perk::kDeadeye, Perk::kDeadeye }) {
+		for (const auto perk : { Perk::kVolley, Perk::kVolley, Perk::kDeadeye }) {
 			CHECK(book.Learn(aela, archer, At(archer, perk)) == Block::kNone);
 		}
 		CHECK(book.Unspent(aela) == 0);
 		// Out of her own points, with Lydia's untouched: they are not hers to spend.
-		CHECK(book.Learn(aela, archer, At(archer, Perk::kFletcher)) == Block::kNoPoints);
+		CHECK(book.Learn(aela, archer, At(archer, Perk::kSteadyBreath)) == Block::kNoPoints);
 		CHECK(book.Unspent(lydia) == 19);
 
 		// Her level rising gives her points, and nobody else; a lower level seen later takes none away.
@@ -437,17 +724,17 @@ namespace
 		CHECK(book.SetUnlimited(aela, true) == Block::kNone);
 		CHECK(book.Unlimited(aela) && !book.Unlimited(lydia));
 		CHECK(book.Earned(aela) == kUnlimited && book.Earned(lydia) == 20);
-		for (int k = 0; k < 3; ++k) {
-			CHECK(book.Learn(aela, archer, At(archer, Perk::kFletcher)) == Block::kNone);
-		}
+		CHECK(book.Learn(aela, archer, At(archer, Perk::kSteadyBreath)) == Block::kNone);
+		CHECK(book.Learn(aela, archer, At(archer, Perk::kSteadyBreath)) == Block::kNone);
+		CHECK(book.Unspent(aela) == kUnlimited);
 		CHECK(book.Learn(lydia, tank, At(tank, Perk::kTaunt)) == Block::kNone);
 		CHECK(book.SetUnlimited(aela, false) == Block::kNone);
 		CHECK(book.Earned(aela) == 6 && book.Unspent(aela) == 2);
 		CHECK(book.Unspent(lydia) == 19);
 
 		// Bonus points: on their own mastered path, out of their own pool.
-		book.Meet(lydia, 60);
-		CHECK(book.Earned(lydia) == 50);
+		book.Meet(lydia, 80);
+		CHECK(book.Earned(lydia) == 70);
 		for (int pass = 0; pass < 3; ++pass) {
 			for (std::size_t i = 0; i < kNodes; ++i) {
 				for (int k = 0; k < 3; ++k) {
@@ -457,7 +744,7 @@ namespace
 		}
 		CHECK(Mastered(*book.Find(lydia), tank));
 		const int left = book.Unspent(lydia);
-		CHECK(left == 50 - Mastery(tank));
+		CHECK(left == 70 - Mastery(tank));
 		CHECK(book.Invest(lydia, tank, 5) == Block::kNone);
 		CHECK(book.Invest(lydia, tank, 5) == Block::kNone);
 		CHECK(book.Invest(lydia, tank, 0) == Block::kBonusFull);
@@ -512,60 +799,43 @@ namespace
 		const auto mage = Role::kMage;
 		const auto magnus = At(mage, Perk::kMagnus);
 		auto       record = Fresh();
-		CHECK(CostOf(mage, magnus, 1) == 5 && CostOf(mage, magnus, 2) == 3 && CostOf(mage, magnus, 3) == 3);
-		CHECK(Mastery(mage) == 41);
+		record.peak = 50;
+		CHECK(CostOf(mage, magnus, 1) == 1 && CostOf(mage, magnus, 2) == 2 && CostOf(mage, magnus, 3) == 3);
+		CHECK(Mastery(mage) == 49);
 		CHECK(CanLearn(record, mage, magnus, 99) == Block::kCapstone);
-		// A rank in everything else is not enough.
-		for (const auto perk : { Perk::kSurgeOverflow, Perk::kSurgeConduit, Perk::kWardSpellward, Perk::kWardMantle, Perk::kArcaneFlow, Perk::kBurst,
-				 Perk::kBurstSearing, Perk::kBurstTwin, Perk::kSpellShield, Perk::kSurge, Perk::kUnravel }) {
-			CHECK(Learn(record, mage, At(mage, perk), 99) == Block::kNone);
-		}
-		CHECK(Spent(record, mage) == 11);
-		CHECK(CanLearn(record, mage, magnus, 99) == Block::kCapstone);
-		// Every rank of everything else is.
-		const auto& path = PathOf(mage);
-		for (int pass = 0; pass < 3; ++pass) {
-			for (std::size_t i = 0; i < kNodes; ++i) {
-				if (!path[i].Empty() && !path[i].capstone) {
-					Learn(record, mage, i, 99);
-				}
-			}
-		}
-		const int others = Mastery(mage) - 11;
-		CHECK(Spent(record, mage) == others);
-		// One rank short anywhere keeps it shut.
-		const auto unravel = At(mage, Perk::kUnravel);
-		CHECK(Forget(record, mage, unravel) == Block::kNone);
-		CHECK(CanLearn(record, mage, magnus, 99) == Block::kCapstone);
-		CHECK(Learn(record, mage, unravel, 99) == Block::kNone);
-		// Five points to unlock: four left is not enough.
-		CHECK(CanLearn(record, mage, magnus, others + 4) == Block::kNoPoints);
-		CHECK(Learn(record, mage, magnus, others + 5) == Block::kNone);
-		CHECK(Spent(record, mage) == others + 5);
-		// Three for each rank after.
-		CHECK(CanLearn(record, mage, magnus, others + 7) == Block::kNoPoints);
-		CHECK(Learn(record, mage, magnus, others + 8) == Block::kNone);
-		CHECK(Spent(record, mage) == others + 8);
-		CHECK(Equip(record, mage, 0, Ability::kMagnus) == Block::kNone);
-		// Every rank under it holds it up, not only the first.
-		CHECK(CanForget(record, mage, unravel) == Block::kHolds);
-		CHECK(CanForget(record, mage, At(mage, Perk::kBurstTwin)) == Block::kHolds);
-		// A save where something under it is a rank short: it goes, and its points come back.
-		{
-			auto shaken = record;
-			--shaken.ranks[static_cast<std::size_t>(mage)][unravel];
-			CHECK(Repair(shaken, 99));
-			CHECK(shaken.ranks[static_cast<std::size_t>(mage)][magnus] == 0);
-			CHECK(Spent(shaken, mage) == others - 1);
-			CHECK(shaken.slots[static_cast<std::size_t>(mage)][0] != Ability::kMagnus);
-		}
-		CHECK(CanForget(record, mage, magnus) == Block::kNone);
-		CHECK(Forget(record, mage, magnus) == Block::kNone && Forget(record, mage, magnus) == Block::kNone);
-		CHECK(Spent(record, mage) == others);
-		CHECK(record.slots[static_cast<std::size_t>(mage)][0] != Ability::kMagnus);
-		CHECK(CanForget(record, mage, unravel) == Block::kNone);
-		// Empty places cannot be learned.
-		CHECK(CanLearn(record, mage, 10, 99) == Block::kBadNode);
+        // One rank in every other node unlocks Magnus; full mastery is not required.
+        const auto& path = PathOf(mage);
+        for (std::size_t i=0;i<kNodes;++i) if(!path[i].Empty() && !path[i].capstone)
+            CHECK(Learn(record,mage,i,99)==Block::kNone);
+        CHECK(Spent(record,mage)==12);
+        CHECK(CanLearn(record,mage,magnus,99)==Block::kNone);
+        record.peak=49;
+        CHECK(CanLearn(record,mage,magnus,99)==Block::kLevel);
+        record.peak=50;
+        const auto unravel=At(mage,Perk::kUnravel);
+        CHECK(Forget(record,mage,unravel)==Block::kNone);
+        CHECK(CanLearn(record,mage,magnus,99)==Block::kCapstone);
+        CHECK(Learn(record,mage,unravel,99)==Block::kNone);
+        const int others=Spent(record,mage);
+        CHECK(CanLearn(record,mage,magnus,others)==Block::kNoPoints);
+        CHECK(Learn(record,mage,magnus,others+1)==Block::kNone);
+        CHECK(CanLearn(record,mage,magnus,others+2)==Block::kNoPoints);
+        CHECK(Learn(record,mage,magnus,others+3)==Block::kNone);
+        CHECK(Equip(record,mage,0,Ability::kMagnus)==Block::kNone);
+        CHECK(CanForget(record,mage,unravel)==Block::kHolds);
+        CHECK(Learn(record,mage,unravel,99)==Block::kNone);
+        CHECK(CanForget(record,mage,unravel)==Block::kNone);
+        CHECK(Forget(record,mage,unravel)==Block::kNone);
+        auto shaken=record;
+        shaken.ranks[static_cast<std::size_t>(mage)][unravel]=0;
+        CHECK(Repair(shaken,99));
+        CHECK(Rank(shaken,mage,Ability::kMagnus)==0);
+        CHECK(Spent(shaken,mage)==others-1);
+        CHECK(shaken.slots[static_cast<std::size_t>(mage)][0]!=Ability::kMagnus);
+        CHECK(Forget(record,mage,magnus)==Block::kNone);
+        CHECK(Forget(record,mage,magnus)==Block::kNone);
+        CHECK(CanForget(record,mage,unravel)==Block::kNone);
+        CHECK(CanLearn(record,mage,10,99)==Block::kBadNode);
 		// A save from before Magnus: the Atronach's ranks are dropped and the points come back.
 		std::vector<std::uint8_t> old{ 1, 0, 0, 0, 0x34, 0x12, 0, 0, 30, 0, 6 };
 		for (std::size_t r = 0; r < kRoles; ++r) {
@@ -580,8 +850,41 @@ namespace
 		if (!loaded.empty()) {
 			Repair(loaded[0].second, 20);
 			CHECK(Spent(loaded[0].second) == 0);
-			CHECK(loaded[0].second.slots[static_cast<std::size_t>(mage)][0] == Ability::kSurge);
+			CHECK(loaded[0].second.slots[static_cast<std::size_t>(mage)][0] == Ability::kNone);
 		}
+	}
+
+	void DebugMode()
+	{
+		for(const float heading : {0.0f,1.5707963f,3.1415927f,4.7123890f}) {
+			const auto at=DebugAbility::Aim(10,20,30,heading);
+			CHECK(std::abs(std::hypot(at[0]-10,at[1]-20)-700.0f)<0.001f);
+			CHECK(at[2]==30);
+			CHECK(std::abs((at[0]-10)*std::cos(heading)-(at[1]-20)*std::sin(heading))<0.001f);
+		}
+		Book book;
+		book.Meet(71, 1);
+		const auto original=*book.Find(71);
+		CHECK(book.SetUnlimited(71,true)==Block::kNone);
+		// Every node can be tested at a low level, including branches before their parents.
+		for(std::size_t r=0;r<kRoles;++r) {
+			const auto role=static_cast<Role>(r);
+			const auto& path=PathOf(role);
+			for(std::size_t i=kNodes;i-- > 0;) {
+				if(path[i].Empty()) continue;
+				for(int rank=path[i].base;rank<path[i].most;++rank) CHECK(book.Learn(71,role,i)==Block::kNone);
+				CHECK(book.Learn(71,role,i)==Block::kMaxed);
+				CHECK(book.Unspent(71)==kUnlimited);
+			}
+		}
+		const auto debug=*book.Find(71);
+		Book loaded;
+		loaded.Load(book.Records(),book.KeptAside());
+		CHECK(loaded.Unlimited(71));
+		CHECK(loaded.Find(71)->ranks==debug.ranks);
+		CHECK(loaded.SetUnlimited(71,false)==Block::kNone);
+		CHECK(*loaded.Find(71)==original);
+		CHECK(loaded.Unspent(71)==0);
 	}
 
 	void Unlimited()
@@ -589,42 +892,54 @@ namespace
 		const auto tank = Role::kTank;
 		const auto t = static_cast<std::size_t>(tank);
 		auto       record = Fresh();
-		record.peak = 20;
+		record.peak = 50;
 		Learn(record, tank, At(tank, Perk::kTaunt), 10);
 		const auto before = record;
-		// Unlimited points: everything bought, Challenge and Stand Fast carried.
+		// Unlimited points: everything bought, Chaos Down and Stand Fast carried.
 		for (std::size_t i = 0; i < kNodes; ++i) {
 			for (int k = 0; k < 3; ++k) {
 				Learn(record, tank, i, kUnlimited);
 			}
 		}
 		CHECK(Spent(record, tank) == Mastery(tank));
-		CHECK(Equip(record, tank, 1, Ability::kChallenge) == Block::kNone);
+		CHECK(Equip(record, tank, 1, Ability::kChaosDown) == Block::kNone);
 		CHECK(Equip(record, tank, 0, Ability::kStandFast) == Block::kNone);
-		record.peak = 24;
+		record.peak = 54;
 		Restore(record, before);
 		CHECK(Spent(record) == 1);
-		CHECK(Rank(record, tank, Ability::kTaunt) == 2);
-		CHECK(Rank(record, tank, Ability::kChallenge) == 0);
-		CHECK(record.peak == 24);
+		CHECK(Rank(record, tank, Ability::kTaunt) == 1);
+		CHECK(Rank(record, tank, Ability::kChaosDown) == 0);
+		CHECK(record.peak == 54);
 		// Both carried abilities were added in the meantime: back to the two defaults.
-		CHECK(record.slots[t][0] == Ability::kTaunt && record.slots[t][1] == Ability::kBodyguard);
+		CHECK(record.slots[t][0] == Ability::kTaunt && record.slots[t][1] == Ability::kNone);
 		// A default carried throughout stays where it is.
 		auto kept = before;
-		Learn(kept, tank, At(tank, Perk::kChallenge), kUnlimited);
-		for (const auto perk : { Perk::kTauntBrace, Perk::kTauntBrace, Perk::kIronHide, Perk::kIronHide, Perk::kChallenge }) {
+		Learn(kept, tank, At(tank, Perk::kChaosDown), kUnlimited);
+		for (const auto perk : { Perk::kTauntBrace, Perk::kTauntBrace, Perk::kIronHide, Perk::kIronHide, Perk::kChaosDown }) {
 			Learn(kept, tank, At(tank, perk), kUnlimited);
 		}
 		Equip(kept, tank, 0, Ability::kBodyguard);
-		Equip(kept, tank, 1, Ability::kChallenge);
+		Equip(kept, tank, 1, Ability::kChaosDown);
 		Restore(kept, before);
-		CHECK(kept.slots[t][0] == Ability::kBodyguard && kept.slots[t][1] == Ability::kTaunt);
+		CHECK(kept.slots[t][0] == Ability::kTaunt && kept.slots[t][1] == Ability::kNone);
 	}
 }
 
 int main()
 {
+    CHECK(FWM::Paths::Info(FWM::Paths::Ability::kPinningShot).name == "Windstep");
+    CHECK(FWM::Paths::Value(FWM::Paths::Perk::kPinningShot, 1) == 2);
+    CHECK(FWM::Paths::Value(FWM::Paths::Perk::kPinningShot, 3) == 4);
+    CHECK(FWM::Paths::Value(FWM::Paths::Perk::kPinningHeavy, 3) == 3);
+    MageRework();
+	TraitLevels();
+	AbilityLevels();
+	ProgressionMigration();
+	SteadyBreathRules();
+	ArcherTraitRules();
+	ChaosDownRules();
 	Unlimited();
+	DebugMode();
 	Capstone();
 	Shape();
 	Words();

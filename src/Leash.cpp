@@ -219,13 +219,13 @@ namespace FWM::Leash
 		return status == Status::kReady;
 	}
 
-	void Apply(RE::Actor* a_follower, float a_radius, RE::Actor* a_center)
+	void Apply(RE::Actor* a_follower, float a_radius, RE::TESObjectREFR* a_center, bool a_recovering)
 	{
 		if (!Available() || !a_follower) {
 			return;
 		}
 		auto*      controller = Game::Controller(a_follower);
-		RE::Actor* center = a_center ? a_center : RE::PlayerCharacter::GetSingleton();
+		RE::TESObjectREFR* center = a_center ? a_center : RE::PlayerCharacter::GetSingleton();
 		if (!controller || !center) {
 			return;
 		}
@@ -252,11 +252,12 @@ namespace FWM::Leash
 			area->space = SpaceOf(center);
 			area->updatedAt = 0.0f;
 		}
+		area->priority = a_recovering ? 4 : kPriority;
 		area->radius = a_radius;
 		if (auto& last = logged[a_follower->GetFormID()]; last != std::pair{ a_radius, handle }) {
 			last = { a_radius, handle };
 			Log::Info("[Leash] {} keeps within {:.0f} of {}."sv, Game::Name(a_follower), a_radius,
-				center->IsPlayerRef() ? std::string("you") : Game::Name(center));
+				center->IsPlayerRef() ? std::string("you") : (center->As<RE::Actor>() ? Game::Name(center->As<RE::Actor>()) : std::string("a healer's circle")));
 		}
 		area->enabled = true;
 	}

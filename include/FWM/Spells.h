@@ -16,6 +16,9 @@ namespace FWM::Spells
 	// Everything they may hold under their role, their own spells first.
 	[[nodiscard]] std::vector<View::Spell> OptionsFor(RE::Actor* a_companion, Role a_role);
 
+// Known, role-compatible hand spells only; never includes the player's teachable spells.
+    [[nodiscard]] std::array<std::vector<RE::FormID>,2> Automatic(RE::Actor* actor, Role role);
+
 	// A chosen spell as the plan shows it; an empty Spell for none.
 	[[nodiscard]] View::Spell Describe(RE::FormID a_spell, RE::Actor* a_companion);
 

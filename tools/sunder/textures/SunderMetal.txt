@@ -1,0 +1,11 @@
+Sunder armor-fragment material
+
+Generated with the built-in image_gen tool on 2026-10-22.
+Source: SunderMetal.png. Production: assets/textures/FightWithMe/SunderMetal.dds.
+Conversion: Texconvx64.exe -nologo -y -f BC7_UNORM -w 1024 -h 1024 -m 0 -o <assets/textures/FightWithMe> SunderMetal.png
+
+Initial prompt:
+Use case: photorealistic-natural. Asset type: seamless albedo texture for small broken Nordic steel armor fragments in a fantasy game. Square full-frame flat orthographic material scan of weathered forged steel. Medium cool steel grey, faint blue graphite undertones, dense fine hammered grain, directional scuff marks and shallow scratches, restrained worn silver highlights, subtle small dark pits and very sparse tarnish. Natural irregular surface, believable rough metal. Surface fills the entire image continuously with no object silhouette, no border, no deep cracks, no large decorative patterns or symbols, no text or logo. Neutral even diffuse lighting, no cast shadows or reflections of surroundings. Seamless across all four edges, not a rendered breastplate. Keep midtones visibly silver grey instead of almost black so small fragments read against a dark game background. This is a material texture, not an illustration.
+
+Final refinement prompt (built-in image_gen edit, initial PNG as edit target):
+Use case: precise-object-edit. Asset type: seamless albedo material for broken steel armor plates in a fantasy game. Image 1 is the edit target. Refine its metal surface: make it substantially smoother, cooler blue graphite steel, with subtle long brushed grain and occasional fine bright silver scratches. Remove the coarse rocky grain, hammered craters, large pits and pebbled white speckling. Restrained satin steel with broad smooth midtone regions; a believable lightly worn forged breastplate material, not granite or concrete. Keep the square full-frame flat material scan, continuous tileable edge-to-edge surface, neutral even lighting, no silhouette, no text, no border, no decorative symbols, no reflected objects, no directional cast shadow. Detailed but visually calm so it reads as metal when mapped to small curved plates.

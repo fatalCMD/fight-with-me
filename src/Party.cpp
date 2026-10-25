@@ -1,11 +1,15 @@
 #include "FWM/Party.h"
+#include "FWM/Loadouts.h"
 
 #include "FWM/Forms.h"
 #include "FWM/Game.h"
 #include "FWM/Log.h"
 #include "FWM/Notices.h"
 #include "FWM/Settings.h"
+#include "FWM/Text.h"
 #include "FWM/WalkWithMe.h"
+#include "FWM/AbilityLink.h"
+#include "FWM/WindstepDecoys.h"
 
 namespace FWM::Party
 {
@@ -60,6 +64,7 @@ namespace FWM::Party
 		bool IsFollower(RE::Actor* a_actor, bool& a_summon)
 		{
 			a_summon = false;
+			if(WindstepDecoys::Is(a_actor->GetFormID())||AbilityLink::IsWindstepDecoy(a_actor->GetFormID()))return false;
 			if (a_actor->IsCommandedActor()) {
 				const auto commander = a_actor->GetCommandingActor();
 				if (commander && commander->IsPlayerRef()) {
@@ -157,7 +162,7 @@ namespace FWM::Party
 			const auto after = Playable(Loadout(a_actor), a_member.arsenal);
 			it->second = ForRole(after, it->second);
 			Log::Info("[Party] {} can no longer be a {} ({}) and fights as a {}."sv, a_member.name, Info(before).name, Why(lack), Info(after).name);
-			Notices::Push(std::format("{} cannot be a {}: {} Now a {}.", a_member.name, Info(before).name, Why(lack), Info(after).name), Notices::Kind::kWarning);
+			Notices::Push(Trf("{} cannot be a {}: {} Now a {}.", a_member.name, Info(before).name, Why(lack), Info(after).name), Notices::Kind::kWarning);
 		}
 	}
 
@@ -197,14 +202,15 @@ namespace FWM::Party
 			member.id = actor->GetFormID();
 			member.name = Game::Name(actor.get());
 			member.summon = summon;
+            member.creature = !CanHaveRole(actor.get()) && !summon;
 			member.managedByWalkWithMe = WalkWithMe::IsManaged(member.id);
 			member.arsenalIn -= a_dt;
-			if (!summon && (!member.arsenalKnown || member.arsenalIn <= 0.0f)) {
+			if (member.CanTakeRole() && (!member.arsenalKnown || member.arsenalIn <= 0.0f)) {
 				member.arsenal = Game::ArsenalOf(actor.get());
 				member.arsenalKnown = true;
 				member.arsenalIn = actor->IsInCombat() ? 3.0f : 10.0f;  // an inventory scan is the costly part
 			}
-			if (!summon) {
+			if (member.CanTakeRole()) {
 				(void)OrdersFor(actor.get());
 				Reconsider(member, actor.get(), a_dt);
 				Enforce(member, actor.get());
@@ -306,6 +312,7 @@ namespace FWM::Party
 
 	void ResetRuntime()
 	{
+        Loadouts::EndBattle();
 		members.clear();
 		worldClock.Restart();
 	}
@@ -335,8 +342,30 @@ namespace FWM::Party
 		return nullptr;
 	}
 
+    bool CanHaveRole(RE::Actor* a_actor)
+    {
+        const auto* race = a_actor ? a_actor->GetRace() : nullptr;
+        if (!race) return false;
+        const bool creature = race->HasKeywordString("ActorTypeCreature") ||
+            race->HasKeywordString("ActorTypeAnimal") || race->HasKeywordString("ActorTypeDragon");
+        return RoleAllowed(race->HasKeywordString("ActorTypeNPC"), creature, a_actor->IsCommandedActor());
+    }
+
+    bool CanHaveRole(RE::FormID a_id)
+    {
+        return CanHaveRole(RE::TESForm::LookupByID<RE::Actor>(a_id));
+    }
+
 	Orders& OrdersFor(RE::Actor* a_actor)
 	{
+        // Only Refresh creates orders; keep accidental callers from assigning a creature.
+        static Orders unassigned;
+        if (!CanHaveRole(a_actor)) {
+            unassigned = Orders{};
+            unassigned.autoAbility = unassigned.autoSpecial = unassigned.autoRejuvenate = false;
+            unassigned.position = Position::kFree;
+            return unassigned;
+        }
 		const auto id = a_actor->GetFormID();
 		if (const auto it = orders.find(id); it != orders.end()) {
 			return it->second;
@@ -355,13 +384,20 @@ namespace FWM::Party
 
 	const Orders* FindOrders(RE::FormID a_id)
 	{
+        if (!CanHaveRole(a_id)) return nullptr;
 		const auto it = orders.find(a_id);
+        if(it!=orders.end())if(auto* battle=Loadouts::BattleOrders(a_id,it->second))return battle;
 		return it != orders.end() ? &it->second : nullptr;
 	}
 
 	void SetOrders(RE::FormID a_id, const Orders& a_orders)
 	{
-		orders[a_id] = a_orders;
+        if (!CanHaveRole(a_id)) return;
+		auto& kept = orders[a_id];
+        const auto preferred=kept.role;
+		kept = a_orders;
+        if(Loadouts::Locked(a_id))kept.role=preferred;
+		kept.position = Live(kept.position);
 	}
 
 	std::vector<std::pair<std::uint32_t, Orders>> SavedOrders()
@@ -376,7 +412,18 @@ namespace FWM::Party
 		orders.clear();
 		unsure.clear();
 		for (const auto& [id, saved] : a_orders) {
-			orders[id] = saved;
+			auto& kept = orders[id];
+			kept = saved;
+			kept.position = Live(kept.position);
+		}
+	}
+
+	void AdoptOrders(const std::vector<std::pair<std::uint32_t, Orders>>& a_orders)
+	{
+		for (const auto& [id, saved] : a_orders) {
+			if (const auto [it, added] = orders.try_emplace(id, saved); added) {
+				it->second.position = Live(it->second.position);
+			}
 		}
 	}
 
@@ -388,6 +435,7 @@ namespace FWM::Party
 
 	void SetHands(RE::FormID a_id, const Hands& a_hands)
 	{
+        if (a_hands != Hands{} && !CanHaveRole(a_id)) return;
 		if (a_hands == Hands{}) {
 			hands.erase(a_id);
 		} else {
@@ -412,6 +460,7 @@ namespace FWM::Party
 
 	Lack LackFor(RE::FormID a_id, Role a_role)
 	{
+		if (a_role == Role::kBruiser) return FWM::LackFor(a_role, Game::ArsenalOf(RE::TESForm::LookupByID<RE::Actor>(a_id)));
 		const auto* member = Find(a_id);
 		if (!member || !member->arsenalKnown) {
 			return Lack::kNothing;
@@ -427,13 +476,14 @@ namespace FWM::Party
 		if (a_actor->IsPlayerRef()) {
 			return true;
 		}
+		if(WindstepDecoys::Is(a_actor->GetFormID())||AbilityLink::IsWindstepDecoy(a_actor->GetFormID()))return true;
 		return Find(a_actor->GetFormID()) != nullptr;
 	}
 
-	void Answer(Member& a_member, std::string a_text, bool a_done)
+	void Answer(Member& a_member, std::string_view a_text, bool a_done)
 	{
 		Log::Info("[Ability] {}: {}"sv, a_member.name, a_text);
-		a_member.answer = std::move(a_text);
+		a_member.answer = std::string(a_text);
 		a_member.answerAt = ::GetTickCount64();
 		a_member.answerDone = a_done;
 	}

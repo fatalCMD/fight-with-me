@@ -1,10 +1,12 @@
 #pragma once
 
 #include "FWM/Orders.h"
+#include "FWM/Party.h"
+#include "FWM/PathsLink.h"
 
 // Each role's special ability, on a button in the battle plan and, when switched on, on
 // their own:
-//   Bodyguard (tank)    runs to the player when they are in trouble, taunts on arrival
+//   Weak Will (tank)    weakens their own damage and that of enemies that attack them
 //   Volley (archer)     every archer and mage fires at one enemy for a while
 //   War cry (bruiser)   staggers every enemy close around them
 //   Ward (mage, healer) casts Oak/Stone/Iron/Ebonyflesh on the player
@@ -13,7 +15,9 @@
 
 namespace FWM::Specials
 {
-	inline constexpr float kGuardSeconds = 10.0f;  // a bodyguard stays at your side this long
+	[[nodiscard]] std::pair<RE::TESObjectWEAP*, RE::TESAmmo*> DebugRanged(RE::Actor* actor);
+	[[nodiscard]] bool LooseArrowAt(RE::Actor* actor, const RE::NiPoint3& point);
+	void DebugActivate(Party::Member& member, RE::Actor* actor, const PathsLink::Kit& kit, Paths::Ability ability);
 
 	void Update(float a_dt);
 	void Tick(float a_dt);  // every frame: a volley's arrows, in quick succession

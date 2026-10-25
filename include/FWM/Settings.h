@@ -27,6 +27,20 @@ namespace FWM::Settings
 		bool  autoBattle{ false };
 		float sightRange{ 2500.0f };
 
+		// Companions level up by fighting beside you, XP from every enemy the party brings down.
+		bool  leveling{ true };
+		float xpPerEnemyLevel{ 3.0f };  // an even enemy: this × the companion's level
+		float xpBossMult{ 3.0f };
+		float xpClimb{ 0.05f };  // each level costs this share more than the player's, per level they have
+		float xpCrowd{ 0.75f };  // each enemy after a fight's best counts this share of the one before
+		bool  levelCap{ true };  // nobody passes the player's level
+
+        // Party damage balance (Paths only): percentages, no permanent actor-value changes.
+        bool partyBalance{ true };
+        float partyExtraPenalty{ 5.0f };
+        float partyAdvantagePenalty{ 10.0f };
+        float partyMinimumDamage{ 50.0f };
+
 		// Battle plan
 		Hotkey        planKey{ 71 };        // Numpad 7
 		std::uint32_t planGamepadKey{ 2 };  // XInput button pressed with LB held, 0 = none
@@ -85,6 +99,7 @@ namespace FWM::Settings
 		bool sounds{ true };  // the game's own menu sounds in the battle plan
 		bool tooltips{ true };  // describe controls on hover and pad focus
 		bool pathsGuideSeen{ false };  // the paths guide has opened once by itself
+		std::string language;  // a translation to read, by the game's name for it (FRENCH); empty: the game's own
 
 		// Debug
 		bool logDecisions{ false };
@@ -97,6 +112,8 @@ namespace FWM::Settings
 
 	// The live settings. Safe from any thread; a reference stays valid for the session.
 	[[nodiscard]] const Data& Get() noexcept;
+	// Live theme, including Fight With Me's current choice when both plugins are loaded.
+	[[nodiscard]] int Theme() noexcept;
 
 	// The player's own: what the settings pages edit and what is saved, so copy this, not Get(),
 	// to change one and Apply or Submit. The same as Get() except while Paths - Follower Ability
@@ -114,7 +131,9 @@ namespace FWM::Settings
 	bool Apply(const Data& a_data);
 
 	// From any thread (the menu): Apply on the main thread soon. Returns the revision.
-	std::uint64_t Submit(const Data& a_data);
+	std::uint64_t Submit(const Data& a_data, bool shareTheme = false);
+    // Main thread: change only this plugin's theme, preserving all other settings.
+    bool ApplyTheme(int theme);
 
 	[[nodiscard]] std::uint64_t AppliedRevision() noexcept;
 	[[nodiscard]] std::uint64_t RequestedRevision() noexcept;

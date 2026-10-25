@@ -9,6 +9,7 @@ namespace FWM::Forms
 	{
 		RE::TESEffectShader*        markGlow{ nullptr };
 		RE::BGSSoundDescriptorForm* tauntSound{ nullptr };
+		RE::BGSSoundDescriptorForm* bearRoar{ nullptr };  // NPCBearAggroWarning02, Taunt's spectral bear
 		RE::TESIdleForm*            idleShield{ nullptr };
 		RE::TESIdleForm*            idleWeapon{ nullptr };
 		RE::TESIdleForm*            idleCry{ nullptr };
@@ -32,14 +33,29 @@ namespace FWM::Forms
 		RE::BGSSoundDescriptorForm* rejuvenateSound{ nullptr };  // MAGWardTestCastSD
 
 		// Paths abilities
-		RE::BGSKeyword*               undead{ nullptr };  // ActorTypeUndead: Sun's Bane burns them
+		RE::BGSKeyword*               undead{ nullptr };  // ActorTypeUndead: the healer's circle burns them
 		// Elemental Burst: [element][tier], fire, frost, shock by Apprentice, Adept, Expert
 		std::array<std::array<RE::SpellItem*, 3>, 3> bursts{};
 		RE::SpellItem*                flameCloak{ nullptr };
-		RE::TESAmmo*                  ironArrow{ nullptr };  // what a fletcher makes with nothing else to copy
+		RE::TESAmmo*                  ironArrow{ nullptr };  // seed arrow for an empty archer-path quiver
+		std::array<RE::TESAmmo*, 3>    pathArrows{};  // steel, elven, ebony: Fine Arrows
 		RE::BGSSoundDescriptorForm*   quakeSound{ nullptr };  // a giant's club on dirt: Earthshaker
-		RE::BGSSoundDescriptorForm*   cleaveSound{ nullptr };  // a two-handed blow landing: Cleave, Sunder
-		std::array<RE::BGSSoundDescriptorForm*, 2> chicken{};  // a cluck and a squawk, for companions with unlimited points
+		RE::BGSSoundDescriptorForm*   quakeRocks{ nullptr };  // a rockfall trap let go, as Earthshaker's rocks burst out
+		RE::BGSSoundDescriptorForm*   quakeRumble{ nullptr }; // the ground's rumble and shake under it
+		RE::BGSSoundDescriptorForm*   quakeCrumble{ nullptr };  // a cave crumbling, as they sink back
+		std::array<RE::BGSSoundDescriptorForm*, 4> bastionSounds{};  // Bastion::kSounds order
+		std::array<RE::BGSSoundDescriptorForm*, 4> bastionGrandSounds{};
+		RE::BGSSoundDescriptorForm*   blowSound{ nullptr };   // a two-handed blow landing: Sunder, the spectral wolf's bite
+		RE::BGSSoundDescriptorForm*   wolfSnarl{ nullptr };   // NPCWolfAttackPower, as its jaws start to close
+		RE::BGSSoundDescriptorForm*   wolfHowl{ nullptr };    // NPCWolfHowl, as the spectral wolf's head appears
+		// Elemental Burst's blast by element (fire, frost, shock): as it goes off, and a moment later
+		// (the fireball's roll, the ice shattering, the crackle of the second strike).
+		std::array<RE::BGSSoundDescriptorForm*, 3> blastSounds{};
+		std::array<RE::BGSSoundDescriptorForm*, 3> blastAfter{};
+		// Magnus's orb: the Eye of Magnus opening, its low hum while it floats, and its vanishing.
+		RE::BGSSoundDescriptorForm*   magnusOpen{ nullptr };
+		RE::BGSSoundDescriptorForm*   magnusHum{ nullptr };
+		RE::BGSSoundDescriptorForm*   magnusVanish{ nullptr };
 
 		// Specials
 		std::array<RE::SpellItem*, 4> flesh{};   // Oakflesh, Stoneflesh, Ironflesh, Ebonyflesh
