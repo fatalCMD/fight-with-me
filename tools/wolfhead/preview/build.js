@@ -71,9 +71,23 @@ function png(texture) {
   return name;
 }
 
+
+function compactSamples() {
+  for(const [exe,file,args] of [
+    ['BreathLook','breath-look-compact.json',['compact']],
+    ['BearLook','bear-look-compact.json',['compact']],
+    ['WolfPose','pose-compact.json',['70','60','compact']],
+    ['MoonLook','azura-look-compact.json',['compact']]])
+      fs.writeFileSync(path.join(OUT,file),execFileSync(path.join(REPO,'build/skyrim/Release/FightWithMe'+exe+'.exe'),args,{maxBuffer:64*1024*1024}));
+  const runs={};for(const seconds of [8,10,12,14])runs[seconds]=JSON.parse(execFileSync(path.join(REPO,'build/skyrim/Release/FightWithMeBastionLook.exe'),[String(seconds),'compact'],{maxBuffer:32*1024*1024}));
+  fs.writeFileSync(path.join(OUT,'bastion-look-compact.json'),JSON.stringify({...runs[8],runs}));
+}
+
+
 // --- Heads -----------------------------------------------------------------------------------
 
 const unpack = b => b / 255 * 2 - 1;
+if(process.argv.includes('--compact-only')) {compactSamples();breathAssets();head(path.join(REPO,'assets/meshes/FightWithMe/ArrowRain.nif'),'rain.json');fs.writeFileSync(path.join(OUT,'rain-look.json'),execFileSync(path.join(REPO,'build/skyrim/Release/FightWithMeArrowRainLook.exe'),['60'],{maxBuffer:64*1024*1024}));process.exit(0);}
 function head(nifFile, outFile) {
   const nif = nifio.read(fs.readFileSync(nifFile));
   const name = i => (i >= 0 ? nif.strings[i] : '');
@@ -134,6 +148,7 @@ fs.writeFileSync(path.join(OUT, 'bear-roar.wav'), sounds.read(roar));
 for (const [mesh, name] of [['WarCrySabre','warcry-sabre'],['WarCrySabreRed','warcry-sabre-red']]) head(path.join(REPO, 'assets/meshes/FightWithMe',mesh+'.nif'),name+'.json');
 }
 function breathAssets() {
+  for(const [rank,tier] of ['','II','III'].entries())for(const element of ['Fire','Frost','Shock'])head(path.join(REPO,'assets/meshes/FightWithMe','Breath'+element+tier+'Compact.nif'),'breath-'+element.toLowerCase()+'-'+(rank+1)+'-compact.json');
   for(const [mesh,name] of [['DragonBreathHead','breath-head'],['DragonBreathAlduin','breath-alduin']])head(path.join(REPO,'assets/meshes/FightWithMe',mesh+'.nif'),name+'.json');
   for(const [rank,tier] of ['','II','III'].entries())for(const element of ['Fire','Frost','Shock'])head(path.join(REPO,'assets/meshes/FightWithMe','Breath'+element+tier+'.nif'),'breath-'+element.toLowerCase()+'-'+(rank+1)+'.json');
   fs.writeFileSync(path.join(OUT,'breath-look.json'),execFileSync(path.join(REPO,'build/skyrim/Release/FightWithMeBreathLook.exe'),{maxBuffer:16*1024*1024}));
@@ -436,3 +451,5 @@ moonAssets();
 windstepAssets();
 
 surgeAssets();
+
+compactSamples();

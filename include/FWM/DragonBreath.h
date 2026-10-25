@@ -7,16 +7,17 @@
 namespace FWM::DragonBreath
 {
     inline constexpr float kRelease = 0.90f, kFade = 0.8f, kMinDistance = 140.f; // two metres
-    inline constexpr std::array<float,3> kReach{600,850,1100}, kDPS{8,11,14}, kDuration{2.4f,2.8f,3.2f};
+    inline constexpr std::array<float,3> kReach{600,850,1100}, kDPS{20,30,45}, kDuration{2.4f,2.8f,3.2f};
     constexpr int Tier(int rank) { return std::clamp(rank,1,3)-1; }
     inline float Reach(int rank, int branch=0) { return kReach[Tier(rank)]*(1+0.1f*std::clamp(branch,0,3)); }
     inline constexpr std::array<float,3> kRadius{90,125,180};
     inline float Radius(int rank, float reach) {return kRadius[Tier(rank)]*reach/kReach[Tier(rank)];}
+    inline float StreamWidth(int rank, bool compact) { return compact?(rank>=3?.48f:.40f):1.f; }
     inline float Duration(int rank, int branch=0) { return kDuration[Tier(rank)]+0.5f*std::clamp(branch,0,3); }
     inline float Ease(float t) { t=std::clamp(t,0.f,1.f); return t*t*(3-2*t); }
     inline bool SafeDistance(float distance) { return std::isfinite(distance) && distance >= kMinDistance; }
     struct Pose { float alpha{}, jaw{}, stream{}, front{}, scale{}, height{}, forward{}, muzzleY{}, muzzleZ{}, pitch{}, runeAngle{}, runeRadius{}, runeAlpha{}; };
-    inline Pose At(float age, int rank, float duration)
+    inline Pose At(float age, int rank, float duration, bool compact=false)
     {
         const bool grand=rank>=3;
         const float stop=kRelease+duration;
@@ -31,16 +32,17 @@ namespace FWM::DragonBreath
         p.jaw=(grand?.32f:.52f)*(1-open)-.50f*open-p.pitch;
         p.stream=Ease((age-kRelease)/.12f)*(1-Ease((age-stop)/.25f));
         p.front=Ease((age-kRelease)/.30f);
-        p.scale=grand?7.2f:rank==2?4.4f:3.8f;
+        p.scale=compact?(grand?2.35f:rank==2?1.45f:1.2f):(grand?7.2f:rank==2?4.4f:3.8f);
         // Base jaw bounds plus clearance for the hinge's travel as the skull lifts.
         p.height=26.f+(grand?32.22402f:56.69074f)*p.scale+3.f*open;
-        p.forward=(grand?80.f:60.f)+(grand?44.02418f:57.97861f)*p.scale-12.f*pull+9.f*settle;
+        p.forward=(compact?28.f:(grand?80.f:60.f))+(grand?44.02418f:57.97861f)*p.scale-12.f*pull+9.f*settle;
         // Throat anchor inside the open mouth, transformed with the skull rather than a point ahead.
         const float throatY=grand?-10.f:-2.f,throatZ=grand?-6.f:-18.f;
         p.muzzleY=std::cos(p.pitch)*throatY-std::sin(p.pitch)*throatZ;
         p.muzzleZ=std::sin(p.pitch)*throatY+std::cos(p.pitch)*throatZ;
         p.runeAngle=age*.30f;
         p.runeRadius=(grand?320.f:rank==2?245.f:220.f)*(.88f+.12f*Ease(age/.65f));
+        if(compact)p.runeRadius*=grand?.40f:.33f;
         p.runeAlpha=p.alpha*.55f*(.92f+.08f*std::sin(age*4));
         return p;
     }
@@ -60,9 +62,9 @@ namespace FWM::DragonBreath
         const float frame=age*22.f+index*.173f, step=std::floor(frame), blend=Ease((frame-step)*4.f);
         const auto noise=[index](float tick,float offset){const float v=std::sin(tick*12.9898f+index*78.233f+offset)*4375.8545f;return v-std::floor(v);};
         const auto mix=[&](float offset){return noise(step,offset)*(1-blend)+noise(step+1,offset)*blend;};
-        return {mix(0)*6.283185f,index<8?0.f:(mix(11)-.5f)*12,index<8?0.f:(mix(27)-.5f)*12,index<8?.65f+.35f*mix(51):std::max(0.f,(mix(51)-.60f)*2.5f)};
+        return {mix(0)*6.283185f,index<16?0.f:(mix(11)-.5f)*12,index<16?0.f:(mix(27)-.5f)*12,index<16?.65f+.35f*mix(51):std::max(0.f,(mix(51)-.30f)/.70f)};
     }
-    inline float TargetReach(int rank,int branch=0) {const auto p=At(0,rank,Duration(rank));return p.forward+p.muzzleY*p.scale+Reach(rank,branch);}
+    inline float TargetReach(int rank,int branch=0,bool compact=false) {const auto p=At(0,rank,Duration(rank),compact);return p.forward+p.muzzleY*p.scale+Reach(rank,branch);}
     inline std::array<float,3> JetColor(int rank,int element,int jet) {
         if(element==0)return rank>=3&&jet<3?std::array<float,3>{.06f,.40f,1.f}:std::array<float,3>{1,.28f,.035f};
         if(element==1)return rank>=3?std::array<float,3>{.58f,.88f,1.f}:std::array<float,3>{.32f,.72f,1.f};

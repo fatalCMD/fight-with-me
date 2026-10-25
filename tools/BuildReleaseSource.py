@@ -7,7 +7,7 @@ import subprocess
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-EXCLUDED = {'.git', '__pycache__', 'node_modules', 'build', 'package', '.vs', '.github', '.claude', '.factory'}
+EXCLUDED = {'.git', '__pycache__', 'node_modules', 'build', 'package', 'out', '.vs', '.github', '.claude', '.factory'}
 TEXT = {'.c', '.cpp', '.h', '.hpp', '.in', '.cmake', '.json', '.txt', '.ini',
         '.ps1', '.py', '.js', '.cjs', '.mjs', '.html', '.css', '.md', '.svg', '.natvis', '.inc', '.rc'}
 
@@ -75,7 +75,7 @@ def main():
 
 This is the current working source, including new untracked files, for both DLLs.
 It is a developer download, not a game mod. Large effect models/textures and class
-backdrops are supplied separately in POTC Effects-1.0.20.zip. To rebuild
+backdrops are supplied separately in POTC Effects-1.0.21.zip. To rebuild
 the runtime archives, copy that download's meshes, textures and interface folders
 into assets/. Theme fonts and small UI icons are already included here.
 

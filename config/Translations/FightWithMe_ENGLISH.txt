@@ -199,7 +199,7 @@ No safe space to retreat.	No safe space to retreat.
 Windstep.	Windstep.
 Nobody to rain on.	Nobody to rain on.
 Needs a bow and arrows to copy.	Needs a bow and arrows to copy.
-{} calls down a rain of {} arrows on {}.	{} calls down a rain of {} arrows on {}.
+{} fires {} arrows through a portal at {}.	{} fires {} arrows through a portal at {}.
 Arrow rain: {} arrows on {}.	Arrow rain: {} arrows on {}.
 Their magicka is already surging.	Their magicka is already surging.
 {}'s magicka surges: {:.0f}x as fast for {:.0f} s.	{}'s magicka surges: {:.0f}x as fast for {:.0f} s.
@@ -761,6 +761,8 @@ Hold LB and press the chosen button.	Hold LB and press the chosen button.
 Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights.	Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights.
 Ability effects	Ability effects
 What the abilities look like in the world: spirit beasts, circles, bursts and weapon flames. Off keeps what they do and drops how they look.	What the abilities look like in the world: spirit beasts, circles, bursts and weapon flames. Off keeps what they do and drops how they look.
+Compact summons	Compact summons
+Smaller spirit heads, Dragon's Breath, Azura's apparition and Last Bastion for tighter spaces. Off restores their original size. Applies to new casts.	Smaller spirit heads, Dragon's Breath, Azura's apparition and Last Bastion for tighter spaces. Off restores their original size. Applies to new casts.
 Short lines on the left of the screen when a companion uses an ability or has points to spend.	Short lines on the left of the screen when a companion uses an ability or has points to spend.
 The game's own menu sounds when you point at and choose in the panel.	The game's own menu sounds when you point at and choose in the panel.
 The companion under your crosshair comes first; Tab moves to the next.	The companion under your crosshair comes first; Tab moves to the next.

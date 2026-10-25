@@ -105,11 +105,11 @@ namespace FWM::WolfBite
 		return pose;
 	}
 
-	Pose Display(Pose pose, float ground, bool grand)
+	Pose Display(Pose pose, float ground, bool grand, bool compact)
 	{
-		if (!grand) return pose;
+		if (!grand && !compact) return pose;
 		const Vec grip = Place(pose, kGrip);
-		pose.scale *= 1.28f;
+		pose.scale *= (grand ? 1.28f : 1.f) * (compact ? .48f : 1.f);
 		pose.translate = Sub(grip, Turn(pose.rotate, Scale(kGrip, pose.scale)));
 		pose.translate.z += std::max(0.0f, ground + kClearance - Lowest(pose));
 		return pose;

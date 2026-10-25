@@ -132,6 +132,7 @@ namespace FWM::Arts
 			std::size_t        turn{ 0 };  // whose turn under it to be aimed at
 			int                struck{ 0 };
 			int                grazed{ 0 };
+            RE::NiPoint3 portal{},forward{},right{};
 		};
 		std::vector<Rain> rains;
 
@@ -704,7 +705,8 @@ namespace FWM::Arts
 			float                                   share{ 0.0f };    // of a bitten one's health, bled away
 			float                                   seconds{ 0.0f };  // how long the wounds bleed
 			float                                   hold{ 0.0f };     // how long whatever it catches stands frozen
-			bool                                    grand{ false };   // the third rank's red wolf, holding on longer
+			bool                                    compact{ true };
+            bool                                    grand{ false };   // the third rank's red wolf, holding on longer
 			float                                   age{ 0.0f };
 			bool                                    snarled{ false };
 			bool                                    swung{ false };
@@ -798,7 +800,7 @@ namespace FWM::Arts
 		Pose PoseOf(const Spirit& a_spirit, bool display = false)
 		{
 			auto bite = WolfBite::At(a_spirit.age, a_spirit.heading, { a_spirit.at.x, a_spirit.at.y, a_spirit.at.z }, a_spirit.chest, a_spirit.grand);
-			if (display) bite = WolfBite::Display(bite,a_spirit.at.z,a_spirit.grand);
+			if (display) bite = WolfBite::Display(bite,a_spirit.at.z,a_spirit.grand,a_spirit.compact);
 			Pose       pose;
 			pose.head.rotate = Ni(bite.rotate);
 			pose.head.translate = { bite.translate.x, bite.translate.y, bite.translate.z };
@@ -940,6 +942,7 @@ namespace FWM::Arts
 			spirit.seconds = Paths::kWolfBleedSeconds + a_kit.Value(Perk::kWolfHemorrhage);
 			spirit.hold = Paths::kWolfHold[static_cast<std::size_t>(rank - 1)] + (a_kit.Rank(Perk::kWolfMaul) > 0 ? Paths::kWolfMaulHold : 0.0f);
 			spirit.grand = rank >= 3;
+            spirit.compact=Settings::Get().compactEffects;
 			spirit.effect.reset(Effects::Head(target?target.get():a_fighter, spirit.at, spirit.heading, WolfBite::Gone(spirit.grand) + 0.1f, spirit.grand));
 			if (!spirit.effect) {
 				Log::Warn("[Paths] Kynareth's Maw from {} has no head to show (is meshes\\FightWithMe\\SpectralWolfHead.nif installed?); it bites unseen."sv, a_member.name);
@@ -1132,13 +1135,19 @@ namespace FWM::Arts
 			}
 			const int rank = std::max(a_kit.Rank(Ability::kArrowRain), 1);
 			const int count = static_cast<int>(Paths::Value(Perk::kArrowRain, rank) + a_kit.Value(Perk::kArrowRainDownpour));
-			// A flare goes up to call it, and the first arrow falls as it bursts.
+			// A vertical portal opens directly in front of the archer.
 			const auto at=debug?PathsLink::DebugAim(a_archer):centre->GetPosition();
-			const auto look = Rainfall::Call(a_archer, centre.get(), at, Paths::kRainSeconds, rank >= 3);
+			auto forward=at-a_archer->GetPosition();forward.z=0;
+            if(forward.Length()<1)forward={std::sin(a_archer->GetAngleZ()),std::cos(a_archer->GetAngleZ()),0};
+            forward=forward/std::max(forward.Length(),1.f);
+            const auto portal=a_archer->GetPosition()+forward*ArrowRain::kPortalForward+RE::NiPoint3{0,0,ArrowRain::kPortalHeight};
+            a_archer->SetHeading(std::atan2(forward.x,forward.y));
+            const auto look = Rainfall::Call(a_archer, centre.get(), at, Paths::kRainSeconds, rank >= 3);
 			rains.push_back({ a_archer->GetHandle(), centre?centre->GetHandle():RE::ActorHandle{}, at, ammo, bow, count, Paths::kRainSeconds / static_cast<float>(count), ArrowRain::kCall,
 				a_kit.Rank(Perk::kArrowRainPinning) > 0, look, a_member.name });
+            rains.back().portal=portal;rains.back().forward=forward;rains.back().right=forward.Cross({0,0,1});
 			const auto name = debug?std::string(Tr("10 m ahead")):Game::Name(centre.get());
-			Notices::Used(Trf("{} calls down a rain of {} arrows on {}.", a_member.name, count, name), Paths::Ability::kArrowRain, Notices::Kind::kOrder);
+			Notices::Used(Trf("{} fires {} arrows through a portal at {}.", a_member.name, count, name), Paths::Ability::kArrowRain, Notices::Kind::kOrder);
 			Log::Info("[Paths] {} rains {} arrows on {}."sv, a_member.name, count, name);
 			return { true, Trf("Arrow rain: {} arrows on {}.", count, name) };
 		}
@@ -1146,7 +1155,7 @@ namespace FWM::Arts
 		void Fall(Rain& a_rain)
 		{
 			auto archer = a_rain.archer.get();
-			if (!archer) {
+			if (!archer || archer->IsDead() || !archer->Is3DLoaded()) {
 				a_rain.left = 0;
 				return;
 			}
@@ -1169,16 +1178,36 @@ namespace FWM::Arts
 				ground = a_rain.centre + RE::NiPoint3{ std::cos(angle) * radius, std::sin(angle) * radius, 0.0f };
 			}
 			const RE::NiPoint3 spot = ground + RE::NiPoint3{ 0.0f, 0.0f, over };
-			const RE::NiPoint3 origin = spot + RE::NiPoint3{ (unit(rng) - 0.5f) * 160.0f, (unit(rng) - 0.5f) * 160.0f, ArrowRain::kSky };
+			const RE::NiPoint3 origin = a_rain.portal + a_rain.right*((unit(rng)-.5f)*65.f) + RE::NiPoint3{0,0,(unit(rng)-.5f)*65.f};
+            // Keep the stream forward even if its original target runs behind the caster.
+            if((spot-origin).Dot(a_rain.forward)<80.f) { --a_rain.left; return; }
+            // Do not create a projectile on the far side of a nearby wall.
+            if(auto* cell=archer->GetParentCell();cell)if(auto* world=cell->GetbhkWorld();world){
+                const auto start=archer->GetPosition()+RE::NiPoint3{0,0,ArrowRain::kPortalHeight};
+                const float scale=RE::bhkWorld::GetWorldScale();RE::bhkPickData pick{};
+                pick.rayInput.from={start.x*scale,start.y*scale,start.z*scale,0};
+                pick.rayInput.to={origin.x*scale,origin.y*scale,origin.z*scale,0};
+                RE::CFilter own{};archer->GetCollisionFilterInfo(own);
+                pick.rayInput.filterInfo.filter=static_cast<std::uint32_t>(RE::COL_LAYER::kLOS)|(own.GetSystemGroup()?own.GetSystemGroup()<<16:1u<<16);
+                world->PickObject(pick);if(!pick.pickFailed&&pick.rayOutput.HasHit()){a_rain.left=0;return;}
+            }
 			const auto         dir = spot - origin;
 			RE::Projectile::ProjectileRot rotation{ -std::atan2(dir.z, std::hypot(dir.x, dir.y)), std::atan2(dir.x, dir.y) };
 			RE::ProjectileHandle          handle;
 			RE::Projectile::LaunchArrow(&handle, archer.get(), a_rain.ammo, a_rain.bow, origin, rotation);
-			Rainfall::Loose(a_rain.look, handle, spot, ground.z);
+			if(auto projectile=handle.get()){
+                auto& data=projectile->GetProjectileRuntimeData();
+                const auto velocity=dir*(ArrowRain::kSpeed/std::max(dir.Length(),1.f));
+                data.velocity=velocity;data.linearVelocity=velocity;
+                const auto* object=projectile->GetBaseObject();
+                const auto* base=object?object->As<RE::BGSProjectile>():nullptr;
+                if(base&&base->data.speed>0)data.speedMult=ArrowRain::kSpeed/base->data.speed;
+            }
+            Rainfall::Loose(a_rain.look, handle, spot, ground.z);
 			Shaft shaft;
 			shaft.handle = handle;
 			shaft.at = origin;
-			shaft.velocity = dir;
+			shaft.velocity = dir*(ArrowRain::kSpeed/std::max(dir.Length(),1.f));
 			a_rain.shafts.push_back(shaft);
 			--a_rain.left;
 		}
@@ -1371,7 +1400,7 @@ namespace FWM::Arts
             const bool debug=PathsLink::DebugCasting(member.id);
             const auto aim=PathsLink::DebugAim(actor);
             auto target=debug?RE::NiPointer<RE::Actor>{}:asked?Chosen(member,actor):Opponent(actor);
-            const float reach=DragonBreath::TargetReach(rank,kit.Rank(Perk::kBreathReach));
+            const float reach=DragonBreath::TargetReach(rank,kit.Rank(Perk::kBreathReach),Settings::Get().compactEffects);
             if(!debug&&(!target||!InSight(actor,target.get(),reach))) return asked?Refused(Tr("No enemy within breath range.")):Result{};
             const auto element=static_cast<int>(ElementOf(member,actor));
             if(!DragonBreaths::Cast(actor,target.get(),rank,element,kit.Rank(Perk::kBreathReach),kit.Rank(Perk::kBreathLingering),debug?&aim:nullptr)) return asked?Refused(Tr("Needs room in front to breathe.")):Result{};
@@ -1899,6 +1928,11 @@ namespace FWM::Arts
 				rain.in += rain.every;
 			}
 			std::erase_if(rain.shafts, [&](Shaft& a_shaft) {
+                if(auto projectile=a_shaft.handle.get();projectile&&projectile->GetProjectileRuntimeData().impacts.empty()&&!projectile->GetProjectileRuntimeData().flags.any(RE::Projectile::Flags::kProcessedImpacts, RE::Projectile::Flags::kDestroyed)){
+                    auto& data=projectile->GetProjectileRuntimeData();
+                    const float speed=a_shaft.velocity.Length();
+                    if(speed>1){data.velocity=a_shaft.velocity*(ArrowRain::kSpeed/speed);data.linearVelocity=data.velocity;}
+                }
 				a_shaft.flown += a_dt;
 				RE::ObjectRefHandle struck;
 				if (!Game::Landed(a_shaft, a_shaft.flown, a_dt, &struck)) {

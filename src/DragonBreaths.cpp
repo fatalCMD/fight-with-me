@@ -23,6 +23,9 @@ namespace FWM::DragonBreaths
             RE::NiPoint3 origin, headAt, mouth, direction;
             RE::NiMatrix3 heading, aim;
             RE::NiPointer<RE::BSTempEffectParticle> headFX, streamFX;
+            struct Flame { RE::NiPointer<RE::BSTempEffectParticle> fx; float expires; };
+            std::vector<Flame> flames;
+            float nextFlame{};
             Part head, stream, rune;
             RE::NiPointer<RE::NiAVObject> jaw;
             std::array<Part,8> jets;
@@ -35,7 +38,7 @@ namespace FWM::DragonBreaths
             std::array<RE::NiPoint3,4> groundFrom,groundTo;
             int rank{},element{},copy{};
             float age{},loading{},duration{},reach{},dps{},dealt{},markClock{};
-            bool found{},released{};
+            bool found{},released{},compact{};
             EffectAudio::ID audio{};
             Posing::Lamp lamp;
         };
@@ -83,11 +86,13 @@ namespace FWM::DragonBreaths
         void Finish(Live& v) {
             if(auto caster=v.caster.get()) Freeze::ReleaseAnchor(caster.get());
             if(v.headFX) v.headFX->lifetime=0; if(v.streamFX) v.streamFX->lifetime=0;
+            for(auto& flame:v.flames) if(flame.fx) flame.fx->lifetime=0;
+            v.flames.clear();
             Posing::Out(v.lamp); EffectAudio::End(v.audio);
         }
         void Show(Live& v,float clear) {
             if(!v.found) return;
-            const auto p=DragonBreath::At(v.age,v.rank,v.duration);
+            const auto p=DragonBreath::At(v.age,v.rank,v.duration,v.compact);
             auto* root=Posing::RootOf(v.headFX.get()); auto* flow=Posing::RootOf(v.streamFX.get());
             if(!root||!flow) return;
             const auto headAim=Facing(v.direction*std::cos(p.pitch)+RE::NiPoint3{0,0,std::sin(p.pitch)});
@@ -106,7 +111,7 @@ namespace FWM::DragonBreaths
             Posing::PlaceInWorld(flow,v.stream.node.get(),v.mouth,v.aim,std::max(length/1000,.001f));
             for(int i=0;i<8;i++) {
                 const float flicker=v.element==2?.35f+.65f*std::abs(std::sin(v.age*39+i*1.7f)):.8f+.2f*std::sin(v.age*11+i);
-                Posing::Paint(v.jets[i].shaders,DragonBreath::JetColor(v.rank,v.element,i),p.stream*flicker);
+                Posing::Paint(v.jets[i].shaders,DragonBreath::JetColor(v.rank,v.element,i),p.stream*flicker*(v.element==0?.55f:1.f));
                 Posing::Drift(v.jets[i].shaders,-v.age*(v.element==0?3.5f:1.5f)+i*.17f);
                 if(v.jets[i].node) {
                     const float angle=.10f*std::sin(v.age*6.f-i*.7f),c=std::cos(angle),s=std::sin(angle);
@@ -117,11 +122,11 @@ namespace FWM::DragonBreaths
             for(int i=0;i<32;i++) {
                 auto& part=v.puffs[i]; if(!part.node) continue;
                 const float f=std::fmod(v.age*(v.element==2?2.1f:1.25f)+i/32.f,1.f), angle=i*2.399f+v.age;
-                const float normalized=DragonBreath::Radius(v.rank,v.reach)*1000/v.reach;
+                const float normalized=DragonBreath::Radius(v.rank,v.reach)*DragonBreath::StreamWidth(v.rank,v.compact)*1000/v.reach;
                 const float radius=normalized*DragonBreath::BeamProfile(f)*(v.rank==3&&v.element==0?.78f+.12f*(i%7)/6:.15f+.55f*(i%7)/6);
                 part.node->local.translate={std::cos(angle)*radius,1000*f,std::sin(angle)*radius};
                 part.node->local.scale=.7f+.5f*std::sin(f*3.14159f);
-                Posing::Paint(part.shaders,DragonBreath::JetColor(v.rank,v.element,7),p.stream*std::sin(f*3.14159f)*(v.rank>=3?1.f:.65f));
+                Posing::Paint(part.shaders,DragonBreath::JetColor(v.rank,v.element,7),p.stream*std::sin(f*3.14159f)*(v.rank>=3?1.f:.65f)*(v.element==0?.50f:1.f));
                 Posing::Drift(part.shaders,-v.age*.35f);
             }
             if(v.element==2) for(int i=0;i<64;i++) {
@@ -137,7 +142,7 @@ namespace FWM::DragonBreaths
             if(v.rank==3&&v.element==1)for(int i=0;i<16;i++) {
                 auto& shard=v.ice[i];if(!shard.node)continue;
                 const float f=std::fmod(v.age*1.65f+i/16.f,1.f),a=i*2.399f+v.age*2;
-                const float r=DragonBreath::Radius(v.rank,v.reach)*1000/v.reach*DragonBreath::BeamProfile(f)*.72f;
+                const float r=DragonBreath::Radius(v.rank,v.reach)*DragonBreath::StreamWidth(v.rank,v.compact)*1000/v.reach*DragonBreath::BeamProfile(f)*.72f;
                 shard.node->local.translate={std::cos(a)*r,1000*f,std::sin(a)*r};
                 Posing::Paint(shard.shaders,{.65f,.9f,1},p.stream*std::sin(f*3.14159f));
             }
@@ -150,7 +155,7 @@ namespace FWM::DragonBreaths
                     if(along<clear) {
                         v.groundFrom[i]=v.mouth+v.direction*along;
                         const auto side=v.direction.Cross({0,0,1});
-                        const auto start=v.groundFrom[i]+side*(DragonBreath::Radius(v.rank,v.reach)*pulse.side)+RE::NiPoint3{0,0,80};
+                        const auto start=v.groundFrom[i]+side*(DragonBreath::Radius(v.rank,v.reach)*DragonBreath::StreamWidth(v.rank,v.compact)*pulse.side)+RE::NiPoint3{0,0,80};
                         const auto end=start-RE::NiPoint3{0,0,800};
                         const float scale=RE::bhkWorld::GetWorldScale();auto* world=v.cell->GetbhkWorld();
                         if(world&&scale>0) {
@@ -185,8 +190,9 @@ namespace FWM::DragonBreaths
         if(copy==4) return false;
         Live v; v.caster=caster->GetHandle();v.cell=caster->GetParentCell();v.rank=std::clamp(rank,1,3);v.element=element;v.copy=copy;
         if(!v.cell||!v.cell->IsAttached()) return false;
+        v.compact=Settings::Get().compactEffects;
         v.duration=DragonBreath::Duration(v.rank,durationRank);v.reach=DragonBreath::Reach(v.rank,reachRank);v.dps=DragonBreath::kDPS[DragonBreath::Tier(v.rank)];
-        const auto p=DragonBreath::At(0,v.rank,v.duration);
+        const auto p=DragonBreath::At(0,v.rank,v.duration,v.compact);
         v.origin=caster->GetPosition();
         auto flat=targetPoint-caster->GetPosition(); flat.z=0;
         if(flat.Length()<1) flat={std::sin(caster->GetAngleZ()),std::cos(caster->GetAngleZ()),0};
@@ -203,7 +209,7 @@ namespace FWM::DragonBreaths
         if(Settings::Get().abilityEffects) {
             const float life=DragonBreath::kRelease+v.duration+DragonBreath::kFade+2;
             v.headFX.reset(Effects::BreathModel(caster,copy,v.headAt,life,v.rank>=3?1:0));
-            v.streamFX.reset(Effects::BreathModel(caster,copy,v.mouth,life,element+2,v.rank));
+            v.streamFX.reset(Effects::BreathModel(caster,copy,v.mouth,life,element+2,v.rank,v.compact));
         }
         Log::Info("[Dragon's Breath] {} begins rank {} element {}: {:.0f}/s for {:.1f}s, reach {:.0f}."sv,Game::Name(caster),v.rank,element,v.dps,v.duration,v.reach);
         live.push_back(std::move(v));return true;
@@ -215,7 +221,7 @@ namespace FWM::DragonBreaths
             if(!Settings::Get().enabled||!caster||caster->IsDead()||!caster->Is3DLoaded()||caster->GetParentCell()!=v.cell||!v.cell->IsAttached()||caster->IsInRagdollState()||caster->AsActorState()->IsBleedingOut()||caster->AsActorState()->IsStaggered()) {Finish(v);return true;}
             if(!v.found&&v.headFX&&v.streamFX&&!Find(v)&&v.loading<1) {v.loading+=dt;return false;}
             const float before=v.age;v.age+=dt;
-            const auto pose=DragonBreath::At(v.age,v.rank,v.duration);
+            const auto pose=DragonBreath::At(v.age,v.rank,v.duration,v.compact);
             v.headAt=v.origin+v.direction*pose.forward+RE::NiPoint3{0,0,pose.height};
             v.mouth=v.headAt+v.direction*(pose.muzzleY*pose.scale)+RE::NiPoint3{0,0,pose.muzzleZ*pose.scale};
             caster->SetHeading(std::atan2(v.direction.x,v.direction.y));
@@ -225,8 +231,19 @@ namespace FWM::DragonBreaths
             }
             EffectAudio::Move(v.audio,v.mouth);
             const float clear=ClearReach(v,caster.get());
-            if(Settings::Get().abilityEffects) Show(v,clear);
-            else { if(v.headFX) v.headFX->lifetime=0; if(v.streamFX) v.streamFX->lifetime=0; Posing::Out(v.lamp); }
+            if(Settings::Get().abilityEffects) {
+                Show(v,clear);
+                std::erase_if(v.flames,[&](const auto& flame){return v.age>=flame.expires;});
+                const float remaining=DragonBreath::kRelease+v.duration-v.age;
+                if(v.element==0 && v.released && remaining>0 && clear>40 && v.age>=v.nextFlame) {
+                    // The stock shout emits for one second. Overlap successive bursts for a continuous channel.
+                    const float life=std::min(1.1f,remaining+.25f);
+                    if(auto* flame=Effects::BreathFlame(caster.get(),v.mouth,v.aim,std::max(.05f,std::min(clear,v.reach)/600.f),life))
+                        v.flames.push_back({RE::NiPointer<RE::BSTempEffectParticle>(flame),v.age+life});
+                    v.nextFlame=v.age+.65f;
+                }
+            }
+            else { for(auto& flame:v.flames) if(flame.fx) flame.fx->lifetime=0; v.flames.clear(); if(v.headFX) v.headFX->lifetime=0; if(v.streamFX) v.streamFX->lifetime=0; Posing::Out(v.lamp); }
             const float active=DragonBreath::ActiveTime(before,v.age,v.duration);
             v.markClock-=dt;const bool mark=v.markClock<=0;if(mark)v.markClock=.65f;
             if(active>0) for(const auto& entry:Enemies::All()) {
@@ -234,7 +251,7 @@ namespace FWM::DragonBreaths
                 if(!enemy||!Game::Usable(enemy.get())||!enemy->Is3DLoaded()||Party::IsPartyActor(enemy.get())||enemy->GetParentCell()!=v.cell) continue;
                 const auto relative=enemy->GetPosition()+RE::NiPoint3{0,0,70}-v.mouth;
                 const float along=relative.Dot(v.direction),radial=(relative-v.direction*along).Length();
-                const float front=DragonBreath::At(v.age,v.rank,v.duration).front;
+                const float front=DragonBreath::At(v.age,v.rank,v.duration,v.compact).front;
                 if(!DragonBreath::Contains(along,radial,v.reach,front,v.rank)||along>clear+55) continue;
                 bool unused=false; if(!caster->HasLineOfSight(enemy.get(),unused)) continue;
                 auto* values=enemy->AsActorValueOwner();

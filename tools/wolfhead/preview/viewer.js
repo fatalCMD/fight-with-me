@@ -12,8 +12,9 @@ const status = $('status');
 const billboards = [];
 const drifts = source => /(fxfirescrolltilegrey|cloudtile|cloudtilefrostsmall|darkswirls|darkswirlsstrip|fxembers|healingpulse)\.dds$/i.test(source || '');
 
+const compact=new URLSearchParams(location.search).get('size')!=='original';
 const files = ['out/head.json', 'out/head-plain.json', 'out/pose.json', 'out/circle.json', 'out/circle-look.json', 'out/blast-fire.json', 'out/blast-frost.json', 'out/blast-shock.json', 'out/blast-look.json', 'out/magnus.json',
-  'out/magnus-look.json', 'out/quake.json', 'out/quake-look.json', 'out/rain.json', 'out/rain-look.json', 'out/cloak.json', 'out/cloak-look.json', 'out/bear.json', 'out/bear-plain.json', 'out/bear-look.json', 'out/head-red.json', 'out/head-red-plain.json', 'out/haunt.json', 'out/chaos.json', 'out/chaos-look.json', 'out/chaos-grand.json', 'out/rejuvenation.json', 'out/rejuvenation-look.json', 'out/bear-red.json', 'out/bear-red-plain.json', 'out/sunder.json', 'out/sunder-look.json', 'out/chaos-binding.json', 'out/weakwill.json', 'out/weakwill-grand.json', 'out/weakwill-look.json', 'out/bastion.json', 'out/bastion-grand.json', 'out/bastion-look.json', 'out/warcry-sabre.json', 'out/warcry-sabre-red.json'];
+  'out/magnus-look.json', 'out/quake.json', 'out/quake-look.json', 'out/rain.json', 'out/rain-look.json', 'out/cloak.json', 'out/cloak-look.json', 'out/bear.json', 'out/bear-plain.json', 'out/bear-look.json', 'out/head-red.json', 'out/head-red-plain.json', 'out/haunt.json', 'out/chaos.json', 'out/chaos-look.json', 'out/chaos-grand.json', 'out/rejuvenation.json', 'out/rejuvenation-look.json', 'out/bear-red.json', 'out/bear-red-plain.json', 'out/sunder.json', 'out/sunder-look.json', 'out/chaos-binding.json', 'out/weakwill.json', 'out/weakwill-grand.json', 'out/weakwill-look.json', 'out/bastion.json', 'out/bastion-grand.json', 'out/bastion-look.json', 'out/warcry-sabre.json', 'out/warcry-sabre-red.json'].map(f=>compact && /(?:pose|bear-look|bastion-look)\.json$/.test(f)?f.replace('.json','-compact.json'):f);
 const [furred, plain, pose, circleMesh, circleLook, fireMesh, frostMesh, shockMesh, blastLook, magnusMesh, magnusLook, quakeMesh, quakeLook, rainMesh, rainLook, cloakMesh, cloakLook, bearMesh, bearPlainMesh, bearLook, redFurred, redPlain, hauntMesh, chaosMesh, chaosLook, chaosGrandMesh, rejuvenationMesh, rejuvenationLook, bearRedMesh, bearRedPlainMesh, sunderMesh, sunderLook, chaosBindingMesh, weakWillMesh, weakWillGrandMesh, weakWillLook, bastionMesh, bastionGrandMesh, bastionLook, warSabreMesh, warDragonMesh] = await Promise.all(files.map(f => fetch(f).then(r => {
   if (!r.ok) throw new Error(`${f} is missing: run node tools\\wolfhead\\preview\\build.js`);
   return r.json();
@@ -1082,8 +1083,9 @@ function showRain(t) {
   const two = k => String(k).padStart(2, '0');
   const tint = (node, alpha, rgb) => paint(mat.get(node), alpha, rgb);
   const hide = (node, shown) => g.get(node).scale.setScalar(shown ? 1 : 0.0001);
-  g.get('Mark').position.set(0, 0, 1);
-  g.get('Mark').scale.setScalar(Math.max(markScale, 0.0001));
+  const portalScale=($('rainRank').value==='grand'?85:65)/300;
+  g.get('Mark').position.set(0,85,100);g.get('Mark').rotation.x=Math.PI/2;
+  g.get('Mark').scale.setScalar(Math.max(markScale*portalScale, 0.0001));
   g.get('Ring').rotation.z = ring;
   g.get('Dashes').rotation.z = dashes;
   g.get('Heads').rotation.z = ring;
@@ -1094,8 +1096,8 @@ function showRain(t) {
   tint('Heads', headsAlpha, rainLook.markColor);
   tint('Outer', outer, rainLook.markColor);
   tint('Floor', floor, rainLook.markColor);
-  g.get('Sky').position.set(0, 0, rainLook.sky);
-  g.get('Sky').scale.setScalar(Math.max(skyScale, 0.0001));
+  g.get('Sky').position.set(0,83,100);g.get('Sky').rotation.x=Math.PI/2;
+  g.get('Sky').scale.setScalar(Math.max(skyScale*portalScale, 0.0001));
   g.get('Swirl').rotation.z = swirl;
   g.get('Crown').rotation.z = crownTurn;
   tint('Halo', sky, rainLook.skyColor);
@@ -1103,12 +1105,12 @@ function showRain(t) {
   tint('Crown', crown, rainLook.skyColor);
   for (const m of rain.flowing) m.uniforms.uvOffset.value.y = -t * rainLook.drift;
   placePart(g.get('Flare'), [...f.flare.slice(0, 5), f.flare[5] > 0 ? 1 : 0]);
-  tint('Flare', f.flare[5], rainLook.trailColor);
-  g.get('Burst').position.set(0, 0, rainLook.sky);
-  g.get('Burst').scale.setScalar(Math.max(burstScale, 0.0001));
+  tint('Flare', 0, rainLook.trailColor);
+  g.get('Burst').position.set(0,85,100);g.get('Burst').rotation.x=Math.PI/2;
+  g.get('Burst').scale.setScalar(Math.max(burstScale*portalScale, 0.0001));
   tint('Burst', burst, rainLook.trailColor);
   let falling = 0, struck = 0;
-  for (let k = 0; k < 28; k++) {
+  for (let k = 0; k < 96; k++) {
     const a = f.arrows[k];
     const arrow = g.get(`Arrow${two(k)}`), hit = g.get(`Hit${two(k)}`);
     if (!a) { hide(`Arrow${two(k)}`, false); hide(`Hit${two(k)}`, false); continue; }
@@ -1209,7 +1211,7 @@ function showBear(t, warcry = false) {
     }
     f.waves.forEach(([forward, radius, alpha], i) => {
       const node = bear.groups.get(`Wave${i}`);
-      node.position.set(0, forward, warcry ? f.height : 205); node.scale.setScalar(radius);
+      node.position.set(0, forward, warcry || compact ? f.height : 205); node.scale.setScalar(radius);
       for (const m of bear.materials.get(`Wave${i}`) || []) {
         m.uniforms.tint.value.set(...f.glow, 1); m.uniforms.opacity.value = alpha;
       }

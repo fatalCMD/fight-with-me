@@ -8199,7 +8199,7 @@ namespace FWM::Menu
 					Im::EndTable();
 				}
 				if (Checks("notices")) {
-					Check(Trc("Notices"), draft.notices, Trc("Short lines on the left of the screen when a companion cannot do what they were told, or runs out of arrows."));
+                    Check(Trc("Notices"), draft.notices, Trc("Short lines on the left of the screen when a companion cannot do what they were told, or runs out of arrows."));
 					Check(Trc("Menu sounds"), draft.sounds, Trc("The game's own menu sounds when you point at and choose orders in the battle plan."));
 					Check(Trc("Tooltips"), draft.tooltips, Trc("Describe each control when you point at it or move to it with the pad. Turn off once you know them."));
 					Im::EndTable();
@@ -8601,7 +8601,8 @@ namespace FWM::Menu
 				if (Checks("pathsLook")) {
 					Check(Trc("Ability effects"), draft.abilityEffects,
 						Trc("What the abilities look like in the world: spirit beasts, circles, bursts and weapon flames. Off keeps what they do and drops how they look."));
-					Check(Trc("Notices"), draft.notices, Trc("Short lines on the left of the screen when a companion uses an ability or has points to spend."));
+					Check(Trc("Compact summons"), draft.compactEffects, Trc("Smaller spirit heads, Dragon's Breath, Azura's apparition and Last Bastion for tighter spaces. Off restores their original size. Applies to new casts."));
+                    Check(Trc("Notices"), draft.notices, Trc("Short lines on the left of the screen when a companion uses an ability or has points to spend."));
 					Check(Trc("Tooltips"), draft.tooltips, Trc("Describe each control when you point at it or move to it with the pad. Turn off once you know them."));
 					Check(Trc("Menu sounds"), draft.sounds, Trc("The game's own menu sounds when you point at and choose in the panel."));
 					Im::EndTable();

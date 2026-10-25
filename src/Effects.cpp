@@ -1067,7 +1067,17 @@ namespace FWM::Effects
 		return effect;
 	}
 
-    RE::BSTempEffectParticle* BreathModel(RE::Actor* a_near, std::size_t copy, const RE::NiPoint3& at, float seconds, int part, int rank)
+    // Keep the stock shout's emitter, flame sheets and controllers intact. No copied vanilla asset.
+    RE::BSTempEffectParticle* BreathFlame(RE::Actor* actor, const RE::NiPoint3& at, const RE::NiMatrix3& aim, float scale, float seconds)
+    {
+        auto* cell=actor?actor->GetParentCell():nullptr;
+        if(!Settings::Get().enabled||!Settings::Get().abilityEffects||!cell||!cell->IsAttached()||seconds<=0) return nullptr;
+        auto* effect=RE::BSTempEffectParticle::Spawn(cell,seconds,R"(Magic\MAGFireBreathShout.nif)",aim,at,scale,0,nullptr);
+        if(effect) {const std::scoped_lock guard(groundSaveLock);ownedGroundEffects.insert(effect);heads.emplace_back(effect);}
+        return effect;
+    }
+
+    RE::BSTempEffectParticle* BreathModel(RE::Actor* a_near, std::size_t copy, const RE::NiPoint3& at, float seconds, int part, int rank, bool compact)
     {
         static constexpr std::array<std::array<const char*,4>,11> breathModels{{
         {R"(FightWithMe\DragonBreathHead.nif)",R"(FightWithMe\DragonBreathHead2.nif)",R"(FightWithMe\DragonBreathHead3.nif)",R"(FightWithMe\DragonBreathHead4.nif)"},
@@ -1085,7 +1095,9 @@ namespace FWM::Effects
         auto* cell=a_near?a_near->GetParentCell():nullptr;
         if(part<0||part>=5||copy>=4||!Settings::Get().enabled||!Settings::Get().abilityEffects||!cell||!cell->IsAttached()) return nullptr;
         const int index=part<2?part:part+3*(std::clamp(rank,1,3)-1);
-        const char* model=breathModels[index][copy];
+        std::string path=breathModels[index][copy];
+        if(compact && part>=2)path.insert(path.size()-4,"Compact");
+        const char* model=path.c_str();
         if(!RE::BSResourceNiBinaryStream(std::format("meshes\\{}",model)).good()) return nullptr;
         auto* effect=RE::BSTempEffectParticle::Spawn(cell,seconds,model,RE::NiMatrix3{},at,1.f,0,nullptr);
         if(effect) {const std::scoped_lock guard(groundSaveLock);ownedGroundEffects.insert(effect);heads.emplace_back(effect);}

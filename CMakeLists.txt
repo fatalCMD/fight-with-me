@@ -380,6 +380,14 @@ if(FWM_BUILD_TESTS)
 		endif()
 	endforeach()
 	add_test(NAME FightWithMeBreathTests COMMAND FightWithMeBreathTests)
+    add_executable(FightWithMeCompactEffectsTests tests/CompactEffectsTests.cpp src/BearRoar.cpp src/Bastion.cpp src/MoonFx.cpp src/WolfBite.cpp src/ArrowRain.cpp src/Blast.cpp)
+    target_compile_features(FightWithMeCompactEffectsTests PRIVATE cxx_std_23)
+    target_include_directories(FightWithMeCompactEffectsTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    if(MSVC)
+        target_compile_options(FightWithMeCompactEffectsTests PRIVATE ${FWM_MSVC_OPTIONS})
+    endif()
+    add_test(NAME FightWithMeCompactEffectsTests COMMAND FightWithMeCompactEffectsTests)
+
 
 	# Taunt's bear roar, sampled with the plugin's own code for tools/wolfhead/preview.
 	add_executable(FightWithMeBearLook tools/bearhead/BearLook.cpp src/BearRoar.cpp)

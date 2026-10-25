@@ -36,7 +36,7 @@ namespace
 		return free < 0.0f ? 1.0f : std::max(0.0f, 1.0f - free / 0.5f);
 	}
 
-	void Frames(float a_chest, int a_fps, bool a_grand)
+	void Frames(float a_chest, int a_fps, bool a_grand, bool compact)
 	{
 		const float held = FWM::Paths::kWolfHold[a_grand ? 2 : 1];
 		const float end = std::max(Gone(a_grand), kSnap + FWM::Paths::kWolfCatch + FWM::Haunt::Seconds(held));
@@ -45,7 +45,7 @@ namespace
 		for (int i = 0; i < count; ++i) {
 			const float t = static_cast<float>(i) / static_cast<float>(a_fps);
 			const auto  collision = At(std::min(t, Gone(a_grand)), 0.0f, {}, a_chest, a_grand);
-			const auto  pose = Display(collision, 0, a_grand);
+			const auto  pose = Display(collision, 0, a_grand, compact);
 			const auto& r = pose.rotate;
 			const float since = t - kSnap;
 			const auto  haunt = FWM::Haunt::At(since, FWM::Paths::kWolfCatch + held, a_grand);
@@ -88,9 +88,9 @@ int main(int a_argc, char** a_argv)
 	std::printf(",\"grip\":");
 	Vector(kGrip);
 	std::printf("},\n\"plain\":");
-	Frames(chest, fps, false);
+	Frames(chest, fps, false, a_argc>3);
 	std::printf(",\n\"grand\":");
-	Frames(chest, fps, true);
+	Frames(chest, fps, true, a_argc>3);
 	std::printf("}\n");
 	return 0;
 }

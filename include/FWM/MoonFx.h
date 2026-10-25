@@ -18,5 +18,5 @@ struct Part {std::array<float,3> at{},color{};float scale{1},turn{},tilt{},alpha
 struct Frame {std::array<Part,kParts> parts;float light{};};
 std::string Name(std::size_t index);
 Frame Aura(float age,float left,int rank);
-Frame At(float age,int rank,float radius=0);
+Frame At(float age,int rank,float radius=0,bool compact=false);
 }

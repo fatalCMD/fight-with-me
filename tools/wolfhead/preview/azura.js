@@ -23,7 +23,7 @@ const hilt=new THREE.Mesh(new THREE.BoxGeometry(22,5,4),armor);hilt.position.set
 let elapsed=0,paused=false,last=performance.now(),rank=Number(new URL(location.href).searchParams.get('rank'))||1;
 const glow=new THREE.PointLight(0xff5421,0,330,2);glow.position.set(0,0,70);scene.add(glow);
 const loader=new THREE.TextureLoader(),textures=new Map(),nodes={},billboards=[],materials=[];
-const [mesh,look]=await Promise.all(['azura.json','azura-look.json'].map(async file=>{const response=await fetch('out/'+file);if(!response.ok)throw Error(file+' unavailable');return response.json();}));
+const [mesh,look]=await Promise.all(['azura.json',new URLSearchParams(location.search).get('size')==='original'?'azura-look.json':'azura-look-compact.json'].map(async file=>{const response=await fetch('out/'+file);if(!response.ok)throw Error(file+' unavailable');return response.json();}));
 const audioData=await fetch('out/audio-plans.json').then(r=>r.json()),sound=new SoundPlayer(audioData,$('#audio'),$('#sound'),$('#soundStatus'));
 const root=new THREE.Group();scene.add(root);
 for(const n of mesh.nodes){const group=new THREE.Group();group.position.fromArray(n.translate);nodes[n.name]=group;if(n.billboard)billboards.push(group);}

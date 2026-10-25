@@ -105,8 +105,9 @@ async function load(name){
  for(const s of data.shapes){const mesh=new THREE.Mesh(geometryOf(s),glowMaterial(s));const tr=s.transform;mesh.position.fromArray(tr.translate);mesh.scale.setScalar(tr.scale);mesh.setRotationFromMatrix(new THREE.Matrix4().set(...[...tr.rotate.slice(0,3),0,...tr.rotate.slice(3,6),0,...tr.rotate.slice(6,9),0,0,0,0,1]));nodes[s.node].add(mesh);}
  top.visible=false;scene.add(top);return {top,nodes,facing};
 }
-const look=await fetch('out/breath-look.json').then(r=>r.json());
-for(const name of ['head','alduin',...['fire','frost','shock'].flatMap(e=>[1,2,3].map(r=>e+'-'+r))])models[name]=await load('breath-'+name);
+const compact=new URLSearchParams(location.search).get('size')!=='original';
+const look=await fetch('out/breath-look'+(compact?'-compact':'')+'.json').then(r=>r.json());
+for(const name of ['head','alduin',...['fire','frost','shock'].flatMap(e=>[1,2,3].map(r=>e+'-'+r))])models[name]=await load('breath-'+name+(compact&&!['head','alduin'].includes(name)?'-compact':''));
 const audioData=await fetch('out/audio-plans.json').then(r=>r.json()),sound=new SoundPlayer(audioData,$('audio'),$('sound'),$('soundStatus'));
 function audioPlan(){const rank=Number($('rank').value),element=Number($('element').value),run=look.ranks[rank-1],cues=audioData.plans.dragonbreath[rank-1].map(c=>({...c,at:c.at+look.release,form:c.channel?audioData.existing[['breathFire','breathFrost','breathShock'][element]]:c.form}));sound.load(cues,look.release+run.duration+.25);}
 
@@ -119,7 +120,7 @@ const restart=()=>{sound.unlock();audioPlan();age=0;paused=false;$('pause').text
 $('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Play':'Pause';};$('timeline').oninput=()=>{age=Number($('timeline').value)/1000*look.ranks[Number($('rank').value)-1].seconds;paused=true;$('pause').textContent='Play';};
 function paint(node,color,alpha,blended=false,drift=0){node?.traverse(o=>{if(o.material?.uniforms){const u=o.material.uniforms;u.tint.value.set(color[0]*(blended?1:alpha),color[1]*(blended?1:alpha),color[2]*(blended?1:alpha),blended?alpha:1);if(/fxfirescrolltilegrey|cloudtilefrostsmall|cloudtile.dds|darkswirls|fxembers/i.test(o.material.userData.source||''))u.uvOffset.value.y=drift;}});}
 // Keep the same drifting-texture selection as the native material animator.
-for(const name of Object.keys(models)){const data=await fetch('out/breath-'+name+'.json').then(r=>r.json());let i=0;models[name].top.traverse(o=>{if(o.material)o.material.userData.source=data.shapes[i++].source;});}
+for(const name of Object.keys(models)){const data=await fetch('out/breath-'+name+(compact&&!['head','alduin'].includes(name)?'-compact':'')+'.json').then(r=>r.json());let i=0;models[name].top.traverse(o=>{if(o.material)o.material.userData.source=data.shapes[i++].source;});}
 const ease=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);},profile=f=>.16+.84*ease(f/.12);
 function draw(){requestAnimationFrame(draw);const now=performance.now(),dt=Math.min((now-last)/1000,.1);last=now;const rank=Number($('rank').value),element=Number($('element').value),run=look.ranks[rank-1];if(!paused){const before=age;age=(age+dt)%(run.seconds+1);if(age<before)sound.reset();}sound.update(age,!paused,1);
  const p=run.frames[Math.min(run.frames.length-1,Math.floor(age*60))],head=models[rank===3?'alduin':'head'],flow=models[['fire','frost','shock'][element]+'-'+rank];

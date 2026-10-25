@@ -88,6 +88,7 @@ namespace FWM::Settings
 		// What abilities look like in the world: the glows on a tank and the enemies a taunt holds,
 		// the gesture and sparks of a healer's or mage's ability, a volley's target, and so on.
 		bool abilityEffects{ true };
+        bool compactEffects{ true };
 
 		// Time effect
 		std::string imodIntro{ "Skyrim.esm|0x0486F7" };

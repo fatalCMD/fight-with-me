@@ -287,6 +287,7 @@ namespace FWM::Settings
 			v.Bool(L"Specials", L"bEnabled", d.specials);
 
 			v.Bool(L"Effects", L"bEnabled", d.abilityEffects);
+            v.Bool(L"Effects", L"bCompactSummons", d.compactEffects);
 
 
 			v.Float(L"PathBonus", L"fFighterAttackSpeed", t.bonusAttackSpeed, 0.0f, 10.0f);

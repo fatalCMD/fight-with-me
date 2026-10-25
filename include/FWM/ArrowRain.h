@@ -29,12 +29,13 @@ namespace FWM::ArrowRain
 
 	inline constexpr float kRadius = 300.0f;    // the mark's reach: Paths::kRainRadius
 	inline constexpr float kSky = 1100.0f;      // the arrows start this high over their mark
-	inline constexpr float kCall = 0.45f;       // the flare's climb: the first arrow falls once it bursts
-	inline constexpr int   kMaxArrows = 28;     // visual capacity, allowing older/custom counts
+	inline constexpr float kPortalForward=85.0f, kPortalHeight=100.0f, kPortalRadius=65.0f;
+    inline constexpr float kCall = 0.45f;       // the flare's climb: the first arrow falls once it bursts
+	inline constexpr int   kMaxArrows = 96;     // visual capacity, allowing older/custom counts
 	inline constexpr float kTrail = 300.0f;     // the streak's length in the mesh, up from the nock
 	inline constexpr float kTip = 61.0f;        // the game's arrows reach this far ahead of their nock
 	inline constexpr float kSink = 12.0f;       // and a struck one's head goes this far in
-	inline constexpr float kSpeed = 4500.0f;    // how fast DemoArrow's arrows fall (in game, the arrows' own)
+	inline constexpr float kSpeed = 12000.0f;    // how fast DemoArrow's arrows fall (in game, the arrows' own)
 	inline constexpr float kLanding = 0.35f;    // allowed for the last arrow to come down before the mark goes
 	inline constexpr float kDrift = 0.35f;      // the sky's swirl drifting, texture lengths a second
 	inline constexpr float kStroke = 0.25f;     // the arrowheads pulse in this share of the mark's reach

@@ -158,8 +158,8 @@ namespace FWM::ArrowRain
 		Arrow arrow;
 		const float angle = Hash(a_index, 1) * kTurn;
 		const float reach = std::sqrt(Hash(a_index, 2)) * kRadius;
-		arrow.to = { std::cos(angle) * reach, std::sin(angle) * reach, 0.0f };
-		arrow.from = { arrow.to.x + (Hash(a_index, 3) - 0.5f) * 160.0f, arrow.to.y + (Hash(a_index, 4) - 0.5f) * 160.0f, kSky };
+		arrow.to = { std::cos(angle) * reach, 900.0f, 100.0f + std::sin(angle)*reach*.18f };
+		arrow.from = { (Hash(a_index,3)-.5f)*65, kPortalForward, kPortalHeight+(Hash(a_index,4)-.5f)*65 };
 		arrow.loosed = kCall + static_cast<float>(a_index) * a_rain / static_cast<float>(std::max(a_count, 1));
 		const float fall = Length({ arrow.to.x - arrow.from.x, arrow.to.y - arrow.from.y, arrow.to.z - arrow.from.z });
 		arrow.lands = arrow.loosed + (fall - (kTip - kSink)) / kSpeed;

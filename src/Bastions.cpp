@@ -19,7 +19,7 @@ namespace FWM::Bastions
 			RE::NiPoint3 origin;
 			float angle{}, age{}, duration{}, scale{ 1 }, loading{};
 			int rank{ 1 };
-			bool found{}, struck{};
+			bool found{}, struck{}, compact{};
 			std::array<RE::BSSoundHandle, Bastion::kSounds.size()> sounds;
 			std::array<bool, Bastion::kSounds.size()> sounded{}, faded{};
 			Posing::Lamp lamp;
@@ -72,6 +72,7 @@ namespace FWM::Bastions
 		if (!actor || !actor->Is3DLoaded() || !std::isfinite(seconds) || seconds <= 0 || !Settings::Get().abilityEffects) return;
 		Clear();
 		Fortress fort;
+        fort.compact=Settings::Get().compactEffects;
 		fort.actor = actor->GetHandle(); fort.origin = actor->GetPosition(); fort.angle = actor->GetAngleZ();
 		fort.duration = seconds; fort.rank = std::clamp(rank, 1, 3);
 		const float height = actor->GetHeight();
@@ -102,7 +103,7 @@ namespace FWM::Bastions
 		}
 		auto* root = Posing::RootOf(fort.effect.get());
 		if (!root) { Clear(); return; }
-		const auto frame = Bastion::At(fort.age, fort.duration, fort.rank);
+		const auto frame = Bastion::At(fort.age, fort.duration, fort.rank, fort.compact);
 		for (std::size_t i = 0; i < fort.parts.size(); ++i) {
 			auto& part = fort.parts[i]; const auto& pose = frame.parts[i];
 			const bool follows = i >= 4;

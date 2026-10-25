@@ -11,7 +11,7 @@ namespace FWM::Bastion
 		constexpr std::array<float, 3> strength{ .14f, .16f, .20f };
 		return strength[std::clamp(rank, 1, 3) - 1] * (1 - Ease(distance / kShakeReach));
 	}
-	Frame At(float age, float duration, int rank)
+	Frame At(float age, float duration, int rank, bool compact)
 	{
 		Frame f;
 		if (!std::isfinite(age) || !std::isfinite(duration) || age < 0 || duration <= 0 || age >= duration + kFade) return f;
@@ -48,6 +48,7 @@ namespace FWM::Bastion
 		for (int i : { 4, 5 }) { f.parts[i].turn = .045f * std::sin(age * .85f); f.parts[i].height = 1.5f * std::sin(age * 1.3f); }
 		f.parts[6].turn = -.15f * age; f.parts[6].height = 5 * std::sin(age * .9f);
 		f.light = (.12f * ward + .24f * landed * std::exp(-since * 7)) * end;
-		return f;
+		if(compact)for(int i : {0,1,2,3}){f.parts[i].scale*=.45f;f.parts[i].height*=.45f;}
+        return f;
 	}
 }

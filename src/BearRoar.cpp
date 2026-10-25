@@ -15,7 +15,7 @@ namespace FWM::BearRoar
 		}
 	}
 
-	Pose At(float a_age, bool a_grand)
+	Pose At(float a_age, bool a_grand, bool compact)
 	{
 		Pose p;
 		if (!std::isfinite(a_age) || a_age < 0.0f || a_age >= kGone) {
@@ -60,10 +60,15 @@ namespace FWM::BearRoar
 			p.waves[i] = { 140.0f + 310.0f * t, 35.0f + 145.0f * t,
 				(a_grand ? 0.52f : 0.38f) * Ease(0.0f, 1.0f, t / 0.08f) * (1.0f - t) * (1.0f - t) };
 		}
-		return p;
+		if(compact) {
+            const float factor=a_grand?.53f:.46f;
+            p.scale*=factor; p.height=25+(p.height-25)*factor; p.side*=factor;
+            for(auto& wave:p.waves){wave.radius*=factor;wave.forward*=factor;}
+        }
+        return p;
 	}
 
-	Pose WarCryAt(float a_age, bool a_grand)
+	Pose WarCryAt(float a_age, bool a_grand, bool compact)
 	{
 		auto p = At(a_age, a_grand);
 		// A spirit inhabiting the caster's upper body, not a projectile or an overhead summon.
@@ -80,7 +85,12 @@ namespace FWM::BearRoar
 			wave.forward = 0.0f;
 			wave.alpha *= 0.65f;
 		}
-		return p;
+		if(compact) {
+            const float factor=a_grand?.53f:.46f;
+            p.scale*=factor; p.height=25+(p.height-25)*factor; p.side*=factor;
+            for(auto& wave:p.waves){wave.radius*=factor;wave.forward*=factor;}
+        }
+        return p;
 	}
 
 	float Shake(float a_distance)

@@ -20,7 +20,7 @@ int main(int argc, char** argv)
 	for(int rank=1;rank<=3;++rank) {
 		std::printf("%s[",rank>1?",":"");
 		for(int i=0;i<=static_cast<int>(std::ceil((duration+kFade)*60));++i) {
-			const auto f=At(i/60.0f,duration,rank);
+			const auto f=At(i/60.0f,duration,rank,argc>2);
 			std::printf("%s{\"light\":%.4f,\"parts\":[",i?",":"",f.light);
 			for(std::size_t j=0;j<f.parts.size();++j) { const auto& p=f.parts[j]; std::printf("%s[%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f]",j?",":"",p.scale,p.height,p.turn,p.alpha,p.color[0],p.color[1],p.color[2]); }
 			std::printf("]}");

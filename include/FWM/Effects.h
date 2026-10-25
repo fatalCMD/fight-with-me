@@ -69,7 +69,8 @@ namespace FWM::Effects
 	// with a vanilla-only fallback. Head, Jaw and Wave0..2 are animated by TauntBears. Never saved.
 	[[nodiscard]] RE::BSTempEffectParticle* BearHead(RE::Actor* a_near, std::size_t a_copy, const RE::NiPoint3& a_at, float a_seconds, bool a_grand, bool a_warCry = false);
 
-	[[nodiscard]] RE::BSTempEffectParticle* BreathModel(RE::Actor* a_near, std::size_t copy, const RE::NiPoint3& at, float seconds, int part, int rank=1);
+	[[nodiscard]] RE::BSTempEffectParticle* BreathFlame(RE::Actor* actor, const RE::NiPoint3& at, const RE::NiMatrix3& aim, float scale, float seconds);
+	[[nodiscard]] RE::BSTempEffectParticle* BreathModel(RE::Actor* a_near, std::size_t copy, const RE::NiPoint3& at, float seconds, int part, int rank=1, bool compact=false);
 
 	// Chaos Down's ground pulse; independent copies, excluded from saves.
 	[[nodiscard]] RE::BSTempEffectParticle* ChaosGround(RE::Actor* a_near, std::size_t a_copy, const RE::NiPoint3& a_at, float a_seconds, bool a_grand);

@@ -14,7 +14,7 @@ const OUT = path.join(__dirname, '..', '..', 'assets');
 const R = 300;         // ArrowRain::kRadius
 const TRAIL = 300;     // ArrowRain::kTrail
 const TIP = 61;        // ArrowRain::kTip: the game's arrows reach this far ahead of their nock
-const ARROWS = 28;     // ArrowRain::kMaxArrows
+const ARROWS = 96;     // ArrowRain::kMaxArrows
 
 // How brightly each piece glows (its shader's colour scale). The solid strokes stay near 1; the game's
 // textures give back far less light, so the pieces drawn with them run hot.
@@ -140,13 +140,13 @@ function build() {
     chevron(outer, R * 1.25, t, 30, 7);
   }
   const floor = piece();
-  disc(floor, R, 1.6, r => (r < 1 ? (0.12 + 0.88 * Math.pow(r, 3)) * (1 - Math.pow(r, 12)) : 0), 72, 12);
+  disc(floor, R, 1.6, r => r<.9?1:Math.max(0,(1-r)*10), 72, 12);
   parts.push(m.node('NiNode', 'Mark', [
     m.node('NiNode', 'Ring', [m.shape('MarkRing', ring, { scale: LOOK.ring })]),
     m.node('NiNode', 'Dashes', [m.shape('MarkDashes', dashes, { scale: LOOK.dashes })]),
     m.node('NiNode', 'Heads', [m.shape('MarkHeads', heads, { scale: LOOK.heads })]),
     m.node('NiNode', 'Outer', [m.shape('MarkOuter', outer, { scale: LOOK.outer })]),
-    m.node('NiNode', 'Floor', [m.shape('MarkFloor', floor, { scale: LOOK.floor })])
+    m.node('NiNode', 'Floor', [m.shape('MarkFloor', floor, { scale: 1.4, texture: "textures\\FightWithMe\\ArrowRune.DDS" })])
   ]));
 
   // The sky the arrows fall out of: a soft glow facing down, a swirl of cloud turning in it, and the

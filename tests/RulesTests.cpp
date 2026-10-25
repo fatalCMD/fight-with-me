@@ -1309,13 +1309,13 @@ namespace
 		// The stand-in arrows fall inside the mark, loosed as Arts looses the game's, landing within the show.
 		for (int k = 0; k < kMaxArrows; ++k) {
 			const auto arrow = DemoArrow(k, kMaxArrows, rain);
-			CHECK(std::hypot(arrow.to.x, arrow.to.y) <= kRadius + 0.01f);
+			CHECK(std::abs(arrow.to.x) <= kRadius + 0.01f && arrow.from.y == kPortalForward && arrow.to.y > arrow.from.y);
 			CHECK(arrow.loosed >= kCall && arrow.loosed < kCall + rain && arrow.lands - arrow.loosed < kLanding);
 			CHECK(arrow.lands + 1.0f <= Seconds(rain));
 			// Landed, its point is kSink into the ground at its mark.
 			const Vec along{ arrow.to.x - arrow.from.x, arrow.to.y - arrow.from.y, arrow.to.z - arrow.from.z };
 			const auto tip = TipOf(DemoHead(arrow, arrow.lands + 0.5f), along);
-			CHECK(Near(std::hypot(tip.x - arrow.to.x, tip.y - arrow.to.y, tip.z - arrow.to.z), kSink, 0.5f) && tip.z < arrow.to.z);
+			CHECK(Near(std::hypot(tip.x - arrow.to.x, tip.y - arrow.to.y, tip.z - arrow.to.z), kSink, 0.5f) && tip.y > arrow.to.y);
 		}
 	}
 

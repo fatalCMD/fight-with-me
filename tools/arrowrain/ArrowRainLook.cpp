@@ -14,8 +14,8 @@ using namespace FWM::ArrowRain;
 
 namespace
 {
-	constexpr float kRain = 2.0f;                     // Paths::kRainSeconds
-	constexpr Vec   kBow{ -520.0f, -620.0f, 110.0f };  // the archer's bow hand
+	constexpr float kRain = 1.5f;                     // Paths::kRainSeconds
+	constexpr Vec   kBow{ 0.0f, 0.0f, 100.0f };  // the archer's bow hand
 
 	void Frames(int a_count, bool a_grand, int a_fps)
 	{
@@ -53,9 +53,11 @@ int main(int a_argc, char** a_argv)
 				"\"skyColor\":[%.3f,%.3f,%.3f],\"dustColor\":[%.3f,%.3f,%.3f],\n\"plain\":",
 		fps, kRadius, kSky, kCall, kStroke, kDrift, kBow.x, kBow.y, kBow.z, kTrailColor[0], kTrailColor[1], kTrailColor[2], kMarkColor[0], kMarkColor[1], kMarkColor[2], kSkyColor[0],
 		kSkyColor[1], kSkyColor[2], kDustColor[0], kDustColor[1], kDustColor[2]);
-	Frames(9, false, fps);
+	Frames(24, false, fps);
 	std::printf(",\n\"grand\":");
-	Frames(18, true, fps);
+	Frames(48, true, fps);
+	std::printf(",\n\"second\":");
+	Frames(36, false, fps);
 	std::printf("}\n");
 	return 0;
 }

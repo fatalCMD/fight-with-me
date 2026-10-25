@@ -19,7 +19,7 @@ struct Part {RE::NiPointer<RE::NiAVObject> node;std::vector<RE::BSShaderProperty
 struct Look {
  RE::ActorHandle actor;RE::NiPointer<RE::BSTempEffectParticle> effect;
  std::array<Part,MoonFx::kParts> parts;RE::NiPoint3 origin;RE::NiMatrix3 facing;
- Posing::Lamp lamp;float age{},radius{};int rank{};std::size_t copy{};bool aura{},found{};
+ Posing::Lamp lamp;float age{},radius{};int rank{};std::size_t copy{};bool aura{},found{},compact{};
 };
 std::vector<Look> looks;
 struct Pulse {RE::ActorHandle caster;RE::NiPoint3 origin;RE::TESObjectCELL* cell{};float age{},radius{},duration{};int rank{};std::vector<RE::ActorHandle> reached;};
@@ -32,7 +32,7 @@ void Visual(RE::Actor* actor,int rank,bool aura,float radius,float seconds){
  if(aura&&std::ranges::any_of(looks,[&](const Look& l){return l.aura&&l.actor==actor->GetHandle();}))return;
  for(std::size_t copy=0;copy<MoonFx::kCopies;++copy){
   if(std::ranges::any_of(looks,[copy](const Look& l){return l.copy==copy;}))continue;
-  Look l;l.actor=actor->GetHandle();l.origin=actor->GetPosition();l.facing.MakeZRotation(actor->GetAngleZ());l.rank=rank;l.aura=aura;l.radius=radius;l.copy=copy;
+  Look l;l.compact=Settings::Get().compactEffects;l.actor=actor->GetHandle();l.origin=actor->GetPosition();l.facing.MakeZRotation(actor->GetAngleZ());l.rank=rank;l.aura=aura;l.radius=radius;l.copy=copy;
   l.effect.reset(Effects::Moon(actor,copy,l.origin,seconds+2));if(!l.effect)continue;
   looks.push_back(std::move(l));return;
  }
@@ -101,7 +101,7 @@ void Tick(float dt){
   MoonFx::Frame frame;
   if(l.aura){const std::scoped_lock guard(lock);const auto it=blessings.find(actor->GetFormID());if(it==blessings.end()){Finish(l);return true;}
    const auto& b=it->second;frame=MoonFx::Aura(b.age,b.left,b.rank);l.effect->lifetime=l.effect->age+b.left+1;
-  }else{if(l.age>MoonFx::kApparition){Finish(l);return true;}frame=MoonFx::At(l.age,l.rank,l.radius);}
+  }else{if(l.age>MoonFx::kApparition){Finish(l);return true;}frame=MoonFx::At(l.age,l.rank,l.radius,l.compact);}
   auto* root=Posing::RootOf(l.effect.get());if(!root)return false;
   if(!l.found){for(std::size_t i=0;i<l.parts.size();++i){auto& part=l.parts[i];part.node.reset(root->GetObjectByName(MoonFx::Name(i)));if(!part.node){Finish(l);return true;}part.shaders=Posing::ShadersOf(part.node.get());}l.found=true;}
   for(std::size_t i=0;i<l.parts.size();++i){auto& part=l.parts[i];const auto& p=frame.parts[i];const bool visible=l.aura?(i>=6&&i<66):(i<6||i>=66);

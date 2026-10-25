@@ -29,7 +29,7 @@ Frame Aura(float age,float left,int rank){
  }
  return f;
 }
-Frame At(float age,int rank,float radius){
+Frame At(float age,int rank,float radius,bool compact){
  if(!std::isfinite(age)||age<0||age>=kSeconds)return {};
  rank=std::clamp(rank,1,3);if(radius<=0)radius=Radius(rank);
  const float casterArrival=kRelease+150/radius*kTravel;
@@ -65,6 +65,11 @@ Frame At(float age,int rank,float radius){
   p.at=a;p.scale=length;p.turn=std::atan2(x,-y);p.tilt=std::acos(std::clamp(z/length,-1.0f,1.0f));p.alpha=alpha*.7f;
  }
  auto& aura=f.parts[114];aura.at=mother.at;aura.scale=size;aura.alpha=alpha*.24f;aura.drift=age*.025f;
+ if(compact)for(std::size_t i=0;i<kParts;++i){
+  if(i==4 || (i>=6 && i<66))continue; // The blessing radius and recipients retain their original effect.
+  auto& p=f.parts[i];const float factor=rank>=3?.42f:.38f;
+  p.at[0]*=factor;p.at[1]=-150+(p.at[1]+150)*factor;p.at[2]*=factor;p.scale*=factor;
+ }
  f.light=alpha*.3f+wave.alpha*.5f;
  return f;
 }

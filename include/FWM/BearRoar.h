@@ -30,7 +30,7 @@ namespace FWM::BearRoar
 		std::array<float, 3> tint{ 1.0f, 1.0f, 1.0f }, glow{ kAmber };
 		std::array<Wave, kWaves> waves{};
 	};
-	[[nodiscard]] Pose At(float a_age, bool a_grand = false);
-	[[nodiscard]] Pose WarCryAt(float a_age, bool a_grand = false);
+	[[nodiscard]] Pose At(float a_age, bool a_grand = false, bool compact = false);
+	[[nodiscard]] Pose WarCryAt(float a_age, bool a_grand = false, bool compact = false);
 	[[nodiscard]] float Shake(float a_distance);
 }

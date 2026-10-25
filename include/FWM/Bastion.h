@@ -29,6 +29,6 @@ namespace FWM::Bastion
 	};
 	struct Frame { std::array<Part, kNames.size()> parts; float light{}; };
 	// Architecture stays at the cast point; the final three parts follow the guardian.
-	[[nodiscard]] Frame At(float age, float duration, int rank);
+	[[nodiscard]] Frame At(float age, float duration, int rank, bool compact = false);
 	[[nodiscard]] float Shake(float distance, int rank);
 }

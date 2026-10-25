@@ -133,7 +133,7 @@ namespace FWM::Paths
 		Ranks Primary(Perk a_perk)
 		{
 			switch (a_perk) {
-			case Perk::kDragonBreath: return {8,11,14};
+			case Perk::kDragonBreath: return {20,30,45};
 			case Perk::kBreathReach: return {10,20,30};
 			case Perk::kBreathLingering: return {.5f,1,1.5f};
 			case Perk::kTaunt:
@@ -267,9 +267,9 @@ namespace FWM::Paths
 			case Perk::kPinningHeavy:
 				return { 1, 2, 3 };
 			case Perk::kArrowRain:
-				return { 6, 9, 12 };
+				return { 24, 36, 48 };
 			case Perk::kArrowRainDownpour:
-				return { 2, 4, 6 };
+				return { 8, 16, 24 };
 			case Perk::kFineArrows:
 				return { 1, 2, 3 };
 			case Perk::kSpellTouched:
@@ -1472,7 +1472,7 @@ namespace FWM::Paths
 		case Perk::kPinningTwin:
 			return std::string(Tr("Windstep grants 40% movement speed instead of 30%."));
 		case Perk::kArrowRain:
-			return Trf("{} arrows fall around their target over {:.0f} s, within {:.0f}, each at someone under them; one that misses still grazes whoever it lands beside for half its blow. Conjured: none leave the quiver.", n, kRainSeconds, kRainRadius);
+			return Trf("A portal fires {} fast arrows ahead over {:.1f} s, covering enemies within {:.0f} of the target. Near misses graze for half damage. No ammunition is consumed.", n, kRainSeconds, kRainRadius);
 		case Perk::kArrowRainDownpour:
 			return Trf("{} more arrows fall.", n);
 		case Perk::kArrowRainPinning:

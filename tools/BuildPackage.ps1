@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
 	Builds the mod-manager package for Fight With Me.
 
@@ -16,7 +16,7 @@
 [CmdletBinding()]
 param(
 	[string]$Version = '0.5.0',
-    [string]$EffectsVersion = '1.0.20',
+    [string]$EffectsVersion = '1.0.21',
 	[string]$VcpkgRoot = $env:VCPKG_ROOT,
 	[string]$CMake = '',
 	[switch]$SkipBuild

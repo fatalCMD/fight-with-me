@@ -74,7 +74,7 @@ namespace FWM::WolfBite
 	// holds on and shakes its catch kGrandHold longer.
 	[[nodiscard]] Pose At(float a_age, float a_heading, Vec a_at, float a_chest, bool a_grand = false);
 
-	[[nodiscard]] Pose Display(Pose a_pose, float a_ground, bool a_grand);
+	[[nodiscard]] Pose Display(Pose a_pose, float a_ground, bool a_grand, bool compact = false);
 
 	// A point of the head's mesh, in the world.
 	[[nodiscard]] Vec Place(const Pose& a_pose, Vec a_local);

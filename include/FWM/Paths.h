@@ -657,7 +657,7 @@ namespace FWM::Paths
 	inline constexpr float kWolfBossHold = 0.5f;      // a boss is held this share of it
 	inline constexpr float kWolfCatch = 0.2f;         // seconds into their stagger they are caught still
 	inline constexpr float kRainRadius = 300.0f;
-	inline constexpr float kRainSeconds = 2.0f;
+	inline constexpr float kRainSeconds = 1.5f;
 	inline constexpr float kSurgeSeconds = 12.0f;
 	inline constexpr float kSearingSeconds = 12.0f;
 	inline constexpr std::array<float, 3> kBurstDamage{ 24.0f, 36.0f, 48.0f };

@@ -27,7 +27,7 @@ namespace FWM::TauntBears
 			RE::NiPoint3 feet;
 			float heading{}, age{}, loading{};
 			std::size_t copy{};
-			bool found{}, sounded{}, grand{}, warCry{};
+			bool found{}, sounded{}, grand{}, warCry{}, compact{};
 			Posing::Lamp lamp;
 		};
 		std::vector<Bear> bears;
@@ -68,7 +68,7 @@ namespace FWM::TauntBears
 
 		void Pose(Bear& a_bear)
 		{
-			const auto p = a_bear.warCry ? BearRoar::WarCryAt(a_bear.age, a_bear.grand) : BearRoar::At(a_bear.age, a_bear.grand);
+			const auto p = a_bear.warCry ? BearRoar::WarCryAt(a_bear.age, a_bear.grand, a_bear.compact) : BearRoar::At(a_bear.age, a_bear.grand, a_bear.compact);
 			auto* root = Posing::RootOf(a_bear.effect.get());
 			const RE::NiPoint3 forward{ std::sin(a_bear.heading), std::cos(a_bear.heading), 0.0f };
 			const RE::NiPoint3 right{ std::cos(a_bear.heading), -std::sin(a_bear.heading), 0.0f };
@@ -80,7 +80,7 @@ namespace FWM::TauntBears
 			for (std::size_t i = 0; i < a_bear.waves.size(); ++i) {
 				auto& wave = a_bear.waves[i];
 				const auto& w = p.waves[i];
-				Posing::PlaceInWorld(root, wave.node.get(), a_bear.feet + forward * w.forward + RE::NiPoint3{ 0.0f, 0.0f, a_bear.warCry ? p.height : 205.0f }, Turn(a_bear.heading), w.radius);
+				Posing::PlaceInWorld(root, wave.node.get(), a_bear.feet + forward * w.forward + RE::NiPoint3{ 0.0f, 0.0f, a_bear.warCry || a_bear.compact ? p.height : 205.0f }, Turn(a_bear.heading), w.radius);
 				Posing::Paint(wave.shaders, p.glow, w.alpha);
 			}
 			Posing::Shine(a_bear.lamp, root, at, p.glow, p.alpha * (a_bear.grand ? 0.75f : 1.5f), 350.0f);
@@ -109,6 +109,7 @@ namespace FWM::TauntBears
 		}
 		if (copy == BearRoar::kCopies) return false;
 		Bear bear;
+        bear.compact=Settings::Get().compactEffects;
 		bear.copy = copy;
 		bear.grand = a_grand;
 		bear.warCry = a_warCry;
