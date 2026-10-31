@@ -14,6 +14,7 @@ namespace FWM::Settings
 		float styleWeight{ 0.75f };      // how far a role pulls a follower's own style
 		float planInterval{ 0.3f };      // seconds between target decisions
 		bool  guessRoles{ true };        // first sight: pick a role from loadout (or NFF)
+		bool  roleWeapons{ true };       // each role keeps to its own weapons; off: any carried weapon (not the Skald)
 		bool  guardLeash{ true };        // keep guards (and melee holding back) inside an area around the player
 		float holdBackLeash{ 1000.0f };  // that area for Hold back
 		bool  leaveEmptyFights{ true };  // end a companion's combat once no enemy is left
@@ -21,8 +22,9 @@ namespace FWM::Settings
 		bool        markGlow{ true };  // in the plan, an enemy someone is sent after is outlined, through walls
 		std::string markShader{ "Skyrim.esm|0x0FE68D" };  // GhostWolfSpiritFXShader: edge only; recoloured
 
-		// Out of a fight: an enemy in view brings weapons out, and with auto battle the
-		// companion who sees it starts the fight instead of waiting to be attacked.
+		// Out of a fight, with auto battle: the companion who sees an enemy starts the fight
+		// instead of waiting to be attacked, and the sight of one brings weapons out (unless
+		// drawOnSight is off). Without auto battle they wait, weapons away.
 		bool  drawOnSight{ true };
 		bool  autoBattle{ false };
 		float sightRange{ 2500.0f };
@@ -40,6 +42,7 @@ namespace FWM::Settings
         float partyExtraPenalty{ 5.0f };
         float partyAdvantagePenalty{ 10.0f };
         float partyMinimumDamage{ 50.0f };
+        float followerDamage{100.0f};
 
 		// Battle plan
 		Hotkey        planKey{ 71 };        // Numpad 7

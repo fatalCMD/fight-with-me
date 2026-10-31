@@ -17,6 +17,8 @@ namespace FWM::OrdersLink
 	// The role Fight With Me has saved for them, if any.
 	[[nodiscard]] std::optional<Role> RoleOf(RE::FormID a_member);
 
+    [[nodiscard]] std::optional<Position> PositionOf(RE::FormID a_member);
+
 	// The enemy they were sent after, or none.
 	[[nodiscard]] RE::ActorHandle MarkOf(RE::FormID a_member);
 }

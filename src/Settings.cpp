@@ -4,6 +4,7 @@
 #include "FWM/PanelBindings.h"
 #include "FWM/Log.h"
 #include "FWM/UITheme.h"
+#include "CompanionThemeLink.h"
 
 namespace FWM::Settings
 {
@@ -176,6 +177,7 @@ namespace FWM::Settings
 			v.Float(L"General", L"fStyleWeight", d.styleWeight, 0.0f, 1.0f);
 			v.Float(L"General", L"fDecisionInterval", d.planInterval, 0.1f, 2.0f);
 			v.Bool(L"General", L"bGuessRoles", d.guessRoles);
+			v.Bool(L"Loadout", L"bRoleWeapons", d.roleWeapons);
 			v.Bool(L"General", L"bLeaveEmptyFights", d.leaveEmptyFights);
 			v.Float(L"General", L"fLeaveAfter", d.leaveAfter, 0.5f, 15.0f);
 
@@ -183,6 +185,7 @@ namespace FWM::Settings
 			v.Bool(L"Sight", L"bAutoBattle", d.autoBattle);
 			v.Float(L"Sight", L"fRange", d.sightRange, 500.0f, 6000.0f);
 
+            v.Float(L"PartyBalance", L"fFollowerDamage", d.followerDamage, 0.0f, 100.0f);
             v.Bool(L"PartyBalance", L"bEnabled", d.partyBalance);
             v.Float(L"PartyBalance", L"fExtraFollowerPenalty", d.partyExtraPenalty, 0.0f, 25.0f);
             v.Float(L"PartyBalance", L"fOutnumberPenalty", d.partyAdvantagePenalty, 0.0f, 25.0f);
@@ -511,15 +514,8 @@ namespace FWM::Settings
 
 	int Theme() noexcept
 	{
-		if (Host::Abilities()) {
-			using Query=int(*)();
-			static const auto query=[]()->Query {
-				auto module=::GetModuleHandleW(L"FightWithMe.dll");
-				return module?reinterpret_cast<Query>(::GetProcAddress(module,"FightWithMe_GetTheme")):nullptr;
-			}();
-			if(query)return UITheme::Normalize(query());
-		}
-		return Get().uiTheme;
+		return CompanionThemeLink::Current(Host::Abilities() ? CompanionThemeLink::Mod::Paths :
+			CompanionThemeLink::Mod::Fight, Get().uiTheme);
 	}
 
 	const Data& Chosen() noexcept
@@ -599,13 +595,10 @@ namespace FWM::Settings
 
     bool ShareTheme(int theme)
     {
-        if(!Host::Abilities())return true;
-        auto module=::GetModuleHandleW(L"FightWithMe.dll");
-        if(!module)return true; // standalone Paths saves its own theme
-        using Setter=bool(*)(int);
-        const auto set=reinterpret_cast<Setter>(::GetProcAddress(module,"FightWithMe_SetTheme"));
-        if(!set){Log::Warn("[Settings] Update Fight With Me to change the shared theme from Path of the Companions."sv);return false;}
-        return set(UITheme::Normalize(theme));
+        const bool saved = CompanionThemeLink::Share(Host::Abilities() ? CompanionThemeLink::Mod::Paths :
+            CompanionThemeLink::Mod::Fight, theme);
+        if (!saved) Log::Warn("[Settings] A companion mod could not save the theme. Check its log and update all three mods together."sv);
+        return saved;
     }
 
 	std::uint64_t Submit(const Data& a_data, bool shareTheme)
@@ -640,7 +633,7 @@ namespace FWM::Settings
 						update = std::move(pending);
 						pending.reset();
 					}
-					if(update->theme)update->second.uiTheme=*update->theme;
+					update->second.uiTheme = update->theme.value_or(Chosen().uiTheme);
                     const bool localSaved=Apply(update->second);
                     const bool sharedSaved=!update->theme || ShareTheme(*update->theme);
                     saveFailed = !localSaved || !sharedSaved;

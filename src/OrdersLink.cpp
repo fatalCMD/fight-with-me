@@ -11,6 +11,7 @@ namespace FWM::OrdersLink
 	{
 		FightWithMeAPI::IFightWithMe* api{ nullptr };
 		std::uint32_t (*getMark)(std::uint32_t){ nullptr };
+        std::int32_t (*getPosition)(std::uint32_t){ nullptr };
 	}
 
 	void Connect()
@@ -23,6 +24,7 @@ namespace FWM::OrdersLink
 		const auto get = reinterpret_cast<GetInterface>(::GetProcAddress(module, "FightWithMe_GetInterface"));
 		api = get ? get(FightWithMeAPI::INTERFACE_VERSION) : nullptr;
 		getMark = reinterpret_cast<std::uint32_t (*)(std::uint32_t)>(::GetProcAddress(module, "FightWithMe_GetMark"));
+        getPosition=reinterpret_cast<decltype(getPosition)>(::GetProcAddress(module,"FightWithMe_GetPosition"));
 		if (!api) {
 			Log::Warn("[Orders] FightWithMe.dll offers no interface this version understands; paths follow each companion's gear."sv);
 			return;
@@ -52,4 +54,11 @@ namespace FWM::OrdersLink
 	{
 		return getMark ? Game::FromNative(getMark(a_member)) : RE::ActorHandle{};
 	}
+
+    std::optional<Position> PositionOf(RE::FormID member)
+    {
+        const auto value=getPosition?getPosition(member):-1;
+        if(value<0||value>=static_cast<std::int32_t>(Position::kCount))return std::nullopt;
+        return Live(static_cast<Position>(value));
+    }
 }

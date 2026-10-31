@@ -1,6 +1,8 @@
 #pragma once
 
+#include "FWM/Leveling.h"
 #include "FWM/StyleLayer.h"
+#include "FWM/View.h"
 #include <optional>
 
 namespace FightWithMePathsAPI
@@ -23,6 +25,16 @@ namespace FWM::AbilityLink
 	// Paths supplies weapon compatibility; without Paths, preserve standalone pools.
 	[[nodiscard]] std::optional<std::uint32_t> LoadoutMask(Role role);
 	bool IsWindstepDecoy(RE::FormID actor);
+    bool Performing(RE::FormID actor);
+    bool SkaldRelocating(RE::FormID actor);
+    bool SkaldUnlocked(RE::FormID actor);
+    void SkaldProgress(View::Member& member);
+    Paths::Block UnlockSkald(RE::FormID actor);
+    void Statuses(RE::FormID actor, std::vector<View::Status>& out);
+
+	// The level a companion has earned in battle, which Path of the Companion keeps; nothing
+	// without it, with an older one, or while leveling is off.
+	[[nodiscard]] std::optional<Leveling::Progress> Level(RE::FormID a_member);
 
 	struct Request
 	{

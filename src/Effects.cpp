@@ -1464,6 +1464,54 @@ namespace FWM::Effects
 		return effect;
 	}
 
+    RE::BSTempEffectParticle* SkaldModel(RE::Actor* actor,int song,bool lute,float seconds)
+    {
+        static constexpr std::array<const char*,4> lutes{R"(FightWithMe\SkaldLute0.nif)",R"(FightWithMe\SkaldLute1.nif)",R"(FightWithMe\SkaldLute2.nif)",R"(FightWithMe\SkaldLute3.nif)"};
+        static constexpr std::array<const char*,4> pulses{R"(FightWithMe\SkaldFervor.nif)",R"(FightWithMe\SkaldEchoes.nif)",R"(FightWithMe\SkaldHollow.nif)",R"(FightWithMe\SkaldGlory.nif)"};
+        auto* cell=actor?actor->GetParentCell():nullptr;
+        if(song<0||song>=4||!Settings::Get().enabled||!cell||!cell->IsAttached())return nullptr;
+        const char* model=(lute?lutes:pulses)[static_cast<std::size_t>(song)];
+        if(!RE::BSResourceNiBinaryStream(std::format("meshes\\{}",model)).good())return nullptr;
+        const RE::NiMatrix3 still;
+        auto* effect=RE::BSTempEffectParticle::Spawn(cell,seconds,model,still,actor->GetPosition(),1.f,0,nullptr);
+        if(effect){const std::scoped_lock guard(groundSaveLock);ownedGroundEffects.insert(effect);heads.emplace_back(effect);}
+        return effect;
+    }
+
+    RE::BSTempEffectParticle* SkaldParticles(RE::Actor* actor,std::size_t song,SkaldCloud kind,int rank,const RE::NiPoint3& at)
+    {
+        static const auto cloudModels=[](){
+            std::array<std::array<std::array<std::string,3>,3>,4> cloudNames{};
+            constexpr std::array songs{"Fervor","Echoes","Hollow","Glory"};
+            constexpr std::array kinds{"Aura","Wave","Hit"};
+            for(std::size_t s=0;s<songs.size();++s)for(std::size_t k=0;k<kinds.size();++k)for(std::size_t r=0;r<3;++r)
+                cloudNames[s][k][r]=std::format(R"(FightWithMe\Skald{}{}{}.nif)",songs[s],kinds[k],r+1);
+            return cloudNames;
+        }();
+        auto* cell=actor?actor->GetParentCell():nullptr;
+        const auto index=static_cast<std::size_t>(kind);
+        if(song>=cloudModels.size()||index>=3||!Settings::Get().enabled||!Settings::Get().abilityEffects||!cell||!cell->IsAttached())return nullptr;
+        const auto* model=cloudModels[song][index][static_cast<std::size_t>(std::clamp(rank,1,3)-1)].c_str();
+        if(!RE::BSResourceNiBinaryStream(std::format("meshes\\{}",model)).good())return nullptr;
+        const RE::NiMatrix3 still;
+        auto* effect=RE::BSTempEffectParticle::Spawn(cell,kind==SkaldCloud::Wave?1.95f:1.65f,model,still,at,1.f,0,nullptr);
+        if(effect){const std::scoped_lock guard(groundSaveLock);ownedGroundEffects.insert(effect);heads.emplace_back(effect);}
+        return effect;
+    }
+
+    RE::BSTempEffectParticle* SkaldHit(RE::Actor* actor,std::size_t song,float seconds)
+    {
+        auto* cell=actor?actor->GetParentCell():nullptr;
+        constexpr std::array hitModels{R"(FightWithMe\SkaldHit0.nif)",R"(FightWithMe\SkaldHit1.nif)",R"(FightWithMe\SkaldHit2.nif)",R"(FightWithMe\SkaldHit3.nif)"};
+        if(song>=hitModels.size())return nullptr;
+        const auto* model=hitModels[song];
+        if(!Settings::Get().enabled||!Settings::Get().abilityEffects||!cell||!cell->IsAttached()||
+            !RE::BSResourceNiBinaryStream(std::format("meshes\\{}",model)).good())return nullptr;
+        const RE::NiMatrix3 still;
+        auto* effect=RE::BSTempEffectParticle::Spawn(cell,seconds,model,still,actor->GetPosition(),1.f,0,nullptr);
+        if(effect){const std::scoped_lock guard(groundSaveLock);ownedGroundEffects.insert(effect);heads.emplace_back(effect);}
+        return effect;
+    }
 	void Struck(RE::Actor* a_actor, std::size_t a_element, float a_seconds)
 	{
 		if (!a_actor || a_element >= elementals.size() || !elementals[a_element] || !Settings::Get().enabled || !Settings::Get().abilityEffects ||

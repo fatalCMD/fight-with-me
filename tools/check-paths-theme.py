@@ -5,6 +5,7 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 out = root / 'build/paths-theme-audit'
 out.mkdir(parents=True, exist_ok=True)
+(out / 'windows.h').write_text('#pragma once\n')
 source = (root / 'src/Settings.cpp').read_text(encoding='utf-8')
 def method(signature):
     start = source.index(signature)
@@ -39,13 +40,14 @@ namespace FWM::Host{bool Abilities(){return scenario!=3;}}
 namespace FWM::Log{template<class... T>void Warn(T&&...){}}
 bool coreSet(int theme){coreTheme=theme;++coreWrites;return scenario!=4;}
 int coreGet(){return coreTheme;}
-void* GetModuleHandleW(const wchar_t*){return scenario==0?nullptr:&coreTheme;}
+void* GetModuleHandleW(const wchar_t* name){return scenario==0 || std::wstring_view(name)!=L"FightWithMe.dll"?nullptr:&coreTheme;}
 using Proc=void(*)();
 Proc GetProcAddress(void*,const char* name){
  if(std::string_view(name)=="FightWithMe_GetTheme")return reinterpret_cast<Proc>(&coreGet);
  if(std::string_view(name)=="FightWithMe_SetTheme" && scenario!=2)return reinterpret_cast<Proc>(&coreSet);
  return nullptr;
 }
+#include "CompanionThemeLink.h"
 namespace SKSE {
 struct Tasks{std::vector<std::function<void()>>queued;void AddTask(std::function<void()>task){queued.push_back(task);}}tasks;
 Tasks* GetTaskInterface(){return &tasks;}
@@ -95,7 +97,7 @@ project(PathsThemeAudit LANGUAGES CXX)
 enable_testing()
 add_executable(PathsTheme Audit.cpp)
 target_compile_features(PathsTheme PRIVATE cxx_std_23)
-target_include_directories(PathsTheme PRIVATE "{(root / 'include').as_posix()}")
+target_include_directories(PathsTheme PRIVATE "{out.as_posix()}" "{(root / 'include').as_posix()}")
 foreach(scenario RANGE 0 4)
  add_test(NAME Theme-${{scenario}} COMMAND PathsTheme ${{scenario}})
 endforeach()

@@ -50,6 +50,8 @@ namespace FWM::Arts
 
 	// Every frame, in a fight or out of it: every wait runs down by these world seconds.
 	void Cool(float a_seconds);
+    void ReduceCooldowns(RE::FormID id,float seconds);
+    void CancelSong(RE::FormID id,Paths::Ability ability);
 
 	// Waits still running, for the co-save, and back from it.
 	[[nodiscard]] std::vector<Cooldowns::Wait> SavedWaits();

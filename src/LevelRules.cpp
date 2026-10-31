@@ -65,6 +65,7 @@ namespace FWM::Leveling
 		case Role::kTank: return { 6.0f, 0.0f, 4.0f, { Skill::kBlock, Skill::kHeavyArmor, Skill::kOneHanded }, 3 };
 		case Role::kBruiser: return { 5.0f, 0.0f, 5.0f, { Skill::kTwoHanded, Skill::kHeavyArmor }, 2 };
 		case Role::kArcher: return { 4.0f, 0.0f, 6.0f, { Skill::kArchery, Skill::kLightArmor }, 2 };
+		case Role::kSkald: return { 4.0f, 4.0f, 2.0f, { Skill::kAlteration, Skill::kOneHanded }, 2 };
 		case Role::kMage: return { 3.0f, 7.0f, 0.0f, { Skill::kDestruction, Skill::kAlteration }, 2 };
 		case Role::kHealer: return { 4.0f, 6.0f, 0.0f, { Skill::kRestoration, Skill::kAlteration }, 2 };
 		default: return { 5.0f, 0.0f, 5.0f, { Skill::kOneHanded, Skill::kLightArmor, Skill::kBlock }, 3 };

@@ -1,3 +1,4 @@
+#include "FWM/Skald.h"
 #include "FWM/AbilityAuto.h"
 #include "FWM/AbilityPolicy.h"
 #include "FWM/Abilities.h"
@@ -115,10 +116,11 @@ namespace FWM::Abilities
         if (!orders) return 0;
         const auto kit=PathsLink::KitOf(actor->GetFormID(),orders->role);
         const int rank=kit.tree?std::max(1,kit.Rank(ability)):(actor->GetLevel()>=60?3:actor->GetLevel()>=30?2:1);
-        return AbilityResource::Cost(Game::Maximum(actor,ChoosesSpells(orders->role)?RE::ActorValue::kMagicka:RE::ActorValue::kStamina),rank);
+        return AbilityResource::Cost(Game::Maximum(actor,ChoosesSpells(orders->role)?RE::ActorValue::kMagicka:RE::ActorValue::kStamina),rank)*Skald::ResourceFactor(actor->GetFormID(),ability);
     }
     std::string ResourceBlock(RE::Actor* actor, Paths::Ability ability) {
         if (!actor) return std::string(Tr("Companion unavailable."));
+        if(Skald::IsSong(ability)&&!Skald::HasLute(actor))return std::string(Tr("Requires a lute in this companion inventory."));
         if (PathsLink::DebugCasting(actor->GetFormID())) return {};
         const auto* orders=Party::FindOrders(actor->GetFormID());
         if (!orders) return std::string(Tr("No role selected."));
@@ -137,6 +139,7 @@ namespace FWM::Abilities
             a_actor->AsActorValueOwner()->DamageActorValue(value,cost);
             Log::Info("[AbilityCost] {} uses {}: {:.1f} {} spent, {:.1f} remaining."sv,Game::Name(a_actor),Paths::Info(a_ability).name,cost,ChoosesSpells(orders->role)?"magicka":"stamina",Game::Current(a_actor,value));
         }
+        Skald::ConsumeInspiration(a_member,a_ability);
 		if (!PathsLink::DebugCasting(a_member)) AbilityAuto::Used(a_member, a_actor, a_ability, a_ordered);
 		// Only activation cues here. Timed impacts and persistent effects own their audio.
 		Soundscape::Kind sound=Soundscape::Kind::Count;
@@ -941,6 +944,14 @@ namespace FWM::Abilities
 		if (!actor || !Game::Usable(actor.get()) || !actor->Get3D()) { Party::Answer(member,Tr("Companion unavailable.")); return; }
 		if (Busy(actor.get()) || DragonBreaths::Channeling(actor.get())) { Party::Answer(member,Tr("Companion is busy.")); return; }
 		auto record=Paths::Fresh();
+        if(Skald::IsSong(ability)) {
+            const auto* actual=PathsLink::Find(member.id);
+            const auto* own=Party::FindOrders(member.id);
+            if(!Skald::HasLute(actor.get())){Party::Answer(member,Tr("Requires a lute in this companion inventory."));return;}
+            if(!actual || !actual->record.skaldUnlocked){Party::Answer(member,Tr("Unlock the Skald tree with 10 earned skill points first."));return;}
+            if(!own || own->role!=Role::kSkald){Party::Answer(member,Tr("Assign the Skald role before playing a Ljodh."));return;}
+            record.skaldUnlocked=true;
+        }
 		record.ranks[static_cast<std::size_t>(role)][static_cast<std::size_t>(index)]=static_cast<std::uint8_t>(rank);
 		PathsLink::Kit kit; kit.role=role; kit.tree=true; kit.record=&record; kit.slots[0]=ability;
 		const PathsLink::ScopedDebugCast debug(member.id,kit);

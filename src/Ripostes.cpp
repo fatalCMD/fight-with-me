@@ -6,23 +6,40 @@
 #include "FWM/Freeze.h"
 #include "FWM/Abilities.h"
 #include "FWM/EffectAudio.h"
+#include "FWM/Enemies.h"
 #include "FWM/Game.h"
 #include "FWM/Log.h"
+#include "FWM/Notices.h"
 #include "FWM/Paths.h"
 #include "FWM/Party.h"
 #include "FWM/PathsLink.h"
 #include "FWM/Settings.h"
+#include "FWM/Text.h"
 namespace FWM::Ripostes {
 namespace {
 constexpr auto source=static_cast<std::uint16_t>(Paths::Perk::kRiposte);
 constexpr std::uint32_t guardAnchor=1;
-struct GuardState {RE::ActorHandle actor;RE::TESObjectCELL* cell{};float left{},retry{},failed{};Role role{Role::kFighter};RE::FormID id{};};
+struct GuardState {RE::ActorHandle actor;RE::TESObjectCELL* cell{};float left{},retry{};RiposteGuard::Watch watch;Role role{Role::kFighter};RE::FormID id{};};
 struct Fall {RE::ActorHandle enemy,by;RE::TESObjectCELL* cell{};RE::NiPoint3 previous{},velocity{};float age{},settled{},weapon{},counter{};int rank{},pushes{};bool launched{},boss{};};
 std::vector<GuardState> guards;std::vector<Fall> falls;
+std::unordered_map<RE::FormID,int> misses;  // guards in a row that never came up, this fight
+RiposteGuard::Hand HandOf(RE::TESForm* held){
+ using Hand=RiposteGuard::Hand;
+ if(!held)return Hand::Empty;
+ if(auto* armor=held->As<RE::TESObjectARMO>())return armor->IsShield()?Hand::Shield:Hand::Empty;
+ if(auto* weapon=held->As<RE::TESObjectWEAP>()){
+  if(weapon->IsBow()||weapon->IsCrossbow())return Hand::Bow;
+  if(weapon->IsStaff())return Hand::Staff;
+  return weapon->IsHandToHandMelee()?Hand::Empty:Hand::Melee;
+ }
+ if(held->Is(RE::FormType::Light))return Hand::Torch;
+ if(held->Is(RE::FormType::Spell,RE::FormType::Scroll))return Hand::Spell;
+ return Hand::Empty;
+}
 // Animation events can arrive on AI threads. Never read the main-thread guard
 // vector there, or follow a stored actor pointer after an unload.
 std::atomic<std::shared_ptr<const std::unordered_set<RE::FormID>>> guarded;
-std::atomic<std::uint64_t> dodgeBlocks{};
+std::atomic<std::uint64_t> dodgeBlocks{},swingBlocks{};
 void SetGuarded(RE::FormID id,bool value) {
  auto old=guarded.load(std::memory_order_acquire);
  auto next=std::make_shared<std::unordered_set<RE::FormID>>(old?*old:std::unordered_set<RE::FormID>{});
@@ -31,16 +48,22 @@ void SetGuarded(RE::FormID id,bool value) {
 }
 struct AnimationEvent {
  static bool Thunk(RE::IAnimationGraphManagerHolder* holder,const RE::BSFixedString& event) {
-  if(RiposteGuard::DodgeEntry(event.c_str())) {
+  if(const auto kind=RiposteGuard::Kind(event.c_str());kind!=RiposteGuard::Held::None) {
    const auto held=guarded.load(std::memory_order_acquire);
    auto* ref=static_cast<RE::TESObjectREFR*>(holder);
-   if(held && held->contains(ref->GetFormID())){dodgeBlocks.fetch_add(1,std::memory_order_relaxed);return false;}
+   if(held && held->contains(ref->GetFormID())){(kind==RiposteGuard::Held::Dodge?dodgeBlocks:swingBlocks).fetch_add(1,std::memory_order_relaxed);return false;}
   }
   return original(holder,event);
  }
  static inline REL::Relocation<decltype(Thunk)> original;
 };
 bool Usable(RE::Actor* a){return a&&a->Is3DLoaded()&&Game::Usable(a)&&!a->AsActorState()->IsBleedingOut();}
+// The same pressure that called for the guard: an enemy within reach who is after them.
+bool Threatened(RE::Actor* a){
+ const auto handle=a->GetHandle();
+ return std::ranges::any_of(Enemies::All(),[&](const auto& profile){auto enemy=profile.handle.get();
+  return enemy&&Game::Usable(enemy.get())&&profile.target==handle&&Game::Distance(a,enemy.get())<450.f;});
+}
 RE::NiPoint3 Pelvis(RE::Actor* a){auto* root=a->Get3D();auto* node=root?root->GetObjectByName("NPC Pelvis [Pelv]"):nullptr;return node?node->world.translate:root?root->worldBound.center:a->GetPosition();}
 void Lower(GuardState& g){
  SetGuarded(g.id,false);
@@ -75,16 +98,18 @@ void Install(){
  AnimationEvent::original=holder.write_vfunc(0x01,AnimationEvent::Thunk);
  Log::Info("[Riposte] Temporary NPC dodge guard installed."sv);
 }
+bool CanGuard(RE::Actor* fighter){
+ return fighter&&RiposteGuard::CanGuard(HandOf(fighter->GetEquippedObject(false)),HandOf(fighter->GetEquippedObject(true)));
+}
+bool Benched(RE::FormID id){const auto it=misses.find(id);return it!=misses.end()&&it->second>=RiposteGuard::kMissesToBench;}
 bool Guard(RE::Actor* fighter,int rank,float seconds){
  (void)rank;
- if(!Usable(fighter)||fighter->IsInRagdollState())return false;
- auto* right=fighter->GetEquippedObject(false);auto* weapon=right?right->As<RE::TESObjectWEAP>():nullptr;
- if(weapon&&(weapon->IsBow()||weapon->IsCrossbow()||weapon->IsStaff()))return false;
+ if(!Usable(fighter)||fighter->IsInRagdollState()||!CanGuard(fighter))return false;
  Stop(fighter->GetFormID());
  if(!fighter->AsActorState()->IsWeaponDrawn())fighter->DrawWeaponMagicHands(true);
  if(!fighter->IsAttacking() && fighter->AsActorState()->IsWeaponDrawn() && !fighter->NotifyAnimationGraph("blockStart"))return false;
  const auto* orders=Party::FindOrders(fighter->GetFormID());
- guards.push_back({fighter->GetHandle(),fighter->GetParentCell(),seconds,.2f,0,orders?orders->role:Role::kFighter,fighter->GetFormID()});
+ guards.push_back({fighter->GetHandle(),fighter->GetParentCell(),seconds,.2f,{},orders?orders->role:Role::kFighter,fighter->GetFormID()});
  SetGuarded(fighter->GetFormID(),true);Freeze::Anchor(fighter,guardAnchor);return true;
 }
 bool Guarding(RE::FormID id){return std::ranges::any_of(guards,[id](const GuardState& g){auto a=g.actor.get();return a&&a->GetFormID()==id;});}
@@ -102,12 +127,29 @@ bool Counter(RE::Actor* fighter,RE::Actor* enemy,int rank,float weaponDamage,flo
 void Tick(float dt){
  if(!std::isfinite(dt)||dt<=0)return;dt=std::min(dt,.1f);
  if(const auto count=dodgeBlocks.exchange(0,std::memory_order_relaxed);count>0)Log::Info("[Riposte] Suppressed {} dodge attempts while guarding."sv,count);
+ if(const auto count=swingBlocks.exchange(0,std::memory_order_relaxed);count>0)Log::Info("[Riposte] Held back {} swing(s) and guard drops while guarding."sv,count);
  std::erase_if(guards,[dt](GuardState& g){auto a=g.actor.get();g.left-=dt;g.retry-=dt;
   const auto* member=a?Party::Find(a->GetFormID()):nullptr;
   const auto* orders=a?Party::FindOrders(a->GetFormID()):nullptr;
   if(!Settings::Get().enabled||!Usable(a.get())||!member||!member->CanTakeRole()||!orders||orders->role!=g.role||a->GetParentCell()!=g.cell||a->IsInRagdollState()||g.left<=0||(!a->IsInCombat()&&!PathsLink::Unlimited(a->GetFormID()))){Lower(g);return true;}
-  if(a->IsBlocking()||a->IsAttacking()||!a->AsActorState()->IsWeaponDrawn())g.failed=0;else {g.failed+=dt;if(g.retry<=0){a->NotifyAnimationGraph("blockStart");g.retry=.2f;}}
-  if(g.failed>1){Log::Info("[Riposte] {} cannot maintain the guard; released."sv,Game::Name(a.get()));Lower(g);return true;}return false;
+  const bool blocking=a->IsBlocking(),busy=a->IsAttacking()||!a->AsActorState()->IsWeaponDrawn();
+  if(!blocking&&!busy&&g.retry<=0){a->NotifyAnimationGraph("blockStart");g.retry=.2f;}
+  // Announced once the guard is really up, so a guard that never comes is never called out.
+  switch(g.watch.Advance(dt,blocking,busy,Threatened(a.get()))){
+  case RiposteGuard::Watch::Step::Raised:
+   misses.erase(g.id);
+   Notices::Used(Trf("{} sets themselves to riposte.",member->name),Paths::Ability::kRiposte,Notices::Kind::kOrder);
+   return false;
+  case RiposteGuard::Watch::Step::NeverRaised:{
+   const bool benched=++misses[g.id]>=RiposteGuard::kMissesToBench;
+   Log::Info("[Riposte] {} never raised the guard; released{}."sv,Game::Name(a.get()),benched?", and no more ripostes on their own this fight":"");
+   Lower(g);return true;}
+  case RiposteGuard::Watch::Step::Dropped:
+   Log::Info("[Riposte] {} cannot maintain the guard; released."sv,Game::Name(a.get()));Lower(g);return true;
+  case RiposteGuard::Watch::Step::Alone:
+   Log::Info("[Riposte] {} lowers the guard: nobody near is after them."sv,Game::Name(a.get()));Lower(g);return true;
+  default:return false;
+  }
  });
  std::erase_if(falls,[dt](Fall& f){auto enemy=f.enemy.get(),by=f.by.get();f.age+=dt;
   auto cancel=[&](){if(enemy)Abilities::DropSource(source,enemy->GetFormID());return true;};
@@ -139,5 +181,5 @@ void Tick(float dt){
   Log::Info("[Riposte] {} hits the floor: {:.1f} damage, {:.1f} s down (rank {})."sv,Game::Name(enemy.get()),damage,hold,f.rank);return true;
  });
 }
-void Clear(){for(auto& g:guards)Lower(g);guards.clear();falls.clear();Abilities::DropSource(source);RiposteVfx::Clear();}
+void Clear(){for(auto& g:guards)Lower(g);guards.clear();falls.clear();misses.clear();Abilities::DropSource(source);RiposteVfx::Clear();}
 }

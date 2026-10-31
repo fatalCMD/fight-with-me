@@ -1,3 +1,4 @@
+#include "FWM/Skald.h"
 #include "FWM/TankActs.h"
 #include "FWM/Windsteps.h"
 
@@ -74,6 +75,7 @@ namespace FWM::TankActs
                 if (redirected || av != RE::ActorValue::kHealth || !std::isfinite(clamped) || clamped >= 0)
                     return clamped;
                 clamped *= Windsteps::DamageFactor(victim->GetFormID());
+                clamped=-Skald::Absorb(victim,-clamped);
                 Guardian guard;
                 bool ally = false;
                 {

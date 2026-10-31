@@ -60,7 +60,8 @@ bool Takes(RE::Controller* c,RE::ActorHandle h){return c&&c->combatGroup&&std::r
 namespace FWM::Abilities {int drops{};void DropHoldsOn(RE::ActorHandle){++drops;}}
 namespace FWM::WindstepDecoys {
 struct Decoy{RE::NiPointer<RE::Actor> actor;std::vector<RE::ActorHandle> enemies;};
-std::shared_mutex gate;std::unordered_map<RE::FormID,Decoy> active;
+struct Spare{RE::ActorHandle actor;RE::FormID id{};};
+std::shared_mutex gate;std::unordered_map<RE::FormID,Decoy> active;std::vector<Spare> spares;
 bool Is(RE::FormID id){return active.contains(id);}
 __METHODS__
 }
@@ -83,7 +84,8 @@ int main(){using namespace FWM;int failures=0;auto check=[&](bool ok,const char*
  check(WindstepDecoys::Engage(enemy.get(),echo.get())&&Overrides::Takes(&controller,handle),"engine dropping echo is repaired next tick");
  check(WindstepDecoys::active.at(3).enemies.size()==1,"cleanup records each enemy once");
  WindstepDecoys::Drop(handle);
- check(!handle&&echo->disabled&&echo->deleted&&!WindstepDecoys::Is(3),"expiry deletes only temporary actor and clears handle");
+ check(!handle&&echo->disabled&&!echo->deleted&&!WindstepDecoys::active.contains(3),"expiry disables the echo without deleting it and clears handle");
+ check(WindstepDecoys::spares.size()==1&&WindstepDecoys::spares[0].id==3,"expired echo is kept as a spare");
  check(group.targets.size()==1&&group.targets[0].targetHandle==caster->GetHandle(),"expiry restores ordinary target list");
  check(Abilities::drops==1,"expiry releases forced hold");
  check(!WindstepDecoys::Engage(enemy.get(),echo.get()),"expired echo cannot regain enemies");

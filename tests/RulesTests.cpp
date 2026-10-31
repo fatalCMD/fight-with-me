@@ -1,4 +1,5 @@
 #include "FWM/TreeNavigation.h"
+#include "FWM/TargetPolicy.h"
 #include "FWM/TreeEntrance.h"
 #include "FWM/LoadoutPolicy.h"
 #include "FWM/AbilityResource.h"
@@ -419,6 +420,28 @@ namespace
 
 	void Styles()
 	{
+        const std::array<std::uint32_t,2> skalds{10,11};
+        CHECK(TargetPolicy::Redirect(10,20,skalds));
+        CHECK(TargetPolicy::Redirect(11,20,skalds));
+        CHECK(!TargetPolicy::Redirect(30,20,skalds)); // leave native choices of other allies alone
+        CHECK(!TargetPolicy::Redirect(10,0,skalds));  // nobody else is reachable
+        CHECK(!TargetPolicy::Redirect(20,20,skalds));
+        CHECK(TargetPolicy::Redirect(30,20,{}));     // explicit taunts still override normally
+        const auto bard=TimidSkald(Committed(StyleData{}));
+        CHECK(bard.offensive<.05f&&bard.defensive==1.f);
+        // Holds its stance spell like a mage; no other weapon or magic.
+        CHECK(bard.unarmedScore>0.f&&bard.magicScore>=1.f&&bard.meleeScore==0.f&&bard.rangedScore==0.f&&bard.staffScore==0.f&&bard.shoutScore==0.f);
+        CHECK((bard.flags&(StyleData::kDueling|StyleData::kFlanking))==0);
+        StyleData fleeing;fleeing.fallback=fleeing.avoidThreat=fleeing.strafe=fleeing.circle=1.f;
+        StyleTweaks recovering;recovering.recovery=true;
+        const auto travellingBard=TimidSkald(Tweaked(fleeing,recovering),true);
+        CHECK(travellingBard.fallback==0.f&&travellingBard.avoidThreat==0.f); // walking back, nothing turns it around
+        CHECK(travellingBard.strafe==0.f&&travellingBard.circle==0.f&&travellingBard.unarmedScore>0.f); // never left with nothing usable
+        CHECK(travellingBard.offensive==0.f&&travellingBard.groupOffensive==0.f);
+        // Playing, it moves as its own style moves a mage.
+        StyleData mage;mage.fallback=.6f;mage.avoidThreat=.4f;mage.strafe=.5f;mage.circle=.3f;mage.magicScore=0.f;
+        const auto settledBard=TimidSkald(mage,false);
+        CHECK(settledBard.fallback==.6f&&settledBard.avoidThreat==.4f&&settledBard.strafe==.5f&&settledBard.circle==.3f&&settledBard.magicScore>=1.f);
 		StyleData base;  // vanilla-ish defaults
 		base.offensive = 0.6f;
 		base.defensive = 0.3f;
@@ -581,6 +604,10 @@ namespace
         CHECK(LackFor(Role::kBruiser, sword) == Lack::kTwoHanded);
         Arsenal greatsword=sword;greatsword.twoHanded=true;
         CHECK(LackFor(Role::kBruiser,greatsword)==Lack::kNothing);
+        // Role weapons off: any melee weapon makes a Bruiser, but not none at all.
+        CHECK(LackFor(Role::kBruiser,sword,false)==Lack::kNothing);
+        CHECK(LackFor(Role::kBruiser,mage,false)==Lack::kWeapon);
+        CHECK(Playable(Role::kBruiser,sword,false)==Role::kBruiser&&Playable(Role::kBruiser,sword)!=Role::kBruiser);
         greatsword.twoHanded=false;
         CHECK(Playable(Role::kBruiser,greatsword)==Role::kFighter);
 		CHECK(LackFor(Role::kFighter, mage) == Lack::kWeapon);
@@ -670,6 +697,12 @@ namespace
 		CHECK(Rules::StartsFight(Position::kFree, false) && Rules::StartsFight(Position::kGuard, false) && Rules::StartsFight(Position::kWithMe, false));
 		CHECK(!Rules::StartsFight(Position::kHoldBack, false));
 		CHECK(!Rules::StartsFight(Position::kFrontLine, true));
+
+		// Weapons come out on sight only with auto battle and the switch on, and not while you sneak.
+		CHECK(Rules::DrawsOnSight(true, true, false));
+		CHECK(!Rules::DrawsOnSight(false, true, false));
+		CHECK(!Rules::DrawsOnSight(true, false, false));
+		CHECK(!Rules::DrawsOnSight(true, true, true));
 
 		// Weapons drawn on sight go away once the view is clear for long enough, but follow yours when out.
 		CHECK(!Rules::SheathesAfterSight(2.0f, 5.0f, false));
@@ -1572,6 +1605,9 @@ int main()
         CHECK(RoleAllows(RoleWeapons(Role::kBruiser),WeaponKind::TwoHanded));
         CHECK(!RoleAllows(RoleWeapons(Role::kBruiser),WeaponKind::Shield));
         CHECK(RoleWeapons(Role::kCount)==0);
+        CHECK(RoleWeapons(Role::kSkald)==0 && !ChoosesSpells(Role::kSkald));
+        CHECK(!SpellAllowed(Role::kSkald,true,false,SpellTier::kNovice,50,true));
+        CHECK(!SpellAllowed(Role::kSkald,false,true,SpellTier::kMaster,50,true));
         choice={};CHECK(choice.Lock(300,0,WeaponKind::TwoHanded,Role::kTank,true));
         CHECK(choice.role==Role::kTank && choice.weapon==300);
         CHECK(!choice.Lock(301,0,WeaponKind::OneHanded,Role::kTank,true));

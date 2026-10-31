@@ -1,0 +1,599 @@
+{
+  "version": 1,
+  "specs": [
+    {
+      "name": "SkaldEchoesAura1",
+      "kind": "Aura",
+      "rank": 1,
+      "seconds": 1.65,
+      "layers": [
+        {
+          "name": "Vapor",
+          "atlas": true,
+          "rate": 70,
+          "emit": 0.25,
+          "life": 1.05,
+          "lifeVariation": 0.13,
+          "size": 21,
+          "sizeVariation": 6,
+          "speed": 18,
+          "speedVariation": 7,
+          "declination": 0.15,
+          "spread": 0.55,
+          "radius": 34,
+          "height": 65,
+          "z": 56,
+          "opacity": 0.17,
+          "color": [
+            0.22,
+            0.65,
+            0.73
+          ],
+          "growth": [
+            0.45,
+            1,
+            1.5,
+            1.9
+          ]
+        },
+        {
+          "name": "Pearls",
+          "atlas": false,
+          "rate": 40,
+          "emit": 0.25,
+          "life": 1.1,
+          "lifeVariation": 0.16,
+          "size": 1.35,
+          "sizeVariation": 0.65,
+          "speed": 25,
+          "speedVariation": 10,
+          "declination": 0.2,
+          "spread": 0.65,
+          "radius": 37,
+          "height": 75,
+          "z": 60,
+          "opacity": 0.74,
+          "color": [
+            0.59,
+            0.87,
+            0.92
+          ],
+          "growth": [
+            0.4,
+            1,
+            0.8,
+            0.2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SkaldEchoesWave1",
+      "kind": "Wave",
+      "rank": 1,
+      "seconds": 1.95,
+      "layers": [
+        {
+          "name": "Vapor",
+          "atlas": true,
+          "rate": 250,
+          "emit": 0.16,
+          "life": 1.45,
+          "lifeVariation": 0.13,
+          "size": 35,
+          "sizeVariation": 12,
+          "speed": 760,
+          "speedVariation": 100,
+          "declination": 1.5707963267948966,
+          "spread": 0.015,
+          "radius": 40,
+          "height": 8,
+          "z": 14,
+          "opacity": 0.18,
+          "color": [
+            0.22,
+            0.65,
+            0.73
+          ],
+          "growth": [
+            0.45,
+            1,
+            1.5,
+            1.9
+          ]
+        },
+        {
+          "name": "Pearls",
+          "atlas": false,
+          "rate": 150,
+          "emit": 0.16,
+          "life": 1.45,
+          "lifeVariation": 0.16,
+          "size": 1.8,
+          "sizeVariation": 0.65,
+          "speed": 800,
+          "speedVariation": 100,
+          "declination": 1.5707963267948966,
+          "spread": 0.025,
+          "radius": 30,
+          "height": 10,
+          "z": 17,
+          "opacity": 0.74,
+          "color": [
+            0.59,
+            0.87,
+            0.92
+          ],
+          "growth": [
+            0.4,
+            1,
+            0.8,
+            0.2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SkaldEchoesHit1",
+      "kind": "Hit",
+      "rank": 1,
+      "seconds": 1.65,
+      "layers": [
+        {
+          "name": "Vapor",
+          "atlas": true,
+          "rate": 85,
+          "emit": 0.16,
+          "life": 1.05,
+          "lifeVariation": 0.13,
+          "size": 17,
+          "sizeVariation": 6,
+          "speed": 26,
+          "speedVariation": 7,
+          "declination": 0.15,
+          "spread": 0.55,
+          "radius": 23,
+          "height": 14,
+          "z": 10,
+          "opacity": 0.24,
+          "color": [
+            0.22,
+            0.65,
+            0.73
+          ],
+          "growth": [
+            0.45,
+            1,
+            1.5,
+            1.9
+          ]
+        },
+        {
+          "name": "Pearls",
+          "atlas": false,
+          "rate": 75,
+          "emit": 0.12,
+          "life": 1.1,
+          "lifeVariation": 0.16,
+          "size": 1.35,
+          "sizeVariation": 0.65,
+          "speed": 38,
+          "speedVariation": 10,
+          "declination": 0.2,
+          "spread": 0.65,
+          "radius": 26,
+          "height": 18,
+          "z": 12,
+          "opacity": 0.74,
+          "color": [
+            0.59,
+            0.87,
+            0.92
+          ],
+          "growth": [
+            0.4,
+            1,
+            0.8,
+            0.2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SkaldEchoesAura2",
+      "kind": "Aura",
+      "rank": 2,
+      "seconds": 1.65,
+      "layers": [
+        {
+          "name": "Vapor",
+          "atlas": true,
+          "rate": 115.5,
+          "emit": 0.25,
+          "life": 1.05,
+          "lifeVariation": 0.13,
+          "size": 21,
+          "sizeVariation": 6,
+          "speed": 18,
+          "speedVariation": 7,
+          "declination": 0.15,
+          "spread": 0.55,
+          "radius": 34,
+          "height": 65,
+          "z": 56,
+          "opacity": 0.17,
+          "color": [
+            0.22,
+            0.65,
+            0.73
+          ],
+          "growth": [
+            0.45,
+            1,
+            1.5,
+            1.9
+          ]
+        },
+        {
+          "name": "Pearls",
+          "atlas": false,
+          "rate": 66,
+          "emit": 0.25,
+          "life": 1.1,
+          "lifeVariation": 0.16,
+          "size": 1.35,
+          "sizeVariation": 0.65,
+          "speed": 25,
+          "speedVariation": 10,
+          "declination": 0.2,
+          "spread": 0.65,
+          "radius": 37,
+          "height": 75,
+          "z": 60,
+          "opacity": 0.74,
+          "color": [
+            0.59,
+            0.87,
+            0.92
+          ],
+          "growth": [
+            0.4,
+            1,
+            0.8,
+            0.2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SkaldEchoesWave2",
+      "kind": "Wave",
+      "rank": 2,
+      "seconds": 1.95,
+      "layers": [
+        {
+          "name": "Vapor",
+          "atlas": true,
+          "rate": 412.5,
+          "emit": 0.16,
+          "life": 1.45,
+          "lifeVariation": 0.13,
+          "size": 35,
+          "sizeVariation": 12,
+          "speed": 760,
+          "speedVariation": 100,
+          "declination": 1.5707963267948966,
+          "spread": 0.015,
+          "radius": 40,
+          "height": 8,
+          "z": 14,
+          "opacity": 0.18,
+          "color": [
+            0.22,
+            0.65,
+            0.73
+          ],
+          "growth": [
+            0.45,
+            1,
+            1.5,
+            1.9
+          ]
+        },
+        {
+          "name": "Pearls",
+          "atlas": false,
+          "rate": 247.5,
+          "emit": 0.16,
+          "life": 1.45,
+          "lifeVariation": 0.16,
+          "size": 1.8,
+          "sizeVariation": 0.65,
+          "speed": 800,
+          "speedVariation": 100,
+          "declination": 1.5707963267948966,
+          "spread": 0.025,
+          "radius": 30,
+          "height": 10,
+          "z": 17,
+          "opacity": 0.74,
+          "color": [
+            0.59,
+            0.87,
+            0.92
+          ],
+          "growth": [
+            0.4,
+            1,
+            0.8,
+            0.2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SkaldEchoesHit2",
+      "kind": "Hit",
+      "rank": 2,
+      "seconds": 1.65,
+      "layers": [
+        {
+          "name": "Vapor",
+          "atlas": true,
+          "rate": 140.25,
+          "emit": 0.16,
+          "life": 1.05,
+          "lifeVariation": 0.13,
+          "size": 17,
+          "sizeVariation": 6,
+          "speed": 26,
+          "speedVariation": 7,
+          "declination": 0.15,
+          "spread": 0.55,
+          "radius": 23,
+          "height": 40,
+          "z": 24,
+          "opacity": 0.24,
+          "color": [
+            0.22,
+            0.65,
+            0.73
+          ],
+          "growth": [
+            0.45,
+            1,
+            1.5,
+            1.9
+          ]
+        },
+        {
+          "name": "Pearls",
+          "atlas": false,
+          "rate": 123.75,
+          "emit": 0.12,
+          "life": 1.1,
+          "lifeVariation": 0.16,
+          "size": 1.35,
+          "sizeVariation": 0.65,
+          "speed": 38,
+          "speedVariation": 10,
+          "declination": 0.2,
+          "spread": 0.65,
+          "radius": 26,
+          "height": 46,
+          "z": 25,
+          "opacity": 0.74,
+          "color": [
+            0.59,
+            0.87,
+            0.92
+          ],
+          "growth": [
+            0.4,
+            1,
+            0.8,
+            0.2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SkaldEchoesAura3",
+      "kind": "Aura",
+      "rank": 3,
+      "seconds": 1.65,
+      "layers": [
+        {
+          "name": "Vapor",
+          "atlas": true,
+          "rate": 182,
+          "emit": 0.25,
+          "life": 1.05,
+          "lifeVariation": 0.13,
+          "size": 21,
+          "sizeVariation": 6,
+          "speed": 18,
+          "speedVariation": 7,
+          "declination": 0.15,
+          "spread": 0.55,
+          "radius": 34,
+          "height": 100,
+          "z": 70,
+          "opacity": 0.17,
+          "color": [
+            0.22,
+            0.65,
+            0.73
+          ],
+          "growth": [
+            0.45,
+            1,
+            1.5,
+            1.9
+          ]
+        },
+        {
+          "name": "Pearls",
+          "atlas": false,
+          "rate": 104,
+          "emit": 0.25,
+          "life": 1.1,
+          "lifeVariation": 0.16,
+          "size": 1.35,
+          "sizeVariation": 0.65,
+          "speed": 25,
+          "speedVariation": 10,
+          "declination": 0.2,
+          "spread": 0.65,
+          "radius": 37,
+          "height": 115,
+          "z": 74,
+          "opacity": 0.74,
+          "color": [
+            0.59,
+            0.87,
+            0.92
+          ],
+          "growth": [
+            0.4,
+            1,
+            0.8,
+            0.2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SkaldEchoesWave3",
+      "kind": "Wave",
+      "rank": 3,
+      "seconds": 1.95,
+      "layers": [
+        {
+          "name": "Vapor",
+          "atlas": true,
+          "rate": 650,
+          "emit": 0.16,
+          "life": 1.45,
+          "lifeVariation": 0.13,
+          "size": 35,
+          "sizeVariation": 12,
+          "speed": 760,
+          "speedVariation": 100,
+          "declination": 1.5707963267948966,
+          "spread": 0.015,
+          "radius": 40,
+          "height": 8,
+          "z": 14,
+          "opacity": 0.18,
+          "color": [
+            0.22,
+            0.65,
+            0.73
+          ],
+          "growth": [
+            0.45,
+            1,
+            1.5,
+            1.9
+          ]
+        },
+        {
+          "name": "Pearls",
+          "atlas": false,
+          "rate": 390,
+          "emit": 0.16,
+          "life": 1.45,
+          "lifeVariation": 0.16,
+          "size": 1.8,
+          "sizeVariation": 0.65,
+          "speed": 800,
+          "speedVariation": 100,
+          "declination": 1.5707963267948966,
+          "spread": 0.025,
+          "radius": 30,
+          "height": 10,
+          "z": 17,
+          "opacity": 0.74,
+          "color": [
+            0.59,
+            0.87,
+            0.92
+          ],
+          "growth": [
+            0.4,
+            1,
+            0.8,
+            0.2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SkaldEchoesHit3",
+      "kind": "Hit",
+      "rank": 3,
+      "seconds": 1.65,
+      "layers": [
+        {
+          "name": "Vapor",
+          "atlas": true,
+          "rate": 221,
+          "emit": 0.16,
+          "life": 1.05,
+          "lifeVariation": 0.13,
+          "size": 17,
+          "sizeVariation": 6,
+          "speed": 26,
+          "speedVariation": 7,
+          "declination": 0.15,
+          "spread": 0.55,
+          "radius": 32,
+          "height": 86,
+          "z": 48,
+          "opacity": 0.24,
+          "color": [
+            0.22,
+            0.65,
+            0.73
+          ],
+          "growth": [
+            0.45,
+            1,
+            1.5,
+            1.9
+          ]
+        },
+        {
+          "name": "Pearls",
+          "atlas": false,
+          "rate": 195,
+          "emit": 0.12,
+          "life": 1.1,
+          "lifeVariation": 0.16,
+          "size": 1.35,
+          "sizeVariation": 0.65,
+          "speed": 38,
+          "speedVariation": 10,
+          "declination": 0.2,
+          "spread": 0.65,
+          "radius": 26,
+          "height": 100,
+          "z": 50,
+          "opacity": 0.74,
+          "color": [
+            0.59,
+            0.87,
+            0.92
+          ],
+          "growth": [
+            0.4,
+            1,
+            0.8,
+            0.2
+          ]
+        }
+      ]
+    }
+  ]
+}

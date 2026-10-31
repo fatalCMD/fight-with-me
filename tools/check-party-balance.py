@@ -8,6 +8,7 @@ source = (root / 'src/PartyBalance.cpp').read_text()
 source = '\n'.join(line for line in source.splitlines() if not line.startswith('#include'))
 harness = r'''
 #include "FWM/PartyBalancePolicy.h"
+#include "FWM/SkaldPolicy.h"
 #include <atomic>
 #include <memory>
 #include <vector>
@@ -31,9 +32,10 @@ struct Actor {
 struct PlayerCharacter {static inline Actor* player{};static Actor* GetSingleton(){return player;}};
 }
 namespace FWM {
-namespace Settings {struct Data {bool enabled{true},partyBalance{true};float partyExtraPenalty{5},partyAdvantagePenalty{10},partyMinimumDamage{50};};inline Data cfg;const Data& Get(){return cfg;}}
+namespace Settings {struct Data {bool enabled{true},partyBalance{true};float followerDamage{100};float partyExtraPenalty{5},partyAdvantagePenalty{10},partyMinimumDamage{50};};inline Data cfg;const Data& Get(){return cfg;}}
 namespace Host {inline bool abilities=true;bool Abilities(){return abilities;}}
 namespace Game {bool Usable(RE::Actor* a){return a&&!a->dead&&!a->disabled&&a->loaded;}float Current(RE::Actor* a,RE::ActorValue){return a->health;}float Distance(RE::Actor* a,RE::Actor*){return a->distance;}}
+namespace Skald {inline int calls=0;float Outgoing(RE::Actor*,RE::Actor*,float amount,bool,bool){++calls;return amount;}}
 namespace Log {template<class... T>void Info(std::string_view,T...) {}}
 namespace Party {
  struct Member {RE::ActorHandle handle;RE::FormID id;bool summon{};};inline std::vector<Member> members;
@@ -76,6 +78,15 @@ int main(){
  Host::abilities=false;PartyBalance::Update(0);check(PartyBalance::Multiplier(&a[0],&a[4])==1,"core does not own a second scaler");
  Host::abilities=true;Party::members[1].summon=false;a[2].commanded=false;a[3].cell=1;a[3].world=1;
  PartyBalance::Update(0);PartyBalance::Clear();check(PartyBalance::Multiplier(&a[0],&a[4])==1,"load/reset clears runtime state");
+ Settings::cfg.partyBalance=false;Settings::cfg.followerDamage=20;PartyBalance::Update(0);
+ check(near(PartyBalance::Multiplier(&a[0],&a[4]),.2f),"master works with party scaling off");
+ a[0].combat=false;PartyBalance::Update(0);check(near(PartyBalance::Multiplier(&a[0],&a[4]),.2f),"first hit from an idle follower is scaled");
+ check(PartyBalance::Multiplier(&player,&a[4])==1 && PartyBalance::Multiplier(&a[4],&a[0])==1,"master excludes player and enemies");
+ Settings::cfg.followerDamage=0;const float hp=a[4].health;check(PartyBalance::Damage(&a[0],&a[4],100)==0 && a[4].health==hp,"zero affects direct ability damage");
+ a[0].combat=true;Settings::cfg.partyBalance=true;Settings::cfg.followerDamage=50;PartyBalance::Clear();PartyBalance::Update(0);
+ check(near(PartyBalance::Multiplier(&a[0],&a[4]),.325f),"master combines once with automatic scaling below floor");
+ Party::members.resize(1);PartyBalance::Update(0);check(near(PartyBalance::Multiplier(&a[0],&a[4]),.5f),"master applies to a single follower");
+ Settings::cfg.enabled=false;check(PartyBalance::Multiplier(&a[0],&a[4])==1,"mod disabled bypasses master immediately");
  std::printf("Production party balance audit: %s\n",failures?"FAIL":"PASS");return failures?1:0;
 }
 '''.replace('__SOURCE__', source)

@@ -10,9 +10,9 @@
 
 namespace FightWithMePathsAPI
 {
-	inline constexpr std::uint32_t INTERFACE_VERSION = 5;
+	inline constexpr std::uint32_t INTERFACE_VERSION = 6;
 
-	inline constexpr std::uint32_t kRoles = 6;   // Fighter, Tank, Healer, Bruiser, Archer, Mage
+	inline constexpr std::uint32_t kRoles = 7;   // Fighter, Tank, Healer, Bruiser, Archer, Mage
 	inline constexpr std::uint32_t kNodes = 15;  // per path, in FWM::Paths order
 	inline constexpr std::uint32_t kSlots = 2;
 
@@ -29,6 +29,7 @@ namespace FightWithMePathsAPI
 	};
 
 	inline constexpr std::uint16_t kUnlimitedFlag = 1;
+    inline constexpr std::uint16_t kSkaldUnlockedFlag = 2;
 
 	// What the abilities on one companion ask of their fight right now.
 	struct Steer
@@ -76,7 +77,26 @@ namespace FightWithMePathsAPI
 		std::uint32_t select;          // a companion the tree turned to, for the plan to show; 0 for none
 	};
 
+	// A companion's level earned in battle, for Fight With Me's plan, which keeps none itself.
+	struct Level
+	{
+		std::int32_t level;
+		float        xp;            // toward the next level
+		float        next;          // what the next level costs
+		float        sinceLevelUp;  // seconds since the last one, 99 when long ago
+		bool         capped;        // at or above the player's level: no XP until they level up
+	};
+
 	// FWM::Paths::Block values: 0 is done, anything else is why not.
+	// Optional status export: fixed buffers only, no allocator or STL objects cross DLLs.
+	struct Status
+	{
+		char name[128]{};
+		char detail[512]{};
+		std::uint32_t glyph{}, tint{};
+		float left{-1.f}, length{}, progress{-1.f};
+	};
+
 	using Result = std::int32_t;
 
 	class IPaths
@@ -133,3 +153,10 @@ extern "C" FIGHTWITHMEPATHS_API FightWithMePathsAPI::IPaths* FightWithMePaths_Ge
 // bridge. Paths supplies compatible weapon kinds; Fight With Me owns pool storage,
 // selection and equipment. Bits: one-handed, two-handed, bow, staff, shield.
 extern "C" FIGHTWITHMEPATHS_API std::uint32_t FightWithMePaths_GetLoadoutMask(std::uint32_t a_role);
+
+// Optional additive export, main thread only: a companion's battle level (reference form id).
+// False while leveling is off or nobody by that id has been taken up.
+extern "C" FIGHTWITHMEPATHS_API bool FightWithMePaths_GetLevel(std::uint32_t a_actor, FightWithMePathsAPI::Level* a_out);
+
+// Main thread. Returns the number written; an unknown structure size returns zero.
+extern "C" FIGHTWITHMEPATHS_API std::uint32_t FightWithMePaths_GetStatuses(std::uint32_t actor, std::uint32_t size, FightWithMePathsAPI::Status* out, std::uint32_t capacity);

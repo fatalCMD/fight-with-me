@@ -1,0 +1,9 @@
+{
+  "source": "mus_bardlute_03.wav",
+  "source_sha256": "dc86a1a37851c2ef4cf5f467d5022972601b496bec30fba6041efe4fcb99f4bf",
+  "start": 0.04,
+  "end": 0.84,
+  "seconds": 0.8,
+  "provenance": "Bethesda Skyrim lute recording, excerpted for use with Skyrim.",
+  "output_sha256": "f1c6032a953531dcff84d20fc750b81a37aa27715e14cb8620db98b75ec8b609"
+}

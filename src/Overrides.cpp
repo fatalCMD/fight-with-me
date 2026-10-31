@@ -1,7 +1,9 @@
 #include "FWM/Overrides.h"
+#include "FWM/TargetPolicy.h"
 
 #include "FWM/Game.h"
 #include "FWM/AbilityLink.h"
+#include "FWM/SkaldPolicy.h"
 #include "FWM/WindstepDecoys.h"
 #include "FWM/Log.h"
 
@@ -80,7 +82,7 @@ namespace FWM::Overrides
 
 				const auto chosen = a_out->native_handle();
 				entry->engine.store(chosen, std::memory_order_relaxed);
-				if (!entry->target || entry->target == chosen) {
+				if (!TargetPolicy::Redirect(chosen,entry->target,entry->onlyFrom)) {
 					return result;
 				}
 				if (!Valid(controller, entry->target)) {
@@ -220,6 +222,8 @@ namespace FWM::Overrides
 							}
 						}
 					}
+                    // A Skald may hold only its stance spell, which keeps it at range like a mage.
+                    if(entry.unarmedOnly)return entry.stance&&a_item->item&&a_item->item->GetFormID()==SkaldPolicy::kStanceSpell;
                     if(entry.recovering)return false;
 					if(entry.battleLocked && (!a_item->item || !a_item->item->IsWeapon())) {
                         // A staff can share its left hand with a spell, never give up its right hand.
@@ -261,6 +265,9 @@ namespace FWM::Overrides
 				const auto id = a_spell->GetFormID();
 				for (const auto& entry : *table) {
 					if (entry.body == a_actor) {
+						if (entry.unarmedOnly) {
+							return id == SkaldPolicy::kStanceSpell;  // held, never cast: the skill is not needed
+						}
 						return (entry.explicitSpells[0] && LoadoutPolicy::Contains(entry.pools[0],id)) || (entry.explicitSpells[1] && LoadoutPolicy::Contains(entry.pools[1],id));
 					}
 				}
@@ -368,7 +375,9 @@ namespace FWM::Overrides
                 if (const auto gear=chosenHands.load(std::memory_order_acquire); gear && a_controller) {
                     for (const auto& choice:*gear) if (choice.actor==a_controller->attackerHandle.native_handle()) {
                         const auto* w=a_item->item?a_item->item->As<RE::TESObjectWEAP>():nullptr;
-                        if(choice.recovering || (choice.caster && (!w || (!w->IsStaff() && !w->IsBound()))))return false;
+                        if(choice.unarmedOnly)return choice.fistsReady && (I==0||I==2) && (!a_item->item||(w&&w->IsHandToHandMelee())) && original(a_item,a_controller);
+                        // A caster's fists stay refused either way: out of magicka it falls back.
+                        if(choice.recovering || (choice.caster && (!w || (!choice.anyWeapon && !w->IsStaff() && !w->IsBound()))))return false;
                         if(choice.twoHandedOnly && (!w || w->IsBound() || !(w->IsTwoHandedSword()||w->IsTwoHandedAxe())))return false;
                         if(w && !LoadoutPolicy::Allows(choice.pools[2],w->GetFormID()))return false;
                         if((choice.battleLocked || choice.roleRestricted) && a_item->item && a_item->item->IsArmor() && !LoadoutPolicy::Contains(choice.pools[2],a_item->item->GetFormID()))return false;
@@ -442,7 +451,8 @@ namespace FWM::Overrides
         const auto same=[](const HandsEntry& a,const HandsEntry& b) {
             return a.actor==b.actor && a.body==b.body && a.hands==b.hands && a.pools==b.pools &&
                 a.twoHandedOnly==b.twoHandedOnly && a.battleLocked==b.battleLocked && a.staffLocked==b.staffLocked &&
-                a.roleRestricted==b.roleRestricted && a.caster==b.caster && a.recovering==b.recovering && a.explicitSpells==b.explicitSpells;
+                a.roleRestricted==b.roleRestricted && a.caster==b.caster && a.recovering==b.recovering && a.explicitSpells==b.explicitSpells &&
+                a.unarmedOnly==b.unarmedOnly && a.fistsReady==b.fistsReady && a.stance==b.stance && a.anyWeapon==b.anyWeapon;
         };
         if(previous && previous->size()==a_entries.size() && std::equal(a_entries.begin(),a_entries.end(),previous->begin(),same))return;
         auto next=std::make_shared<const std::vector<HandsEntry>>(std::move(a_entries));

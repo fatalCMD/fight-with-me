@@ -40,6 +40,15 @@
 - `interface/FightWithMe/wolf-head.svg` and `barbed-sun.svg`: Kynareth's Maw's and the
   Healing Circle's icons, "Wolf head" and "Barbed sun" by Lorc, from https://game-icons.net,
   under Creative Commons Attribution 3.0 (http://creativecommons.org/licenses/by/3.0/).
+- Skald's `interface/FightWithMe/glyphs/ef10.svg` through `ef1e.svg`: icons made by
+  **Lorc and Delapouite**, from [Game-icons.net](https://game-icons.net), licensed
+  [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). These are unmodified
+  white-on-transparent downloads, renamed for the menu's private glyph IDs.
+  Lorc: Lyre, Music Spell, Echo Ripples, Sonic Screech, Broken Tablet, Hunting Horn,
+  Resonance, Laurel Crown, Bell Shield, Sands of Time and Rune Stone.
+  Delapouite: Drum, Backward Time, Musical Score and Sticky Boot.
+  Per-icon source links, authors and hashes are in `tools/skald/icon-selection.json`
+  in the source download.
 - `meshes/FightWithMe/HealingCircle.nif` and `textures/FightWithMe/Glow.dds` are Fight With
   Me's own, made from nothing by `tools/healcircle/BuildHealCircle.js`; its runes are the Elder Futhark,
   drawn as strokes by that script.
@@ -162,3 +171,16 @@ Eighteen original transparent illustrations for Fight With Me, generated with th
 
 
 Azura's Moon: Wispmother geometry comes from Skyrim's `meshes/actors/wisp/character assets/wisp.nif`; Azura's Star comes from `meshes/clutter/daedric/azurastar.nif` (Bethesda Softworks). `tools/azurasmoon/BuildMoon.js` reposes the stock weighted skin into a prayer and builds original celestial glow, wave and aura geometry. Animation and blessing mechanics are original Fight With Me work. These assets are for Skyrim under Bethesda's terms for game mods. Only installed stock texture paths are referenced; no third-party mod textures are bundled. The preview can be regenerated with `--moon-only --stock-textures`.
+
+Skald: spectral lute geometry derives from Skyrim's AnimObjectLute (Bethesda Softworks).
+The four Skald song WAVs are faster, pitch-preserved excerpts of the installed game's
+mus_bardlute_01–04 recordings, made by tools/skald/ArrangeLute.py; the Single Note's
+SkaldNote.wav is a 0.8-second excerpt of mus_bardlute_03 made by tools/skald/BuildNote.py.
+Source and output hashes are in tools/skald/arrangements.json and note-audio.json. These
+derived assets are intended for use with Skyrim. Wave and contact geometry and animation
+are original project work, referencing installed Skyrim effect textures.
+The Skald's three class backdrops (`interface/FightWithMe/backdrops/*-skald.png`) and its
+four effect texture atlases (`textures/FightWithMe/Skald/*Atlas.dds`) are original
+illustrations generated with the built-in image generation tool; their prompts are retained
+in tools/skald/theme-art-prompts.json and generated-fx-prompts.json. The Skald's meshes,
+textures, sounds and backdrops ship in the Path of the Companions download.

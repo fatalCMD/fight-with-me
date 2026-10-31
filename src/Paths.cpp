@@ -1,4 +1,5 @@
 #include "FWM/Paths.h"
+#include "FWM/SkaldPolicy.h"
 #include "FWM/WindstepFx.h"
 #include "FWM/ArrowArtsFx.h"
 #include "FWM/RiposteFx.h"
@@ -133,6 +134,21 @@ namespace FWM::Paths
 		Ranks Primary(Perk a_perk)
 		{
 			switch (a_perk) {
+            case Perk::kFervor: return {10.0f,15.0f,20.0f};
+            case Perk::kEchoes: return {25.0f,40.0f,60.0f};
+            case Perk::kHollow: return {10.0f,15.0f,20.0f};
+            case Perk::kGlory: return {25.0f,40.0f,60.0f};
+            case Perk::kSpellweave: return {10.0f,15.0f,20.0f};
+            case Perk::kRelentlessRhythm: return {10.0f,20.0f,30.0f};
+            case Perk::kEncore: return {1.0f,2.0f,3.0f};
+            case Perk::kInspiredCasting: return {10.0f,20.0f,30.0f};
+            case Perk::kLeadfootVerse: return {10.0f,15.0f,20.0f};
+            case Perk::kBrokenConcentration: return {5.0f,10.0f,15.0f};
+            case Perk::kKeenChorus: return {5.0f,10.0f,15.0f};
+            case Perk::kVictoriousVerse: return {2.0f,4.0f,6.0f};
+            case Perk::kSpectralAegis: return {10.0f,20.0f,30.0f};
+            case Perk::kLingeringVerse: return {15.0f,30.0f,45.0f};
+            case Perk::kOldTongue: return {5.0f,10.0f,15.0f};
 			case Perk::kDragonBreath: return {20,30,45};
 			case Perk::kBreathReach: return {10,20,30};
 			case Perk::kBreathLingering: return {.5f,1,1.5f};
@@ -267,9 +283,9 @@ namespace FWM::Paths
 			case Perk::kPinningHeavy:
 				return { 1, 2, 3 };
 			case Perk::kArrowRain:
-				return { 24, 36, 48 };
+				return { 12, 18, 24 };
 			case Perk::kArrowRainDownpour:
-				return { 8, 16, 24 };
+				return { 4, 8, 12 };
 			case Perk::kFineArrows:
 				return { 1, 2, 3 };
 			case Perk::kSpellTouched:
@@ -426,7 +442,7 @@ namespace FWM::Paths
 
 	int Spent(const Record& a_record, Role a_role)
 	{
-		return OnTree(a_record, a_role) + Invested(a_record, a_role);
+		return OnTree(a_record, a_role) + Invested(a_record, a_role) + (a_role==Role::kSkald && a_record.skaldUnlocked ? SkaldPolicy::kUnlockCost : 0);
 	}
 
 	bool Mastered(const Record& a_record, Role a_role)
@@ -478,6 +494,8 @@ namespace FWM::Paths
 
 	std::string_view Why(Block a_block)
 	{
+        if(a_block==Block::kSkaldLocked)return Tr("Unlock Skald with a lute and 10 skill points first.");
+        if(a_block==Block::kNoLute)return Tr("Requires a lute in this companion inventory.");
 		switch (a_block) {
 		case Block::kMaxed:
 			return Tr("Maximum rank reached");
@@ -524,6 +542,7 @@ namespace FWM::Paths
 		if (rank >= node->most) {
 			return Block::kMaxed;
 		}
+        if(a_role==Role::kSkald && !a_record.skaldUnlocked) return Block::kSkaldLocked;
 		if (a_debug) return Block::kNone;
 		if (a_record.peak < RequiredLevel(*node, rank + 1)) {
 			return Block::kLevel;
@@ -594,6 +613,7 @@ namespace FWM::Paths
 		}
 		a_record.slots[r] = Defaults(a_role);
 		a_record.bonus[r] = 0;
+        if(a_role==Role::kSkald) a_record.skaldUnlocked=false;
 	}
 
 	Block CanInvest(const Record& a_record, Role a_role, int a_earned, int a_room)
@@ -672,6 +692,7 @@ namespace FWM::Paths
 	bool Repair(Record& a_record, int a_earned, bool a_debug)
 	{
 		const Record before = a_record;
+        if(!a_record.skaldUnlocked) Reset(a_record,Role::kSkald);
 		if (a_debug) {
 			for (std::size_t r=0; r<kRoles; ++r) {
 				const auto role=static_cast<Role>(r);
@@ -831,6 +852,10 @@ namespace FWM::Paths
 				put(points, 2);
 			}
 		}
+        std::uint32_t unlocked=0;
+        for(const auto& entry:a_entries) if(entry.second.skaldUnlocked)++unlocked;
+        put(unlocked,4);
+        for(const auto& entry:a_entries) if(entry.second.skaldUnlocked)put(entry.first,4);
 		return out;
 	}
 
@@ -898,6 +923,11 @@ namespace FWM::Paths
 				}
 			}
 		}
+        if(a_version>=5) {
+            const auto unlocked=get(4);
+            for(std::uint32_t n=0;n<unlocked && ok;++n){const auto id=get(4);if(!ok)break;for(auto& entry:out)if(entry.first==id)entry.second.skaldUnlocked=true;}
+            if(!ok)for(auto& entry:out)Reset(entry.second,Role::kSkald);
+        }
 		if (a_version < 3) {
 			// Both active records and unlimited-point snapshots migrate, so old ranks cannot return.
 			for (auto& [id, record] : out) {
@@ -966,6 +996,14 @@ namespace FWM::Paths
 		return before.contains(a_id);
 	}
 
+    Block Book::UnlockSkald(std::uint32_t id) {
+        auto it=records.find(id);if(it==records.end())return Block::kBadNode;
+        if(it->second.skaldUnlocked)return Block::kMaxed;
+        // Debug purchases live only in the working record; SetUnlimited(false)
+        // restores the saved record, including its original unlock state.
+        if(!Unlimited(id) && Earned(id)-Spent(it->second)<SkaldPolicy::kUnlockCost)return Block::kNoPoints;
+        it->second.skaldUnlocked=true;return Block::kNone;
+    }
 	Block Book::Learn(std::uint32_t a_id, Role a_role, std::size_t a_node)
 	{
 		const auto it = records.find(a_id);
@@ -1114,6 +1152,7 @@ namespace FWM::Paths
 
 	float Cooldown(const Record& a_record, Role a_role, Ability a_ability)
 	{
+        if(a_ability>=Ability::kFervor && a_ability<=Ability::kGlory)return SkaldPolicy::Cooldown(static_cast<SkaldPolicy::Song>(static_cast<int>(a_ability)-static_cast<int>(Ability::kFervor)));
 		const int rank = std::max(Rank(a_record, a_role, a_ability), 1);
 		auto      branch = [&](Perk a_perk) { return Value(a_perk, Rank(a_record, a_role, a_perk)); };
 		switch (a_ability) {
@@ -1169,6 +1208,22 @@ namespace FWM::Paths
 		const float s = Second(a_perk, r);
 		const auto  n = Number(v);
 		switch (a_perk) {
+        case Perk::kFervor:return Trf("+{}% attack speed",n);
+        case Perk::kSpellweave:return Trf("-{}% casting wind-up",n);
+        case Perk::kRelentlessRhythm:return Trf("-{}% power-attack cost",n);
+        case Perk::kEchoes:return Trf("+{}% cooldown recovery",n);
+        case Perk::kEncore:return Trf("-{} s cooldown",n);
+        case Perk::kInspiredCasting:return Trf("-{}% ability cost",n);
+        case Perk::kHollow:return Trf("-{}% enemy damage",n);
+        case Perk::kLeadfootVerse:return Trf("-{}% movement",n);
+        case Perk::kBrokenConcentration:return Trf("-{}% max magicka",n);
+        case Perk::kGlory:return Trf("+{} pp critical damage",n);
+        case Perk::kKeenChorus:return Trf("+{} pp critical chance",n);
+        case Perk::kVictoriousVerse:return Trf("{}% resource restored",n);
+        case Perk::kSpectralAegis:return Trf("{}% health as shield",n);
+        case Perk::kLingeringVerse:return Trf("+{}% linger duration",n);
+        case Perk::kOldTongue:return Trf("{}% double-effect chance",n);
+
 		case Perk::kTauntBrace:
 		case Perk::kIronHide:
 		case Perk::kBerserkThickSkull:
@@ -1260,7 +1315,7 @@ namespace FWM::Paths
 		case Perk::kRiposteCounter:
 			return Trf("{}x damage", n);
 		case Perk::kSpectralWolf:
-			return Trf("{}x  Â·  {}% bleed", n, Number(s));
+			return Trf("{}x  |  {}% bleed", n, Number(s));
 		case Perk::kWolfHemorrhage:
 			return Trf("+{} s bleed", n);
 		case Perk::kVolley:
@@ -1277,14 +1332,14 @@ namespace FWM::Paths
 			return Trf("+{} arrows", n);
 		case Perk::kSurge:
 			return Trf("{}x magicka", n);
-		case Perk::kDragonBreath: return Trf("{} damage/s Â· {} reach", n, Number(DragonBreath::Reach(r)));
+		case Perk::kDragonBreath: return Trf("{} damage/s | {} reach", n, Number(DragonBreath::Reach(r)));
 		case Perk::kBreathReach: return Trf("+{}% reach", n);
 		case Perk::kBreathLingering: return Trf("+{} s", n);
 		case Perk::kBurst:
-			return Trf("{}  Â·  {} reach", Tr(kTiers[static_cast<std::size_t>(std::clamp(static_cast<int>(v), 0, 3))]),
+			return Trf("{}  |  {} reach", Tr(kTiers[static_cast<std::size_t>(std::clamp(static_cast<int>(v), 0, 3))]),
 				Number(Blast::kRadius[static_cast<std::size_t>(std::clamp(static_cast<int>(v), 1, 3) - 1)]));
 		case Perk::kMagnus:
-			return r == 1 ? std::format("{} s", n) : (r == 2 ? std::format("{} s  Â·  +{}%", n, Number(s)) : Trf("{} s  Â·  +{}%  Â·  ward", n, Number(s)));
+			return r == 1 ? std::format("{} s", n) : (r == 2 ? std::format("{} s  |  +{}%", n, Number(s)) : Trf("{} s  |  +{}%  |  ward", n, Number(s)));
 		case Perk::kSpellShield:
 			return std::format("{}% / {}%", n, Number(s));
 		case Perk::kBodyguard:
@@ -1318,6 +1373,24 @@ namespace FWM::Paths
 
 	std::string Describe(Perk a_perk, int a_rank)
 	{
+        switch(a_perk){
+        case Perk::kFervor: return Trf("Ground waves grant {0}% attack speed. At 3 / 5 / 10 wave hits: 1x / 1.5x / 2x strength. Lasts 8 seconds; waves refresh it.",Value(a_perk,std::max(1,a_rank)));
+        case Perk::kEchoes: return Trf("Ground waves grant {0}% faster companion ability cooldown recovery, or shout recovery for the player. Excludes Ljodhs. At 3 / 5 / 10 hits: 1x / 1.5x / 2x strength. Lasts 8 seconds; waves refresh it.",Value(a_perk,std::max(1,a_rank)));
+        case Perk::kHollow: return Trf("Ground waves weaken enemy damage by {0}%. At 3 / 5 / 10 hits: 1x / 1.5x / 2x strength. Lasts 8 seconds; waves refresh it. Finale: one stagger.",Value(a_perk,std::max(1,a_rank)));
+        case Perk::kGlory: return Trf("Ground waves grant +{0} pp critical damage and 5% critical chance. At 3 / 5 / 10 hits: 1x / 1.5x / 2x strength. Lasts 10 seconds; waves refresh it.",Value(a_perk,std::max(1,a_rank)));
+        case Perk::kSpellweave: return Trf("Shortens spell wind-up by {0}%, scaled by earned Fervor stacks. Concentration damage is unchanged.",Value(a_perk,std::max(1,a_rank)));
+        case Perk::kRelentlessRhythm: return Trf("Power attacks cost {0}% less stamina, scaled by earned Fervor stacks. Cost reduction cannot exceed 100%.",Value(a_perk,std::max(1,a_rank)));
+        case Perk::kEncore: return Trf("The final chord removes {0} seconds from non-Ljodh cooldowns, or the player's shout cooldown, scaled by earned Echoes stacks.",Value(a_perk,std::max(1,a_rank)));
+        case Perk::kInspiredCasting: return Trf("Your next non-Ljodh ability costs {0}% less, scaled by Echoes stacks. For the player, refunds that share of the next charged fire-and-forget spell. One use per performance; later waves do not refill it. Maximum reduction: 100%.",Value(a_perk,std::max(1,a_rank)));
+        case Perk::kLeadfootVerse: return Trf("Hollow slows enemies by {0}%, scaled by their earned wave stacks.",Value(a_perk,std::max(1,a_rank)));
+        case Perk::kBrokenConcentration: return Trf("The finale drains {0}% of enemy maximum magicka, scaled by their earned Hollow stacks.",Value(a_perk,std::max(1,a_rank)));
+        case Perk::kKeenChorus: return Trf("Glory adds {0} percentage points of critical chance, scaled by earned wave stacks.",Value(a_perk,std::max(1,a_rank)));
+        case Perk::kVictoriousVerse: return Trf("Critical hits restore {0}% maximum stamina or magicka, scaled by Glory stacks. At most once per second.",Value(a_perk,std::max(1,a_rank)));
+        case Perk::kSpectralAegis: return Trf("While performing, a personal shield absorbs damage equal to {0}% of maximum health.",Value(a_perk,std::max(1,a_rank)));
+        case Perk::kLingeringVerse: return Trf("Earned Ljodh stacks last {0}% longer. Waves and a successful finale refresh their duration.",Value(a_perk,std::max(1,a_rank)));
+        case Perk::kOldTongue: return Trf("Each newly earned stack has its own {0}% chance to double its contribution. Rolls are independent for each recipient; earlier results are retained.",Value(a_perk,std::max(1,a_rank)));
+        default:break;
+        }
 		const int   r = std::clamp(a_rank, 1, 3);
 		const float v = Value(a_perk, r);
 		const float s = Second(a_perk, r);

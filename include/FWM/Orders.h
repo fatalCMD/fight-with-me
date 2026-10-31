@@ -23,6 +23,7 @@ namespace FWM
 		kBruiser,
 		kArcher,
 		kMage,
+		kSkald,
 		kCount
 	};
 
@@ -165,6 +166,7 @@ namespace FWM
 		{ "Bruiser", "Requires a two-handed melee weapon. Into the front line after the strongest enemy.", Focus::kStrongest, Position::kFrontLine, 0xF0E3 },
 		{ "Archer", "Keeps range and picks off casters and other archers first.", Focus::kBackLine, Position::kHoldBack, 0xF05B },
 		{ "Mage", "Keeps range and finishes off whoever is weakest.", Focus::kWeakest, Position::kHoldBack, 0xE2CA },
+		{ "Skald", "A support bard requiring a lute and a 10-point unlock. Holds back, plays slowing notes between interruptible Ljodhs, and draws less enemy attention when other party targets are available.", Focus::kAttackingParty, Position::kHoldBack, 0xF001 },
 	} };
 
 	struct ChoiceInfo
@@ -306,13 +308,20 @@ namespace FWM
 		kWeapon,
         kTwoHanded,
 		kBow,
-		kSpells
+		kSpells,
+        kLute,
+        kSkaldLocked
 	};
+
+    [[nodiscard]] constexpr Lack SkaldLack(bool hasLute, bool unlocked) {
+        return !hasLute ? Lack::kLute : !unlocked ? Lack::kSkaldLocked : Lack::kNothing;
+    }
 
 	// What stops a companion taking a role, if anything. Someone with no weapon and no
 	// magic at all can still brawl as a Fighter. A healer's heal is their own, not a spell,
 	// so anyone can be one.
-	[[nodiscard]] constexpr Lack LackFor(Role a_role, const Arsenal& a_arsenal)
+	// With role weapons off, a Bruiser needs only a melee weapon.
+	[[nodiscard]] constexpr Lack LackFor(Role a_role, const Arsenal& a_arsenal, bool a_roleWeapons = true)
 	{
 		const bool empty = !a_arsenal.melee && !a_arsenal.ranged && !a_arsenal.casts && !a_arsenal.heals;
 		switch (a_role) {
@@ -321,6 +330,7 @@ namespace FWM
 		case Role::kTank:
 			return a_arsenal.melee ? Lack::kNothing : Lack::kWeapon;
         case Role::kBruiser:
+            if (!a_roleWeapons) return a_arsenal.melee ? Lack::kNothing : Lack::kWeapon;
             return a_arsenal.twoHanded ? Lack::kNothing : Lack::kTwoHanded;
 		case Role::kArcher:
 			return a_arsenal.ranged ? Lack::kNothing : Lack::kBow;
@@ -334,6 +344,10 @@ namespace FWM
 	[[nodiscard]] constexpr std::string_view Why(Lack a_lack)
 	{
 		switch (a_lack) {
+        case Lack::kLute:
+            return "Requires a lute in this companion inventory.";
+        case Lack::kSkaldLocked:
+            return "Unlock the Skald tree with 10 earned skill points first.";
 		case Lack::kTwoHanded:
             return "Requires a two-handed melee weapon in inventory.";
 		case Lack::kWeapon:
@@ -348,9 +362,9 @@ namespace FWM
 	}
 
 	// The preferred role if it can be played, otherwise the closest one that can.
-	[[nodiscard]] constexpr Role Playable(Role a_preferred, const Arsenal& a_arsenal)
+	[[nodiscard]] constexpr Role Playable(Role a_preferred, const Arsenal& a_arsenal, bool a_roleWeapons = true)
 	{
-		if (LackFor(a_preferred, a_arsenal) == Lack::kNothing) {
+		if (LackFor(a_preferred, a_arsenal, a_roleWeapons) == Lack::kNothing) {
 			return a_preferred;
 		}
 		if (a_arsenal.melee) {

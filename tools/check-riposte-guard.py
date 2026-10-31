@@ -55,7 +55,7 @@ __ANCHORS__
 }
 namespace FWM::Ripostes {
 std::atomic<std::shared_ptr<const std::unordered_set<RE::FormID>>>guarded;
-std::atomic<std::uint64_t>dodgeBlocks{};
+std::atomic<std::uint64_t>dodgeBlocks{},swingBlocks{};
 constexpr unsigned guardAnchor=1;
 int forwarded{};
 bool original(RE::IAnimationGraphManagerHolder*,const RE::BSFixedString&){++forwarded;return true;}
@@ -72,7 +72,10 @@ int main(){
  SetGuarded(1,true);Freeze::Anchor(&one,guardAnchor);
  CHECK(!Thunk(&one,"TKDodgeBack"));CHECK(!Thunk(&one,"DodgeLeft"));
  CHECK(Thunk(&two,"TKDodgeBack"));CHECK(dodgeBlocks==2);
- for(auto event:{"blockStart","blockStop","TKDodgeStop","TKDR_DodgeEnd","TKDR_DodgeStart","staggerStart","attackStart"})CHECK(Thunk(&one,event));
+ for(auto event:{"blockStart","TKDodgeStop","TKDR_DodgeEnd","TKDR_DodgeStart","staggerStart","attackStop"})CHECK(Thunk(&one,event));
+ // Behind the guard the AI cannot swing or lower it; the dodge count stays apart.
+ CHECK(!Thunk(&one,"attackStart"));CHECK(!Thunk(&one,"attackPowerStartForward"));CHECK(!Thunk(&one,"blockStop"));
+ CHECK(swingBlocks==3);CHECK(dodgeBlocks==2);CHECK(Thunk(&two,"attackStart"));
  // Refreshing a hold is idempotent; a simultaneous spell channel owns a separate hold.
  Freeze::Anchor(&one,guardAnchor);CHECK(Freeze::anchors.size()==1);
  Freeze::Anchor(&one,0);CHECK(Freeze::anchors.size()==2);
@@ -86,7 +89,9 @@ int main(){
  SetGuarded(1,true);GuardState stale{{nullptr},1};Lower(stale);CHECK(Thunk(&one,"DodgeLeft"));
  SetGuarded(1,true);SetGuarded(2,true);Lower(guard);
  CHECK(Thunk(&one,"TKDodgeForward"));CHECK(!Thunk(&two,"TKDodgeForward"));
- std::puts("Riposte gate: guarded-only dodge suppression, event cleanup, release, stale handles and independent anchors passed.");
+ // The counter's own swing goes through: Counter lowers the guard first.
+ CHECK(Thunk(&one,"attackStart"));
+ std::puts("Riposte gate: guarded-only dodge and swing suppression, event cleanup, release, stale handles and independent anchors passed.");
 }
 '''
 harness = harness.replace('__ANCHORS__', method(freeze, '    void Anchor(') + '\n' + method(freeze, '    void ReleaseAnchor('))

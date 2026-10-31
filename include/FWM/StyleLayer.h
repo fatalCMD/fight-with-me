@@ -88,4 +88,5 @@ namespace FWM
 	// no falling back, no hanging behind a raised shield, no strafing at range. The fight's
 	// own scores (what to fight with) are left alone.
 	[[nodiscard]] StyleData Committed(const StyleData& a_style);
+    [[nodiscard]] StyleData TimidSkald(const StyleData& a_style, bool a_moving = false);
 }

@@ -1,13 +1,14 @@
 (async () => {
 const stage = document.querySelector('#stage');
 const query = new URLSearchParams(location.search);
-let mode = query.get('view') || 'overview', role = Math.max(0,Math.min(5,Number(query.get('role')??1)||0)), chosen = 3, picker = false;
+let mode = query.get('view') || 'overview', role = Math.max(0,Math.min(6,Number(query.get('role')??1)||0)), chosen = Math.max(0,Math.min(14,Number(query.get('node')??3)||0)), picker = false;
 const palettes = {
   vanilla: { bg:'#050505', inset:'#151515', edge:'#eeeeee', line:'#dedede58', text:'#f2f2f2', dim:'#b9b9b9', faint:'#858585', accent:'#4b4b4b' },
   oxblood: { bg:'#0f0f10', inset:'#160c0c', edge:'#d4423a', line:'#ffffff36', text:'#ece8e2', dim:'#aaa6a0', faint:'#6c6a66', accent:'#9e2422' },
   nordic: { bg:'#0f1516', inset:'#151d1e', edge:'#cfd6c3', line:'#9ba6a094', text:'#ecebdd', dim:'#b7bfb3', faint:'#808c86', accent:'#424c48' },
 };
 const symbols = { 0xef00:'wolf-head', 0xef01:'barbed-sun', 0xef02:'weak-will', 0xef03:'last-bastion' };
+for(let code=0xef10;code<=0xef1e;code++)symbols[code]='glyphs/'+code.toString(16);
 const escape = x => String(x ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clamp = (v,a,b) => Math.max(a, Math.min(b,v));
 const data = await fetch('/metadata.json').then(r => r.json());
@@ -151,8 +152,8 @@ function bindLoadouts(){
  for(const id of ['close-pool','pool-done']){const el=stage.querySelector('#'+id);if(el)activate(el,()=>{poolOpen=false;render();});}
 }
 function drawTreeBackdrop(canvasW,h){
-  const key=['fighter','tank','healer','bruiser','archer','mage'][role],side=Math.min(canvasW*.48,h*.57),left=theme==='oxblood'?22:canvasW-side-22;
-  out+=`<defs><linearGradient id="art-fade" x2="0" y2="1"><stop offset="0" stop-color="white" stop-opacity="0"/><stop offset=".08" stop-color="white"/><stop offset=".58" stop-color="white"/><stop offset="1" stop-color="white" stop-opacity="0"/></linearGradient><mask id="art-mask" maskContentUnits="objectBoundingBox"><rect width="1" height="1" fill="url(#art-fade)"/></mask></defs>`;
+  const key=['fighter','tank','healer','bruiser','archer','mage','skald'][role],side=Math.min(canvasW*.48,h*.57),left=theme==='oxblood'?22:canvasW-side-22;
+  out+=`<defs><linearGradient id="art-fade" gradientUnits="userSpaceOnUse" x1="0" x2="0" y1="116" y2="${116+side}"><stop offset="0" stop-color="white" stop-opacity="0"/><stop offset=".08" stop-color="white"/><stop offset=".58" stop-color="white"/><stop offset="1" stop-color="white" stop-opacity="0"/></linearGradient><mask id="art-mask" maskUnits="userSpaceOnUse" x="${left}" y="116" width="${side}" height="${side}"><rect x="${left}" y="116" width="${side}" height="${side}" fill="url(#art-fade)"/></mask></defs>`;
   out+=`<image class="tree-backdrop" data-art="${theme}-${key}" href="/backdrops/${theme}-${key}.png" x="${left}" y="116" width="${side}" height="${side}" opacity="${theme==='nordic'?.27:.23}" mask="url(#art-mask)" pointer-events="none"/>`;
   out+=`<foreignObject x="0" y="0" width="${canvasW}" height="${h}" pointer-events="none" aria-hidden="true"><canvas xmlns="http://www.w3.org/1999/xhtml" id="atmosphere-canvas" data-theme="${theme}" data-width="${canvasW}" data-height="${h}" style="width:100%;height:100%;pointer-events:none"></canvas></foreignObject>`;
 }
@@ -185,8 +186,10 @@ function render(){
   for(const [dir,label] of [[-1,'Previous companion'],[1,'Next companion']]){const x=canvasW*.5+dir*220;out+='<g data-tree-companion="'+dir+'" role="button" aria-label="'+label+'" style="cursor:pointer"><title>'+label+'</title>';rect(x-20,10,40,42,'transparent');glyph(x,33,16,dir<0?0xf053:0xf054,p.dim);out+='</g>';}
   line(canvasW*.5-155,108,canvasW*.5-12,108,p.edge+'3d');line(canvasW*.5+12,108,canvasW*.5+155,108,p.edge+'3d');diamond(canvasW*.5,108,4,'none',p.edge+'b2');out+='</g>';
   const bonusX=w-510,bonusY=43;
+  if(role!==6){
   rect(bonusX,bonusY,235,32,p.inset+'55',p.line);glyph(bonusX+23,bonusY+16,16,[0xf0e7,0xf3ed,0xf21e,0xf6e3,0xf2ea,0xf0d0][role],p.edge);text(bonusX+44,bonusY+16,18,(role===1||role===5?'-':role===4?'':'+' )+spent+'%',p.text);text(bonusX+97,bonusY+16,10,['ATTACK SPEED','DAMAGE TAKEN','HEALING','DAMAGE','ARROWS KEPT','MAGICKA COST'][role],p.dim,'start',1.5);
   for(const [i,g]of[[0,0xf068],[1,0xf067]]){rect(bonusX+243+i*34,bonusY,30,32,'none',p.line);glyph(bonusX+258+i*34,bonusY+16,12,g,p.dim);}
+  }
   out+='<g id="debug-toggle" role="button" tabindex="0" aria-label="Debug Mode" aria-pressed="'+debugMode+'"><title>Debug Mode: free ranks and out-of-combat ability testing</title>';
   circle(w-139,48,19,debugMode?p.accent:p.inset,p.edge);glyph(w-139,48,15,0xf188,p.text);text(w-139,82,10,debugMode?'DEBUG: ON':'DEBUG',p.dim,'middle',1);out+='</g>';
   circle(w-55,48,19,'none',p.line);text(w-55,48,18,'?',p.dim,'middle');
@@ -216,10 +219,11 @@ function render(){
   if(canSpend){out+='<g class="glow">';for(let i=4;i>=1;i--)circle(px,py,52*(.55+.14*i),'#d63a3407');out+='</g>';}
   diamond(px,py,29,'#70191a',canSpend?'#d63a34':'#8e3b38',1.6);diamond(px,py,24,'none','#d63a343d');text(px,py,27,debugMode?'∞':String(points),p.text,'middle');out+='</g>';
   out+='<g id="picker" role="button" aria-label="Select role">';rect(30,24,294,72,p.inset+'33');line(87,94,319,94,p.edge+'55');emblem(61,59,28,p.inset+'99',p.edge+'80');glyph(61,59,26,r.glyph);text(185,60,23,r.name,p.text,'middle');glyph(300,60,13,picker?0xf077:0xf078,p.dim);out+='</g>';
-  if(picker){out+='<g class="role-list">';rect(30,103,294,326,p.inset,p.line);data.roles.forEach((r,i)=>{const yy=110+52*i;out+=`<g data-role="${i}" role="button" aria-label="${escape(r.name)} path">`;rect(37,yy,280,52,i===role?p.accent+'55':p.inset);glyph(62,yy+26,21,r.glyph);top(88,yy+12,21,r.name,i===role?p.text:p.dim);if(i===1)diamond(298,yy+26,4,p.edge);out+='</g>';});out+='</g>';}
+  if(picker){out+='<g class="role-list">';rect(30,103,294,378,p.inset,p.line);data.roles.forEach((r,i)=>{const yy=110+52*i;out+=`<g data-role="${i}" role="button" aria-label="${escape(r.name)} path">`;rect(37,yy,280,52,i===role?p.accent+'55':p.inset);glyph(62,yy+26,21,r.glyph);top(88,yy+12,21,r.name,i===role?p.text:p.dim);if(i===1)diamond(298,yy+26,4,p.edge);out+='</g>';});out+='</g>';}
   const oldLinks=[...stage.querySelectorAll('.branch-link')].map(el=>el.getAttribute('d'));
   stage.innerHTML=out;
   stage.querySelectorAll('[data-pose]').forEach(el=>{
+    if(query.get('render')==='1')return;
     const key=el.dataset.pose,current=poses.get(key),old=oldPoses.get(key);
     if(!current)return;
     if(old&&!roleChanged)el.animate([{transform:'translate('+(old[0]-current[0])+'px,'+(old[1]-current[1])+'px)'},{transform:'translate(0,0)'}],{duration:420,easing:'cubic-bezier(.4,0,.2,1)'});
@@ -265,10 +269,10 @@ function drawDetails(x,h,n,rank,buyable,ranks,index){
   withMaster(n.kind==='ability'?rank:0,()=>top(dx+88*s,topY+26*s,Math.min(25*s,255/Math.max(width(n.name.toUpperCase(),25*s),1)*25*s),n.name.toUpperCase(),p.text,2));
   top(dx+88*s,topY+58*s,14*s,`Rank ${['0','I','II','III'][rank]} of ${['0','I','II','III'][n.most]}`,p.edge);
   let y=topY+96*s;line(dx,y,dx+dw,y);y+=22;
-  const intro=n.kind==='ability'?(a?.own||'Use when the moment calls for it.'):n.kind==='branch'?`Strengthens ${a?.name||'its parent ability'}.`:'Always active while its requirements are met.';
+  const intro=n.description?n.description.replaceAll('{0}',n.values[Math.max(1,rank)-1]):n.kind==='ability'?(a?.own||'Use when the moment calls for it.'):n.kind==='branch'?`Strengthens ${a?.name||'its parent ability'}.`:'Always active while its requirements are met.';
   y+=para(dx,y,15.5*s,intro,dw,p.dim)+28;
   top(dx,y,12*s,'RANKS',p.dim,1.8);y+=33;
-  for(let i=1;i<=n.most;i++){const held=i<=rank,next=i===rank+1;rect(dx,y,dw,55,next?p.accent+'40':'none');diamond(dx+18,y+27,12,held?p.accent:p.inset,held?p.edge:p.line);text(dx+18,y+27,10.5,['','I','II','III'][i],held?p.text:p.dim,'middle');text(dx+51,y+27,16,held?'Learned':debugMode?'Free':requiredLevel(n,i)>0?`Level ${requiredLevel(n,i)}`:next?'Next rank':'Not learned',held||next?p.text:p.faint);if(held)glyph(dx+dw-18,y+27,13,0xf00c,p.edge);else{diamond(dx+dw-35,y+27,4,p.dim,p.dim);text(dx+dw-18,y+27,14,String(rankCost(n,i)),p.dim,'middle');}y+=55;}
+  for(let i=1;i<=n.most;i++){const held=i<=rank,next=i===rank+1;rect(dx,y,dw,55,next?p.accent+'40':'none');diamond(dx+18,y+27,12,held?p.accent:p.inset,held?p.edge:p.line);text(dx+18,y+27,10.5,['','I','II','III'][i],held?p.text:p.dim,'middle');text(dx+51,y+27,16,n.measure&&n.values?n.measure.replace('{}',n.values[i-1]):held?'Learned':debugMode?'Free':requiredLevel(n,i)>0?`Level ${requiredLevel(n,i)}`:next?'Next rank':'Not learned',held||next?p.text:p.faint);if(held)glyph(dx+dw-18,y+27,13,0xf00c,p.edge);else{diamond(dx+dw-35,y+27,4,p.dim,p.dim);text(dx+dw-18,y+27,14,String(rankCost(n,i)),p.dim,'middle');}y+=55;}
   const actionY=h-118-30*s-16*s-128*s-20*s-46*s;
     let blocked='Not enough perk points';
   if(followerLevel()<requiredLevel(n,rank+1))blocked=`Requires level ${requiredLevel(n,rank+1)}`;
@@ -320,7 +324,7 @@ function drawBattle(){
   emblem(1612,960,26,p.inset,p.edge);line(1612,973,1601,958,p.text,1.5);line(1612,973,1623,958,p.text,1.5);line(1601,958,1612,946,p.text,1.4);line(1623,958,1612,946,p.text,1.4);[[1612,973],[1601,958],[1623,958],[1612,946]].forEach(([x,y])=>diamond(x,y,3.5,p.text));diamond(1643,980,12,'#9e2422',p.edge);text(1643,980,11,'4',p.text,'middle');out+='<g class="tree-label">';text(1612,915,14,'Skill tree',p.text,'middle');out+='</g></g>';
   if(battleMessage)text(1612,995,12,battleMessage,p.dim,'middle');
   battleMembers.forEach((m,i)=>{const x=723+i*142;out+='<g role="button" aria-label="Select '+m.name+'" data-member="'+i+'">';if(i===battleMember)selection(x,905,30,{kind:'ability'},false);emblem(x,905,30,i===battleMember?p.accent:p.inset,p.edge);glyph(x,905,24,data.roles[m.role].glyph);text(x,953,14,m.name,i===battleMember?p.text:p.dim,'middle');out+='</g>';});
-  text(936,985,12,'1 / 2  USE ABILITY     â€¢     CLICK ICON  USE     â€¢     AUTO / MANUAL  TOGGLE',p.dim,'middle',.4);
+  text(936,985,12,'1 / 2  USE ABILITY     |     CLICK ICON  USE     |     AUTO / MANUAL  TOGGLE',p.dim,'middle',.4);
 }
 function bindBattle(){
   stage.querySelectorAll('[data-command]').forEach(el=>el.onclick=()=>{battleOrder=+el.dataset.command;render();});
@@ -380,8 +384,13 @@ document.querySelector('#replay-entrance').addEventListener('click',()=>{documen
 window.addEventListener('resize',()=>render());
 document.getElementById('ranks').addEventListener('change',()=>{learned.clear();render();});
 document.getElementById('level').addEventListener('change',render);document.getElementById('theme').addEventListener('change',render);document.getElementById('points').addEventListener('change',render);
-document.addEventListener('keydown',e=>{if(entranceActive)return;if(e.key==='Escape'){if(picker)picker=false;else if(mode==='details')mode='overview';else if(mode==='overview'){leaveTree();return;}render();}if(e.key==='Tab'&&(mode==='overview'||mode==='details')&&!document.body.classList.contains('preview-controls')){e.preventDefault();switchTreeCompanion(e.shiftKey?-1:1);}if(e.key==='q'||e.key==='e'){role=(role+(e.key==='e'?1:5))%6;mode='overview';picker=false;render();}});
+document.addEventListener('keydown',e=>{if(entranceActive)return;if(e.key==='Escape'){if(picker)picker=false;else if(mode==='details')mode='overview';else if(mode==='overview'){leaveTree();return;}render();}if(e.key==='Tab'&&(mode==='overview'||mode==='details')&&!document.body.classList.contains('preview-controls')){e.preventDefault();switchTreeCompanion(e.shiftKey?-1:1);}if(e.key==='q'||e.key==='e'){role=(role+(e.key==='e'?1:6))%7;mode='overview';picker=false;render();}});
 if(['vanilla','oxblood','nordic'].includes(query.get('theme')))document.getElementById('theme').value=query.get('theme');
+for(const key of ['level','ranks','points'])if(query.has(key)&&[...document.getElementById(key).options].some(o=>o.value===query.get(key)))document.getElementById(key).value=query.get(key);
+if(query.get('render')==='1'){
+ document.getElementById('preview-settings').style.display='none';
+ const still=document.createElement('style');still.textContent='*{animation:none!important;transition:none!important}';document.head.append(still);
+}
 render();
 
 })().catch(error => { document.querySelector('.footnote').textContent = String(error); throw error; });

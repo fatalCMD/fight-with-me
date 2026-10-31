@@ -70,6 +70,8 @@ namespace FWM::View
 		bool        walkWithMe{ false };
 		Arsenal     arsenal;
 		bool        arsenalKnown{ false };
+        bool        hasLute{ false };
+        Lack        skaldLack{ Lack::kSkaldLocked };
 		Orders      orders;
 		Position    resolved{ Position::kFree };
 		float       health{ 1.0f };

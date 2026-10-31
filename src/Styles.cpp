@@ -173,7 +173,8 @@ namespace FWM::Styles
 				data.rangedScore *= 0.1f;
 			}
 			data = PositionIntent(Tweaked(data, a_tweaks), a_orders.role, a_resolved, weight);
-			Write(layered.ours, layered.original, a_committed ? Committed(data) : data);
+            data=a_orders.role==Role::kSkald?TimidSkald(data,a_tweaks.recovery):a_committed?Committed(data):data;
+			Write(layered.ours, layered.original, data);
 			layered.role = a_orders.role;
 			layered.position = a_resolved;
 			layered.weight = weight;

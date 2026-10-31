@@ -15,15 +15,19 @@
 #>
 [CmdletBinding()]
 param(
-	[string]$Version = '0.5.0',
+	[string]$Version = '0.6.0',
     [string]$EffectsVersion = '1.0.21',
+	# The Path of the Companions release this one is built and tested with; names the source download.
+	[string]$PathsVersion = '1.2.0',
 	[string]$VcpkgRoot = $env:VCPKG_ROOT,
 	[string]$CMake = '',
-	[switch]$SkipBuild
+	[switch]$SkipBuild,
+	# Leave the Effects pack alone: an unchanged pack is not rebuilt under its released version.
+	[switch]$SkipEffects
 )
 
 $ErrorActionPreference = 'Stop'
-foreach ($label in @($Version, $EffectsVersion)) {
+foreach ($label in @($Version, $EffectsVersion, $PathsVersion)) {
     if ($label -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$') { throw "Invalid package version: $label" }
 }
 
@@ -142,14 +146,19 @@ foreach ($dependency in 'directxmath', 'directxtk', 'fmt', 'rapidcsv', 'spdlog')
 	Copy-Item -LiteralPath (Join-Path $dependencyNotices "$dependency\copyright") -Destination (Join-Path $licenseDir "$dependency-copyright.txt") -Force
 }
 
-"Matching plugin source: FightWithMe-0.5.0-Paths-1.0.0-Source.zip (separate developer download; not required to play). See BUILD-SOURCE.md inside that archive." |
+"Matching plugin source: FightWithMe-$Version-Paths-$PathsVersion-Source.zip (separate developer download; not required to play). See BUILD-SOURCE.md inside that archive." |
     Set-Content -LiteralPath (Join-Path $releaseRoot 'SOURCE-INFORMATION.txt') -Encoding UTF8
+if (-not $SkipEffects) {
 Remove-PackageTarget $effectsRoot
 Remove-PackageTarget $effectsArchive
 New-Item -ItemType Directory -Force -Path $effectsRoot | Out-Null
 foreach ($folder in 'meshes', 'textures') {
     Copy-Item -LiteralPath (Join-Path $repoRoot "assets\$folder") -Destination $effectsRoot -Recurse -Force
 }
+# Skald's meshes and textures ship inside Path of the Companions itself (tools\skald\StageAssets.ps1).
+Get-ChildItem -LiteralPath (Join-Path $effectsRoot 'meshes\FightWithMe') -Filter 'Skald*.nif' -File | Remove-Item -Force
+$skaldTextures = Join-Path $effectsRoot 'textures\FightWithMe\Skald'
+if (Test-Path -LiteralPath $skaldTextures) { Remove-Item -LiteralPath $skaldTextures -Recurse -Force }
 # Large generated UI artwork belongs to the separate required art download.
 $backdropSource = Join-Path $repoRoot 'assets\interface\FightWithMe\backdrops'
 $backdropTarget = Join-Path $effectsRoot 'interface\FightWithMe\backdrops'
@@ -181,6 +190,7 @@ $manifest = @{
     })
 }
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $effectsRoot 'Effects-Manifest.json') -Encoding UTF8
+}
 "Optional: Path of the Companions adds abilities, traits and progression. It requires POTC Effects $EffectsVersion (asset contract 1)." |
     Set-Content -LiteralPath (Join-Path $releaseRoot 'Optional-Paths.txt') -Encoding UTF8
 
@@ -206,7 +216,9 @@ function Write-Package([string]$Folder, [string]$ArchivePath) {
     Write-Output ("{0}: ZIP {1:N0} bytes; unpacked {2:N0} bytes" -f $ArchivePath, (Get-Item -LiteralPath $ArchivePath).Length, $bytes)
 }
 if (Get-ChildItem -LiteralPath $releaseRoot -Recurse -File | Where-Object { $_.Extension -in '.nif','.dds' }) { throw 'Effect content leaked into the main package.' }
-if (Get-ChildItem -LiteralPath $effectsRoot -Recurse -File | Where-Object { $_.Extension -in '.dll','.ini','.pdb','.esp','.esl' }) { throw 'Non-art content leaked into the Effects pack.' }
-if (-not (Test-Path -LiteralPath (Join-Path $effectsRoot 'textures\FightWithMe\EffectsPack-1.txt'))) { throw 'Effects pack contract marker is missing.' }
+if (-not $SkipEffects) {
+    if (Get-ChildItem -LiteralPath $effectsRoot -Recurse -File | Where-Object { $_.Extension -in '.dll','.ini','.pdb','.esp','.esl' }) { throw 'Non-art content leaked into the Effects pack.' }
+    if (-not (Test-Path -LiteralPath (Join-Path $effectsRoot 'textures\FightWithMe\EffectsPack-1.txt'))) { throw 'Effects pack contract marker is missing.' }
+}
 Write-Package $releaseRoot $archivePath
-Write-Package $effectsRoot $effectsArchive
+if (-not $SkipEffects) { Write-Package $effectsRoot $effectsArchive }

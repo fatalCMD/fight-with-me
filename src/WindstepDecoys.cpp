@@ -7,7 +7,11 @@ namespace FWM::WindstepDecoys {
 namespace {
 std::shared_mutex gate;
 struct Decoy { RE::NiPointer<RE::Actor> actor; std::vector<RE::ActorHandle> enemies; };
+struct Spare { RE::ActorHandle actor; RE::FormID id{}; };
 std::unordered_map<RE::FormID,Decoy> active;
+// Spent echoes are disabled and reused, never deleted: a deleted actor leaves its cell while
+// the engine's movement job still updates it, and that job crashes on the missing cell.
+std::vector<Spare> spares;
 std::array<RE::TESNPC*,2> bases{}; // Two reusable templates; never alter a stock NPC.
 std::array<RE::FormID,2> baseIDs{};
 RE::TESNPC* Base(bool female){
@@ -39,23 +43,43 @@ RE::TESNPC* Base(bool female){
  base->SetAssistanceLevel(RE::ACTOR_ASSISTANCE::kHelpsNobody);
  return base;
 }
+// Moves a spare of this body straight into the live set, so Is() never lapses in between.
+RE::NiPointer<RE::Actor> TakeSpare(const RE::TESNPC* base){
+ std::unique_lock lock(gate);
+ for(auto it=spares.begin();it!=spares.end();){
+  auto actor=it->actor.get();
+  if(!actor||actor->IsMarkedForDeletion()){it=spares.erase(it);continue;} // a load or a purged cell took it
+  if(actor->GetActorBase()!=base){++it;continue;}
+  spares.erase(it);active.emplace(actor->GetFormID(),Decoy{actor,{}});return actor;
+ }
+ return {};
+}
 }
 RE::ActorHandle Create(RE::Actor* caster,const RE::NiPoint3& at){
  if(!caster||!caster->GetParentCell()||!caster->GetParentCell()->IsAttached())return {};
  const auto* npc=caster->GetActorBase();auto* base=Base(npc&&npc->IsFemale());if(!base)return {};
- const auto made=RE::TESDataHandler::GetSingleton()->CreateReferenceAtLocation(base,at,{0,0,caster->GetAngleZ()},caster->GetParentCell(),caster->GetWorldspace(),nullptr,nullptr,RE::ObjectRefHandle(),false,true);
- auto ref=made.get();auto* actor=ref?ref->As<RE::Actor>():nullptr;
- if(!actor){if(ref){ref->Disable();ref->SetDelete(true);}return {};}
- actor->SetTemporary();actor->SetActivationBlocked(true);actor->EnableAI(true);
+ const RE::NiPoint3 angle{0,0,caster->GetAngleZ()};
+ auto actor=TakeSpare(base);const bool reused=static_cast<bool>(actor);
+ if(reused){
+  // Still disabled where its last echo faded, possibly in another cell: move it before it loads again.
+  actor->MoveTo(caster);actor->SetPosition(at,true);actor->Enable(false);
+ }else{
+  const auto made=RE::TESDataHandler::GetSingleton()->CreateReferenceAtLocation(base,at,angle,caster->GetParentCell(),caster->GetWorldspace(),nullptr,nullptr,RE::ObjectRefHandle(),false,true);
+  auto ref=made.get();actor.reset(ref?ref->As<RE::Actor>():nullptr);
+  if(!actor){if(ref){ref->Disable();ref->SetDelete(true);}return {};}
+  actor->SetTemporary();
+  {std::unique_lock lock(gate);active.emplace(actor->GetFormID(),Decoy{actor,{}});}
+ }
+ actor->SetActivationBlocked(true);actor->EnableAI(true);
  // Keep detection/actor processing alive; hide only rendered geometry. Restraint prevents attacks.
  actor->AsActorState()->actorState1.lifeState=RE::ACTOR_LIFE_STATE::kRestrained;actor->SetAlpha(1);
- {std::unique_lock lock(gate);active.emplace(actor->GetFormID(),Decoy{RE::NiPointer<RE::Actor>(actor),{}});}
  if(auto* root=actor->Get3D())root->SetAppCulled(true);
- Log::Info("[Windstep] Created temporary target {:08X} at the departure point."sv,actor->GetFormID());
+ Log::Info("[Windstep] {} temporary target {:08X} at the departure point."sv,reused?"Reused":"Created",actor->GetFormID());
  return actor->GetHandle();
 }
 bool Engage(RE::Actor* enemy,RE::Actor* echo){
- if(!Game::Usable(enemy)||!Game::Usable(echo)||!Is(echo->GetFormID()))return false;
+ if(!Game::Usable(enemy)||!Game::Usable(echo))return false;
+ {std::shared_lock lock(gate);if(!active.contains(echo->GetFormID()))return false;} // a spare never takes enemies
  auto* controller=Game::Controller(enemy);if(!controller)return false;
  // StartCombat alone is not a sustained illusion: ordinary detection can forget an
  // invisible dummy and the selector then rejects it as absent from the combat group.
@@ -86,8 +110,9 @@ void Drop(RE::ActorHandle& handle){
   auto* group=c->combatGroup;RE::BSWriteLockGuard lock(group->lock);
   for(auto it=group->targets.begin();it!=group->targets.end();)if(it->targetHandle==handle)it=group->targets.erase(it);else ++it;
  }
- if(auto actor=handle.get()){actor->StopCombat();actor->Disable();actor->SetDelete(true);}
+ // Disable only and shelve it for the next Windstep; see spares.
+ if(auto actor=handle.get();actor&&owned.actor){actor->StopCombat();actor->Disable();std::unique_lock lock(gate);spares.push_back({handle,actor->GetFormID()});}
  handle={};
 }
-bool Is(RE::FormID id){std::shared_lock lock(gate);return active.contains(id);}
+bool Is(RE::FormID id){std::shared_lock lock(gate);return active.contains(id)||std::ranges::any_of(spares,[id](const Spare& s){return s.id==id;});}
 }

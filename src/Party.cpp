@@ -1,5 +1,7 @@
+#include "FWM/Skald.h"
 #include "FWM/Party.h"
 #include "FWM/Loadouts.h"
+#include "FWM/Host.h"
 
 #include "FWM/Forms.h"
 #include "FWM/Game.h"
@@ -113,7 +115,7 @@ namespace FWM::Party
 
 		Role Guess(RE::Actor* a_actor, const Arsenal& a_arsenal)
 		{
-			return Playable(Loadout(a_actor), a_arsenal);
+			return Playable(Loadout(a_actor), a_arsenal, Settings::Get().roleWeapons);
 		}
 
 		// Straight after a load a companion can be in the fight before anything is in their
@@ -154,12 +156,12 @@ namespace FWM::Party
 			if (it == orders.end()) {
 				return;
 			}
-			const auto lack = FWM::LackFor(it->second.role, a_member.arsenal);
+			const auto lack = it->second.role==Role::kSkald ? Party::LackFor(a_member.id,Role::kSkald) : FWM::LackFor(it->second.role, a_member.arsenal, Settings::Get().roleWeapons);
 			if (lack == Lack::kNothing) {
 				return;
 			}
 			const auto before = it->second.role;
-			const auto after = Playable(Loadout(a_actor), a_member.arsenal);
+			const auto after = Playable(Loadout(a_actor), a_member.arsenal, Settings::Get().roleWeapons);
 			it->second = ForRole(after, it->second);
 			Log::Info("[Party] {} can no longer be a {} ({}) and fights as a {}."sv, a_member.name, Info(before).name, Why(lack), Info(after).name);
 			Notices::Push(Trf("{} cannot be a {}: {} Now a {}.", a_member.name, Info(before).name, Why(lack), Info(after).name), Notices::Kind::kWarning);
@@ -240,10 +242,11 @@ namespace FWM::Party
 		auto*       calendar = RE::Calendar::GetSingleton();
 		const float seconds = calendar ? worldClock.Advance(a_frame, calendar->GetDaysPassed(), calendar->GetHour(), calendar->GetTimescale()) : a_frame;
 		for (auto& member : members) {
-			member.tauntReady = Cooldowns::Down(member.tauntReady, seconds);
-			member.healReady = Cooldowns::Down(member.healReady, seconds);
-			member.rejuvenateReady = Cooldowns::Down(member.rejuvenateReady, seconds);
-			member.specialReady = Cooldowns::Down(member.specialReady, seconds);
+			const float recovered=seconds*(1.f+Skald::Recovery(member.id));
+            member.tauntReady = Cooldowns::Down(member.tauntReady, recovered);
+			member.healReady = Cooldowns::Down(member.healReady, recovered);
+			member.rejuvenateReady = Cooldowns::Down(member.rejuvenateReady, recovered);
+			member.specialReady = Cooldowns::Down(member.specialReady, recovered);
 		}
 		std::erase_if(away, [seconds](auto& a_entry) {
 			a_entry.second.Down(seconds);
@@ -393,6 +396,7 @@ namespace FWM::Party
 	void SetOrders(RE::FormID a_id, const Orders& a_orders)
 	{
         if (!CanHaveRole(a_id)) return;
+		if (a_orders.role==Role::kSkald && LackFor(a_id,Role::kSkald)!=Lack::kNothing) return;
 		auto& kept = orders[a_id];
         const auto preferred=kept.role;
 		kept = a_orders;
@@ -460,12 +464,19 @@ namespace FWM::Party
 
 	Lack LackFor(RE::FormID a_id, Role a_role)
 	{
-		if (a_role == Role::kBruiser) return FWM::LackFor(a_role, Game::ArsenalOf(RE::TESForm::LookupByID<RE::Actor>(a_id)));
+        if (a_role==Role::kSkald) {
+            bool unlocked=false;
+            if(Host::Abilities()){
+                const auto* progress=PathsLink::Find(a_id);unlocked=progress && progress->record.skaldUnlocked;
+            }else unlocked=AbilityLink::SkaldUnlocked(a_id);
+            return SkaldLack(Skald::HasLute(RE::TESForm::LookupByID<RE::Actor>(a_id)),unlocked);
+        }
+		if (a_role == Role::kBruiser) return FWM::LackFor(a_role, Game::ArsenalOf(RE::TESForm::LookupByID<RE::Actor>(a_id)), Settings::Get().roleWeapons);
 		const auto* member = Find(a_id);
 		if (!member || !member->arsenalKnown) {
 			return Lack::kNothing;
 		}
-		return FWM::LackFor(a_role, member->arsenal);
+		return FWM::LackFor(a_role, member->arsenal, Settings::Get().roleWeapons);
 	}
 
 	bool IsPartyActor(RE::Actor* a_actor)

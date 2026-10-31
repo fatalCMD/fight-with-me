@@ -46,3 +46,6 @@ extern "C" FIGHTWITHME_API bool                          FightWithMe_InBattle();
 // The enemy a follower (actor reference form id) was sent after in the battle plan, as a native
 // actor handle; 0 when they were sent after no one. Main thread.
 extern "C" FIGHTWITHME_API std::uint32_t                 FightWithMe_GetMark(std::uint32_t a_actorFormID);
+// Saved combat position (FWM::Position value), or -1 if no orders exist. Main thread.
+// Optional export; does not change the version-1 virtual interface.
+extern "C" FIGHTWITHME_API std::int32_t                  FightWithMe_GetPosition(std::uint32_t a_actorFormID);

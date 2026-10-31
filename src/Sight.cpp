@@ -309,10 +309,11 @@ namespace FWM::Sight
 			return;
 		}
 		const bool playerDrawn = player->AsActorState()->IsWeaponDrawn();
-		if (!settings.drawOnSight && !settings.autoBattle) {
+		// Without auto battle nothing happens before a fight: no weapons out, no fight started.
+		if (!settings.autoBattle) {
 			EndSighting();
 			if (!playerDrawn) {
-				PutAway("Watching for enemies is off"sv);
+				PutAway("Auto battle is off"sv);
 			}
 			return;
 		}
@@ -346,8 +347,7 @@ namespace FWM::Sight
 				continue;
 			}
 			Looker looker{ &member, actor };
-			// Without auto battle one sighting is enough; with it, each looker's own counts.
-			if (!enemies.empty() && (settings.autoBattle || !first)) {
+			if (!enemies.empty()) {
 				looker.sees = FirstSeen(actor.get(), enemies, settings.sightRange);
 				if (looker.sees && !first) {
 					first = looker.sees;
@@ -374,7 +374,8 @@ namespace FWM::Sight
 				enemies.size());
 		}
 
-		if (settings.drawOnSight) {
+		const bool sneaking = player->IsSneaking();
+		if (Rules::DrawsOnSight(settings.autoBattle, settings.drawOnSight, sneaking)) {
 			std::string drew;
 			// Once a sighting: asking again each time the game puts them away only has them
 			// drawing and sheathing for as long as the enemy stays in view.
@@ -401,26 +402,23 @@ namespace FWM::Sight
 			}
 		}
 
-		if (settings.autoBattle) {
-			const bool sneaking = player->IsSneaking();
-			std::vector<std::pair<std::string, std::vector<std::string>>> told;
-			for (auto& looker : lookers) {
-				const auto* orders = looker.sees ? Party::FindOrders(looker.member->id) : nullptr;
-				if (!orders || !Rules::StartsFight(orders->position, sneaking)) {
-					continue;
-				}
-				if (Engage(*looker.member, looker.actor.get(), looker.sees, "starts the fight with"sv)) {
-					auto enemy = Game::Name(looker.sees);
-					auto it = std::find_if(told.begin(), told.end(), [&](const auto& a_told) { return a_told.first == enemy; });
-					if (it == told.end()) {
-						told.emplace_back(std::move(enemy), std::vector<std::string>{});
-						it = std::prev(told.end());
-					}
-					it->second.push_back(looker.member->name);
-				}
+		std::vector<std::pair<std::string, std::vector<std::string>>> told;
+		for (auto& looker : lookers) {
+			const auto* orders = looker.sees ? Party::FindOrders(looker.member->id) : nullptr;
+			if (!orders || !Rules::StartsFight(orders->position, sneaking)) {
+				continue;
 			}
-			Announce(told);
+			if (Engage(*looker.member, looker.actor.get(), looker.sees, "starts the fight with"sv)) {
+				auto enemy = Game::Name(looker.sees);
+				auto it = std::find_if(told.begin(), told.end(), [&](const auto& a_told) { return a_told.first == enemy; });
+				if (it == told.end()) {
+					told.emplace_back(std::move(enemy), std::vector<std::string>{});
+					it = std::prev(told.end());
+				}
+				it->second.push_back(looker.member->name);
+			}
 		}
+		Announce(told);
 	}
 
 	void Join(float a_dt)

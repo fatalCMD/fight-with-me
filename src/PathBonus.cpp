@@ -1,3 +1,4 @@
+#include "FWM/Skald.h"
 #include "FWM/PathBonus.h"
 #include "FWM/PartyBalance.h"
 
@@ -84,6 +85,8 @@ namespace FWM::PathBonus
 				const auto* base = a_this->GetBaseObject();
                 if (base && base->IsDetrimental() && (base->data.primaryAV == RE::ActorValue::kHealth || base->data.secondaryAV == RE::ActorValue::kHealth)) {
                     auto* outgoingTarget = a_target ? a_target->GetTargetStatsObject() : nullptr;
+                    const bool instant=a_this->duration<=0 && a_this->spell && a_this->spell->GetSpellType()==RE::MagicSystem::SpellType::kSpell && a_this->spell->GetCastingType()==RE::MagicSystem::CastingType::kFireAndForget;
+                    a_this->magnitude=Skald::Outgoing(a_caster,outgoingTarget?outgoingTarget->As<RE::Actor>():nullptr,a_this->magnitude,instant,true);
                     a_this->magnitude *= PartyBalance::Multiplier(a_caster, outgoingTarget ? outgoingTarget->As<RE::Actor>() : nullptr);
                     auto* ref = a_target ? a_target->GetTargetStatsObject() : nullptr;
                     if (AzurasMoon::Negate(a_caster, ref ? ref->As<RE::Actor>() : nullptr, a_this->magnitude)) {
@@ -135,7 +138,7 @@ namespace FWM::PathBonus
                 if (AzurasMoon::Negate(a_attacker, a_target, *a_damage)) { *a_damage = 0; return; }
 				const float outgoing = TankActs::Attack(a_attacker, a_target);
 				if (*a_damage <= 0.0f) return;
-				*a_damage *= outgoing * PartyBalance::Multiplier(a_attacker, a_target);
+				*a_damage = Skald::Outgoing(a_attacker,a_target,*a_damage,true,false) * outgoing * PartyBalance::Multiplier(a_attacker, a_target);
 				const auto table = Table();
 				const auto* factor = table ? Find(*table, a_target) : nullptr;
 				if (factor && factor->taken < 1.0f) {

@@ -1,0 +1,75 @@
+{
+  "tool": "built-in image_gen",
+  "date": "2026-10-28",
+  "format": "Unmodified transparent PNG originals from built-in imagegen; BC3 DDS derivatives for the game.",
+  "textures": [
+    {
+      "song": "Fervor",
+      "motif": "Fervor, fast battle rhythm: rough amber-gold knotwork, sweeping ember brushstrokes and plucked luminous string wisps, energetic clockwise arcs",
+      "file": "SkaldFervorAtlas.png",
+      "prompt": "Use case: stylized-concept. Asset type: production RGBA game magic-effect texture atlas for a Skyrim bard called Skald. Generate ONE square 1024x1024 image with a truly transparent background. Hand-painted gouache, visible dry-brush grain and feathered translucent luminous edges; ancient Nordic carved ornament, restrained organic detail, readable shapes. Theme: Fervor, fast battle rhythm: rough amber-gold knotwork, sweeping ember brushstrokes and plucked luminous string wisps, energetic clockwise arcs. Four separate motifs arranged in an exact 2x2 grid with fully transparent gutters and no separators. Each motif contained inside its own 512x512 quadrant with 48 pixels of transparent margin at every quadrant edge. TOP LEFT: an intricate circular rune seal, perfectly flat overhead, circular knotwork border, open transparent center, fine radial rune marks and uneven brush texture. TOP RIGHT: one upright slender flowing spectral ribbon, widest at center, tapered and completely fading at both ends, braided hair-like luminous strands and a few powdery wisps. BOTTOM LEFT: a broad painterly circular outward sound wave, perfectly flat overhead, hollow transparent center, broken sweeping arcs around the circumference, soft wispy trailing brushwork. BOTTOM RIGHT: a small airy cluster of three floating rune diamonds with fine luminous threads and dust, all disconnected from the other three motifs. All are isolated emissive magic decals, pale luminous cores with themed color at the edges. No scene, no background fill, no floor, no character, no instrument, no UI, no labels, no readable words, no black rectangular backing, no rendered checkerboard, no photorealism, no mechanical vector precision. Preserve generous true transparency between and around the four motifs. The texture will be placed on animated game meshes; do not depict perspective or an environment.",
+      "source": "assets/textures/FightWithMe/Skald/SkaldFervorAtlas.png",
+      "source_sha256": "ba00f10019b562bd751d52b3cd8a864a0a865ab61b1624cc0e786ba7a9d9595b",
+      "dds_sha256": "62c47a6edbc6c330e58a4f69d6ae8721d4f53fcc9e9bed21a165d9b488192a0f",
+      "dimensions": [
+        1254,
+        1254
+      ],
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "song": "Echoes",
+      "motif": "Echoes, resonant memory and returning ability energy: pale cyan-silver interlaced sound loops, rippling strings, elegant doubled wave marks, flowing mirrored wisps",
+      "file": "SkaldEchoesAtlas.png",
+      "prompt": "Use case: stylized-concept. Asset type: production RGBA game magic-effect texture atlas for a Skyrim bard called Skald. Generate ONE square 1024x1024 image with a truly transparent background. Hand-painted gouache, visible dry-brush grain and feathered translucent luminous edges; ancient Nordic carved ornament, restrained organic detail, readable shapes. Theme: Echoes, resonant memory and returning ability energy: pale cyan-silver interlaced sound loops, rippling strings, elegant doubled wave marks, flowing mirrored wisps. Four separate motifs arranged in an exact 2x2 grid with fully transparent gutters and no separators. Each motif contained inside its own 512x512 quadrant with 48 pixels of transparent margin at every quadrant edge. TOP LEFT: an intricate circular rune seal, perfectly flat overhead, circular knotwork border, open transparent center, fine radial rune marks and uneven brush texture. TOP RIGHT: one upright slender flowing spectral ribbon, widest at center, tapered and completely fading at both ends, braided hair-like luminous strands and a few powdery wisps. BOTTOM LEFT: a broad painterly circular outward sound wave, perfectly flat overhead, hollow transparent center, broken sweeping arcs around the circumference, soft wispy trailing brushwork. BOTTOM RIGHT: a small airy cluster of three floating rune diamonds with fine luminous threads and dust, all disconnected from the other three motifs. All are isolated emissive magic decals, pale luminous cores with themed color at the edges. No scene, no background fill, no floor, no character, no instrument, no UI, no labels, no readable words, no black rectangular backing, no rendered checkerboard, no photorealism, no mechanical vector precision. Preserve generous true transparency between and around the four motifs. The texture will be placed on animated game meshes; do not depict perspective or an environment.",
+      "source": "assets/textures/FightWithMe/Skald/SkaldEchoesAtlas.png",
+      "source_sha256": "2a8a5ddd463f6641ab020245c73bf50b94ea4353a8f9a4d82b6e90391b5a1225",
+      "dds_sha256": "b6bfa38fd1a9e86c7f4f6999aa6e86995a2116d8e26733e444b854d3369151b2",
+      "dimensions": [
+        1254,
+        1254
+      ],
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "song": "Hollow",
+      "motif": "The Hollow, weakening and draining enemies: smoky lilac-violet broken Nordic rune fragments, torn angular spirals, interrupted circles, inward curling spectral wisps",
+      "file": "SkaldHollowAtlas.png",
+      "prompt": "Use case: stylized-concept. Asset type: production RGBA game magic-effect texture atlas for a Skyrim bard called Skald. Generate ONE square 1024x1024 image with a truly transparent background. Hand-painted gouache, visible dry-brush grain and feathered translucent luminous edges; ancient Nordic carved ornament, restrained organic detail, readable shapes. Theme: The Hollow, weakening and draining enemies: smoky lilac-violet broken Nordic rune fragments, torn angular spirals, interrupted circles, inward curling spectral wisps. Four separate motifs arranged in an exact 2x2 grid with fully transparent gutters and no separators. Each motif contained inside its own 512x512 quadrant with 48 pixels of transparent margin at every quadrant edge. TOP LEFT: an intricate circular rune seal, perfectly flat overhead, circular knotwork border, open transparent center, fine radial rune marks and uneven brush texture. TOP RIGHT: one upright slender flowing spectral ribbon, widest at center, tapered and completely fading at both ends, braided hair-like luminous strands and a few powdery wisps. BOTTOM LEFT: a broad painterly circular outward sound wave, perfectly flat overhead, hollow transparent center, broken sweeping arcs around the circumference, soft wispy trailing brushwork. BOTTOM RIGHT: a small airy cluster of three floating rune diamonds with fine luminous threads and dust, all disconnected from the other three motifs. All are isolated emissive magic decals, pale luminous cores with themed color at the edges. No scene, no background fill, no floor, no character, no instrument, no UI, no labels, no readable words, no black rectangular backing, no rendered checkerboard, no photorealism, no mechanical vector precision. Preserve generous true transparency between and around the four motifs. The texture will be placed on animated game meshes; do not depict perspective or an environment.",
+      "source": "assets/textures/FightWithMe/Skald/SkaldHollowAtlas.png",
+      "source_sha256": "6113061b2730de8c04337cd1c1d45984ca1a08e8d6187888f324e9fb9a5f2d23",
+      "dds_sha256": "49219c8fd95ed142c263a57ab2f7b3aef33bc6d26b373f67f556015daa588fd5",
+      "dimensions": [
+        1254,
+        1254
+      ],
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "song": "Glory",
+      "motif": "Glory, courage and critical strikes: pale oxblood rose-red with restrained antique gold details, crown-petal knotwork and pointed rays, regal rising spectral wisps",
+      "file": "SkaldGloryAtlas.png",
+      "prompt": "Use case: stylized-concept. Asset type: production RGBA game magic-effect texture atlas for a Skyrim bard called Skald. Generate ONE square 1024x1024 image with a truly transparent background. Hand-painted gouache, visible dry-brush grain and feathered translucent luminous edges; ancient Nordic carved ornament, restrained organic detail, readable shapes. Theme: Glory, courage and critical strikes: pale oxblood rose-red with restrained antique gold details, crown-petal knotwork and pointed rays, regal rising spectral wisps. Four separate motifs arranged in an exact 2x2 grid with fully transparent gutters and no separators. Each motif contained inside its own 512x512 quadrant with 48 pixels of transparent margin at every quadrant edge. TOP LEFT: an intricate circular rune seal, perfectly flat overhead, circular knotwork border, open transparent center, fine radial rune marks and uneven brush texture. TOP RIGHT: one upright slender flowing spectral ribbon, widest at center, tapered and completely fading at both ends, braided hair-like luminous strands and a few powdery wisps. BOTTOM LEFT: a broad painterly circular outward sound wave, perfectly flat overhead, hollow transparent center, broken sweeping arcs around the circumference, soft wispy trailing brushwork. BOTTOM RIGHT: a small airy cluster of three floating rune diamonds with fine luminous threads and dust, all disconnected from the other three motifs. All are isolated emissive magic decals, pale luminous cores with themed color at the edges. No scene, no background fill, no floor, no character, no instrument, no UI, no labels, no readable words, no black rectangular backing, no rendered checkerboard, no photorealism, no mechanical vector precision. Preserve generous true transparency between and around the four motifs. The texture will be placed on animated game meshes; do not depict perspective or an environment.",
+      "source": "assets/textures/FightWithMe/Skald/SkaldGloryAtlas.png",
+      "source_sha256": "bcd4b1b78f7a6e1963fef2fab44061c21ae777e8d626903f49e0cd979299e311",
+      "dds_sha256": "44bda5fc6b06023f9cd3646961cac7ddab670929e6ee45662b40afcbeff84bad",
+      "dimensions": [
+        1254,
+        1254
+      ],
+      "alpha_range": [
+        0,
+        253
+      ]
+    }
+  ]
+}

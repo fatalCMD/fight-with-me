@@ -80,6 +80,7 @@ namespace FWM::Rules
 
 	bool SpellAllowed(Role a_role, bool a_healing, bool a_attack, SpellTier a_tier, int a_level, bool a_healersAny)
 	{
+        if(a_role==Role::kSkald)return false;
 		switch (a_role) {
 		case Role::kMage:
 			return !a_healing;

@@ -1,0 +1,33 @@
+{
+  "method": "Pitch-preserved faster phrases from installed Skyrim lute recordings; two quarter-note beats per wave.",
+  "tracks": [
+    {
+      "song": "Fervor",
+      "file": "SkaldFervor.wav",
+      "label": "Fervor \u00b7 acoustic lute",
+      "bpm": 138.0,
+      "phase": 0.197
+    },
+    {
+      "song": "Echoes",
+      "file": "SkaldEchoes.wav",
+      "label": "Echoes \u00b7 acoustic lute",
+      "bpm": 126.0,
+      "phase": 0.496
+    },
+    {
+      "song": "Hollow",
+      "file": "SkaldHollow.wav",
+      "label": "Hollow \u00b7 acoustic lute",
+      "bpm": 126.0,
+      "phase": 0.101
+    },
+    {
+      "song": "Glory",
+      "file": "SkaldGlory.wav",
+      "label": "Glory \u00b7 acoustic lute",
+      "bpm": 132.0,
+      "phase": 0.528
+    }
+  ]
+}

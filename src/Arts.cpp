@@ -1,3 +1,4 @@
+#include "FWM/Skald.h"
 #include "FWM/PartyBalance.h"
 #include "FWM/SecondWinds.h"
 #include "FWM/AbilityAuto.h"
@@ -628,8 +629,11 @@ namespace FWM::Arts
 					bossOn = bossOn || profile.boss;
 				}
 			}
-			if (!a_asked && !(on >= 2 || bossOn)) {
+			if (!a_asked && (!(on >= 2 || bossOn) || Ripostes::Benched(a_member.id))) {
 				return {};
+			}
+			if (!Ripostes::CanGuard(a_fighter)) {
+				return a_asked ? Refused(Tr("Needs a weapon or shield to block with, and no spell or staff in the off hand.")) : Result{};
 			}
 			a_state.riposteRank = std::max(a_kit.Rank(Ability::kRiposte), 1);
             const float seconds=Paths::Value(Perk::kRiposte,a_state.riposteRank);
@@ -637,8 +641,8 @@ namespace FWM::Arts
             a_state.riposte = a_state.riposteLength = seconds;
 			a_state.counter = a_kit.Value(Perk::kRiposteCounter);
 			a_state.riposteDisarm = a_kit.Rank(Perk::kRiposteDisarming) > 0;
-			// The held weapon shimmer signals the raised guard; contact gets the flash.
-			Notices::Used(Trf("{} sets themselves to riposte.", a_member.name), Paths::Ability::kRiposte, Notices::Kind::kOrder);
+			// The held weapon shimmer signals the raised guard; contact gets the flash. Ripostes
+			// announces it once the guard is actually up.
 			Log::Info("[Paths] {} readies a riposte for {:.0f} s ({} on them)."sv, a_member.name, a_state.riposte, on);
 			return { true, Trf("Riposte: guard the next melee blow, {:.0f} s.", a_state.riposte) };
 		}
@@ -1580,6 +1584,12 @@ namespace FWM::Arts
 
 		Result Run(Party::Member& a_member, RE::Actor* a_actor, const PathsLink::Kit& a_kit, State& a_state, Ability a_ability, bool a_asked)
 		{
+            if(Skald::IsSong(a_ability)){
+                if(!Skald::HasLute(a_actor))return Refused(Tr("Requires a lute in this companion inventory."));
+                if(!a_kit.record || !a_kit.record->skaldUnlocked)return Refused(Tr("Unlock the Skald tree with 10 earned skill points first."));
+                if(!Skald::Cast(a_actor,a_kit,a_ability))return {};
+                return {true,std::string(Tr("Preparing the Ljodh."))};
+            }
 			switch (a_ability) {
 			case Ability::kChaosDown:
 				return ChaosDown(a_member, a_actor, a_kit, a_asked);
@@ -1757,11 +1767,16 @@ namespace FWM::Arts
 	void Cool(float a_seconds)
 	{
 		for (auto& [id, state] : states) {
-			for (auto& clock : state.clocks) {
-				clock.ready = Cooldowns::Down(clock.ready, a_seconds);
-			}
+            const float recovery=Skald::Recovery(id);
+            for(std::size_t i=0;i<state.clocks.size();++i){auto& clock=state.clocks[i];clock.ready=Cooldowns::Down(clock.ready,a_seconds*(Skald::IsSong(static_cast<Ability>(i))?1.f:1.f+recovery));}
 		}
 	}
+
+    void ReduceCooldowns(RE::FormID id,float seconds){
+        const auto it=states.find(id);if(it==states.end())return;
+        for(std::size_t i=0;i<it->second.clocks.size();++i)if(!Skald::IsSong(static_cast<Ability>(i)))it->second.clocks[i].ready=Cooldowns::Down(it->second.clocks[i].ready,seconds);
+    }
+    void CancelSong(RE::FormID id,Paths::Ability ability){const auto it=states.find(id);if(it!=states.end()&&Skald::IsSong(ability))it->second.clocks[static_cast<std::size_t>(ability)]={};}
 
 	std::vector<Cooldowns::Wait> SavedWaits()
 	{
@@ -1848,6 +1863,8 @@ namespace FWM::Arts
 					answer(Tr("Down themselves."));
 					continue;
 				}
+                if(Skald::Singing(member.id)){answer(Tr("Already performing a Ljodh."));continue;}
+                if(Skald::IsSong(ability)&&Skald::Relocating(member.id))continue;
 				if (DragonBreaths::Channeling(actor.get())) continue;
 				if (Stunned(actor.get())) {
 					if (asked && Abilities::WaitedTooLong(member)) {
@@ -1858,6 +1875,7 @@ namespace FWM::Arts
 				if (!asked && !AbilityAuto::Allow(member, actor.get(), ability)) continue;
 				if (const auto block=Abilities::ResourceBlock(actor.get(),ability); !block.empty()) { answer(block); continue; }
 				const auto result = Run(member, actor.get(), kit, state, ability, asked);
+				if(Skald::IsSong(ability)&&!result.done&&result.text.empty()){clock.requested=false;continue;}
 				answer(result.text.empty() ? std::string(Tr("Nothing to do right now.")) : result.text, result.done);
 				if (result.done) {
 					Abilities::Used(member.id, actor.get(), ability, asked);

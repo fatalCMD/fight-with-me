@@ -34,7 +34,7 @@ namespace FWM
 				i.set = StyleData::kDueling;
 				i.clear = StyleData::kFlanking;
 				break;
-			case Role::kHealer:
+            case Role::kHealer:
 				i.avoidThreat = 0.6f;
 				i.circle = 0.3f;
 				i.fallback = 0.85f;
@@ -226,4 +226,20 @@ namespace FWM
 		s.flags &= ~(StyleData::kDueling | StyleData::kFlanking);
 		return s;
 	}
+    StyleData TimidSkald(const StyleData& base,bool moving){
+        auto s=base;
+        s.offensive=.02f;s.groupOffensive=0.f;s.defensive=1.f;
+        s.meleeScore=s.rangedScore=s.staffScore=s.shoutScore=0.f;s.unarmedScore=.15f;
+        // It holds a spell it never casts (Skald), so the combat AI moves it as it moves
+        // a mage: at range, sidestepping, giving ground as its own style says.
+        s.magicScore=std::max(base.magicScore,1.f);
+        s.flankDistance=s.stalkTime=0.f;
+        // Walking back into its leash, nothing may turn it around. Fists keep their
+        // score on the way: an AI with nothing usable runs.
+        if(moving){s.offensive=s.groupOffensive=0.f;s.avoidThreat=s.fallback=s.circle=s.strafe=0.f;}
+        s.attackStaggered=.05f;s.powerAttackStaggered=s.powerAttackBlocking=0.f;
+        s.bash=s.bashRecoil=s.bashAttack=s.bashPowerAttack=s.specialAttack=0.f;
+        s.flags&=~(StyleData::kDueling|StyleData::kFlanking|StyleData::kAllowDualWielding);
+        return s;
+    }
 }

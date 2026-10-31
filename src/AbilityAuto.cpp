@@ -1,3 +1,4 @@
+#include "FWM/Skald.h"
 #include "FWM/AbilityAuto.h"
 #include "FWM/ArrowArtsFx.h"
 #include "FWM/AbilityPolicy.h"
@@ -27,6 +28,7 @@ namespace FWM::AbilityAuto
 	bool Allow(const Party::Member& member, RE::Actor* actor, Paths::Ability ability)
 	{
 		using namespace AbilityPolicy;
+        if(Skald::IsSong(ability)){const bool useful=Skald::Useful(actor,ability);if(!useful||!pace.Ready(member.id,ability,member.inCombatFor,false))return false;reasons[member.id]="a useful Ljodh";return true;}
 		Context c;
 		c.combatAge = member.inCombatFor;
 		c.health = Game::Fraction(actor, RE::ActorValue::kHealth);

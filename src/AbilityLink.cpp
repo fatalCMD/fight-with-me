@@ -16,7 +16,11 @@ namespace FWM::AbilityLink
 	{
 		FightWithMePathsAPI::IPaths* api{ nullptr };
 		bool (*isDecoy)(RE::FormID){nullptr};
+        bool (*isPerforming)(RE::FormID){nullptr};
+        bool (*isSkaldRelocating)(RE::FormID){nullptr};
 		std::uint32_t (*loadoutMask)(std::uint32_t){ nullptr };
+		bool (*levelOf)(std::uint32_t, FightWithMePathsAPI::Level*){ nullptr };
+		std::uint32_t (*statusesOf)(std::uint32_t, std::uint32_t, FightWithMePathsAPI::Status*, std::uint32_t){ nullptr };
 		bool                         mismatched{ false };  // said once, at the first update
 
 		std::unordered_map<RE::FormID, Request> requests;
@@ -56,7 +60,14 @@ namespace FWM::AbilityLink
 		} else {
 			Log::Warn("[Paths] This Paths DLL has no loadout policy; update Paths to enable role restrictions in pools."sv);
 		}
-		isDecoy = reinterpret_cast<decltype(isDecoy)>(::GetProcAddress(module,"FightWithMePaths_IsWindstepDecoy"));
+		isPerforming = reinterpret_cast<decltype(isPerforming)>(::GetProcAddress(module,"FightWithMePaths_IsPerforming"));
+        isSkaldRelocating=reinterpret_cast<decltype(isSkaldRelocating)>(::GetProcAddress(module,"FightWithMePaths_IsSkaldRelocating"));
+        isDecoy = reinterpret_cast<decltype(isDecoy)>(::GetProcAddress(module,"FightWithMePaths_IsWindstepDecoy"));
+		levelOf = reinterpret_cast<decltype(levelOf)>(::GetProcAddress(module, "FightWithMePaths_GetLevel"));
+		statusesOf = reinterpret_cast<decltype(statusesOf)>(::GetProcAddress(module, "FightWithMePaths_GetStatuses"));
+		if (!levelOf) {
+			Log::Warn("[Paths] This Paths DLL does not share battle levels; update Paths to see their XP in the battle plan."sv);
+		}
 		Log::Info("[Paths] Path of the Companions runs the abilities; Fight With Me carries out what they ask of a fight."sv);
 	}
 
@@ -72,7 +83,49 @@ namespace FWM::AbilityLink
 		return loadoutMask(static_cast<std::uint32_t>(role));
 	}
 
-	bool IsWindstepDecoy(RE::FormID actor) { return isDecoy && isDecoy(actor); }
+	bool Performing(RE::FormID actor) {return isPerforming && isPerforming(actor);}
+    bool SkaldRelocating(RE::FormID actor){return isSkaldRelocating&&isSkaldRelocating(actor);}
+    bool SkaldUnlocked(RE::FormID actor) {
+        FightWithMePathsAPI::Record record{};
+        return api && api->Read(actor,&record) && (record.flags & FightWithMePathsAPI::kSkaldUnlockedFlag)!=0;
+    }
+
+    bool IsWindstepDecoy(RE::FormID actor) { return isDecoy && isDecoy(actor); }
+
+    void SkaldProgress(View::Member& member) {
+        FightWithMePathsAPI::Record record{};
+        if(!api || !api->Read(member.id,&record))return;
+        member.record.skaldUnlocked=(record.flags & FightWithMePathsAPI::kSkaldUnlockedFlag)!=0;
+        member.unlimited=(record.flags & FightWithMePathsAPI::kUnlimitedFlag)!=0;
+        member.pointsEarned=record.earned;
+        member.pointsSpent=record.spent;
+    }
+
+    Paths::Block UnlockSkald(RE::FormID actor) {
+        return api ? static_cast<Paths::Block>(api->Learn(actor,static_cast<std::uint32_t>(Role::kSkald),Paths::kNodes)) : Paths::Block::kBadNode;
+    }
+
+    void Statuses(RE::FormID actor, std::vector<View::Status>& out) {
+        if(!api || !statusesOf)return;
+        std::array<FightWithMePathsAPI::Status,32> rows{};
+        const auto count=std::min(statusesOf(actor,sizeof(rows[0]),rows.data(),static_cast<std::uint32_t>(rows.size())),static_cast<std::uint32_t>(rows.size()));
+        for(std::uint32_t i=0;i<count;++i){
+            const auto& row=rows[i];
+            if(row.tint>static_cast<std::uint32_t>(View::Status::Tint::kMagicka) || !std::isfinite(row.left) || !std::isfinite(row.length) || !std::isfinite(row.progress))continue;
+            out.push_back({std::string(row.name,std::find(std::begin(row.name),std::end(row.name),'\0')),
+                std::string(row.detail,std::find(std::begin(row.detail),std::end(row.detail),'\0')),
+                row.glyph,static_cast<View::Status::Tint>(row.tint),row.left,row.length,row.progress});
+        }
+    }
+
+	std::optional<Leveling::Progress> Level(RE::FormID a_member)
+	{
+		FightWithMePathsAPI::Level level{};
+		if (!api || !levelOf || !levelOf(a_member, &level)) {
+			return std::nullopt;
+		}
+		return Leveling::Progress{ level.level, level.xp, level.next, level.sinceLevelUp, level.capped };
+	}
 
 	void Fetch()
 	{

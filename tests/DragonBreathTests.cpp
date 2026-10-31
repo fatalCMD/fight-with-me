@@ -43,7 +43,17 @@ int main() {
         check(a.alpha>=0 && a.alpha<=1 && std::isfinite(a.angle),"bounded arc motion");
     }
     check(Reach(3)>Reach(2) && Reach(2)>Reach(1),"each rank reaches farther");
-    check(Damage(10,1,0,100)==0 && Damage(10,1,100,0)==0,"element and magic immunity respected");
+    check(std::abs(Damage(10,1,0,100)-1.5f)<.0001f && std::abs(Damage(10,1,100,0)-1.5f)<.0001f,"resistances count up to 85%, as for Elemental Burst");
+    check(std::abs(Damage(10,1,100,100)-.225f)<.0001f && Damage(10,1,85,0)==Damage(10,1,300,0),"both resistances together still let some through");
+    for(int rank=1;rank<=3;++rank) {
+        const float reach=Reach(rank,3), mouth=TargetReach(rank,3,true)-reach;
+        check(UnderHead(mouth*.5f,0,mouth,rank,reach) && UnderHead(0,Radius(rank,reach)*.5f,mouth,rank,reach),"enemies under the head take the stream");
+        check(!UnderHead(-1,0,mouth,rank,reach) && !UnderHead(mouth+1,0,mouth,rank,reach),"the head covers only the ground between caster and mouth");
+        check(!UnderHead(mouth*.5f,Radius(rank,reach)*.5f+26,mouth,rank,reach),"the head is narrower than the stream");
+    }
+    check(std::abs(Turn(0,1,.5f)-kTurnRate*.5f)<.0001f && Turn(0,.1f,1)==.1f,"the head turns at most its rate and stops on its target");
+    check(Turn(3.0f,-3.0f,1)>3.0f,"the head turns the short way round");
+    check(Turn(.5f,2,0)==.5f && Turn(.5f,std::numeric_limits<float>::quiet_NaN(),1)==.5f,"no turn without time or a heading");
     check(Damage(10,1,50,50)==2.5f && Damage(10,1,0,-50)==15,"resistance and weakness affect damage");
     check(Damage(10,0,0,0)==0 && Damage(10,-1,0,0)==0,"nonpositive time cannot deal damage");
     const float nan=std::numeric_limits<float>::quiet_NaN();

@@ -12,7 +12,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
 	FightWithMe
-	VERSION 0.5.0
+	VERSION 0.6.0
 	LANGUAGES CXX
 )
 
@@ -428,7 +428,7 @@ endif()
 # Fight With Me builds alone.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/paths/src/Main.cpp")
 set(FWMP_VERSION_MAJOR 1)
-set(FWMP_VERSION_MINOR 0)
+set(FWMP_VERSION_MINOR 2)
 set(FWMP_VERSION_PATCH 0)
 set(FWMP_VERSION "${FWMP_VERSION_MAJOR}.${FWMP_VERSION_MINOR}.${FWMP_VERSION_PATCH}")
 configure_file(paths/cmake/version.rc.in "${CMAKE_CURRENT_BINARY_DIR}/paths/version.rc" @ONLY)

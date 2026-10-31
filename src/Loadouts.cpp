@@ -5,6 +5,7 @@
 #include "FWM/Log.h"
 #include "FWM/AbilityLink.h"
 #include "FWM/Settings.h"
+#include "FWM/SkaldPolicy.h"
 #ifdef GetObject
 #undef GetObject
 #endif
@@ -22,6 +23,8 @@ LoadoutPolicy::WeaponKind Kind(const RE::TESObjectWEAP* w) {
  return w->IsStaff()?Staff:(w->IsBow()||w->IsCrossbow())?Bow:Two(w)?TwoHanded:OneHanded;
 }
 bool FitsRole(RE::TESForm* item,Role role) {
+ if(role==Role::kSkald)return false;  // the lute is its weapon, whatever the setting
+ if(!Settings::Get().roleWeapons)return true;
  const auto mask=AbilityLink::LoadoutMask(role);if(!mask)return true;
  if(auto* w=item?item->As<RE::TESObjectWEAP>():nullptr)return LoadoutPolicy::RoleAllows(*mask,Kind(w));
  auto* armor=item?item->As<RE::TESObjectARMO>():nullptr;
@@ -67,6 +70,7 @@ const Orders* BattleOrders(RE::FormID actor,const Orders& base) {
 }
 void EndBattle(){battles.clear();checked.clear();eligible.clear();}
 void BeginBattle(RE::Actor* actor,const Orders& orders) {
+ if(actor&&orders.role==Role::kSkald){battles[actor->GetFormID()].choice={};return;}
  if(!actor || !Party::CanHaveRole(actor) || battles.contains(actor->GetFormID()))return;
  const auto id=actor->GetFormID();const auto pool=Of(id)[2];
  auto& kit=battles[id];
@@ -127,7 +131,7 @@ FWM::Hands Hands(RE::FormID actor) {
  return hands;
 }
 bool WeaponAllowed(RE::Actor* actor,const RE::TESObjectWEAP* weapon,Role role) {
- if(!actor || !weapon || (role==Role::kBruiser && !Two(weapon)))return false;
+ if(!actor || !weapon || (role==Role::kBruiser && !Two(weapon) && Settings::Get().roleWeapons))return false;
  if(!FitsRole(const_cast<RE::TESObjectWEAP*>(weapon),role))return false;
  return LoadoutPolicy::Allows(Effective(actor->GetFormID())[2],weapon->GetFormID());
 }
@@ -202,10 +206,22 @@ void Enforce(RE::Actor* actor,Role role) {
  if(!actor || actor->IsDead() || actor->IsInKillMove() || actor->IsAttacking())return;
  const auto now=::GetTickCount64();auto& last=checked[actor->GetFormID()];if(last && now-last<1000)return;last=now;
  auto* equip=RE::ActorEquipManager::GetSingleton();if(!equip)return;
+ if(role==Role::kSkald){
+  if(auto it=battles.find(actor->GetFormID());it!=battles.end())it->second.choice={};
+  auto* defaults=RE::BGSDefaultObjectManager::GetSingleton();
+  for(bool left:{false,true})if(auto* held=actor->GetEquippedObject(left)){
+   if(held->GetFormID()==SkaldPolicy::kStanceSpell)continue;  // held like a mage's, never cast
+   auto* slot=defaults?defaults->GetObject<RE::BGSEquipSlot>(left?RE::DEFAULT_OBJECTS::kLeftHandEquip:RE::DEFAULT_OBJECTS::kRightHandEquip):nullptr;
+   if(auto* object=held->As<RE::TESBoundObject>())equip->UnequipObject(actor,object,nullptr,1,slot,false,true,false,true);
+  }
+  return;
+ }
  if(Locked(actor->GetFormID())){EquipBattle(actor);return;}
  const auto pools=Of(actor->GetFormID());
  const bool restricted=AbilityLink::LoadoutMask(role).has_value();
- if(!restricted && role!=Role::kBruiser && pools[2].empty())return;
+ // A Bruiser keeps a two-hander in hand, unless role weapons are switched off.
+ const bool twoHanders=role==Role::kBruiser && Settings::Get().roleWeapons;
+ if(!restricted && !twoHanders && pools[2].empty())return;
  const auto allowed=Effective(actor->GetFormID());
  bool wrong=false;
  for(bool left:{false,true}) {
@@ -213,12 +229,12 @@ void Enforce(RE::Actor* actor,Role role) {
   const auto* armor=held?held->As<RE::TESObjectARMO>():nullptr;
   const bool invalidSpell=restricted && held && held->As<RE::SpellItem>() && !LoadoutPolicy::Allows(allowed[left?0:1],held->GetFormID());
   const bool invalidShield=restricted && armor && armor->IsShield() && !LoadoutPolicy::Allows(allowed[2],held->GetFormID());
-  if(held && ((w && !WeaponAllowed(actor,w,role)) || invalidSpell || invalidShield || (role==Role::kBruiser && !w))) {
+  if(held && ((w && !WeaponAllowed(actor,w,role)) || invalidSpell || invalidShield || (twoHanders && !w))) {
    if(auto* object=held->As<RE::TESBoundObject>())equip->UnequipObject(actor,object);
    wrong=true;
   }
  }
- if(role==Role::kBruiser || (wrong && !ChoosesSpells(role))) {
+ if(twoHanders || (wrong && !ChoosesSpells(role))) {
   auto* held=actor->GetEquippedObject(false);auto* w=held?held->As<RE::TESObjectWEAP>():nullptr;
   if(w && WeaponAllowed(actor,w,role))return;
   RE::TESObjectWEAP* best=nullptr;

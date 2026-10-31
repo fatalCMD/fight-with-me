@@ -246,7 +246,9 @@ namespace FWM::Leash
 			}
 		}
 		const auto handle = center->GetHandle().native_handle();
-		if (area->reference != handle) {
+        // Skald support markers retain their handle when moved. Refresh their
+        // cached centre as well; otherwise a new short leg can reuse old ground.
+		if (area->reference != handle || (!center->As<RE::Actor>() && (area->center-center->GetPosition()).Length()>1.f)) {
 			area->reference = handle;
 			area->center = center->GetPosition();
 			area->space = SpaceOf(center);
@@ -257,7 +259,7 @@ namespace FWM::Leash
 		if (auto& last = logged[a_follower->GetFormID()]; last != std::pair{ a_radius, handle }) {
 			last = { a_radius, handle };
 			Log::Info("[Leash] {} keeps within {:.0f} of {}."sv, Game::Name(a_follower), a_radius,
-				center->IsPlayerRef() ? std::string("you") : (center->As<RE::Actor>() ? Game::Name(center->As<RE::Actor>()) : std::string("a healer's circle")));
+				center->IsPlayerRef() ? std::string("you") : (center->As<RE::Actor>() ? Game::Name(center->As<RE::Actor>()) : std::string("a support position")));
 		}
 		area->enabled = true;
 	}

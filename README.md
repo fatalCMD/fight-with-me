@@ -1,4 +1,4 @@
-# Fight With Me 0.5.0
+# Fight With Me 0.6.0
 
 Battle orders for your companions in Skyrim. Give each follower a role, a focus and a place in
 the fight; the game's own combat AI carries it out. Fight With Me decides whom they fight and
@@ -31,6 +31,11 @@ and how, stays their own (or what you chose for them, below).
 | Bruiser | Into the front line, giving no ground (needs a two-handed melee weapon) | The strongest enemy | Front line |
 | Archer | Keeps range and falls back from melee; fights as a Fighter when out of arrows | Casters and archers | Hold back |
 | Mage | Keeps range; out of magicka, falls back and waits for it | The weakest enemy | Hold back |
+| Skald | Support bard with slowing lute notes, four interruptible Ljodhs and low enemy targeting priority; requires a lute and a 10-point unlock in POTC | Whoever attacks the party | Hold back |
+
+The Skald preview adds four songs, eight upgrade branches and three traits. See
+[Skald mechanics and validation](docs/SKALD.md). [Follower damage](docs/PARTY-BALANCE.md)
+is controlled by one 0–100% slider, including when automatic party scaling is off.
 
 Each role's focus (their own choice, your target, whoever attacks you or the party, casters and
 archers, strongest, weakest, or one marked enemy) and position (free, guard you, hold back,
@@ -51,13 +56,14 @@ the focus they had.
 
 ## Before a fight
 
-Out of a fight, an enemy that you or a companion can see within 2500 units brings their
-weapons out; they put them away a few seconds after it is gone, unless yours are out. They
-draw once per sighting, so if the game puts their weapons away, they stay away. Wildlife that
-keeps to itself (a fox, an elk) is not an enemy until it is in a fight. With
-**Auto battle** on (a switch at the top right of the battle plan, off by default), the
-companion who sees an enemy starts the fight instead of waiting to be attacked. Companions on
-Hold back wait for it to come to them, and nobody starts one while you sneak.
+With **Auto battle** off (the default; a switch at the top right of the battle plan),
+companions wait for a fight with their weapons away: an enemy in view brings nothing out
+until it attacks, or you do. With it on, the companion who sees an enemy within 2500 units
+starts the fight instead of waiting to be attacked, and the sight of one brings everyone's
+weapons out (not while you sneak); they put them away a few seconds after it is gone, unless
+yours are out. They draw once per sighting, so if the game puts their weapons away, they stay
+away. Companions on Hold back wait for it to come to them, and nobody starts a fight while you
+sneak. Wildlife that keeps to itself (a fox, an elk) is not an enemy until it is in a fight.
 
 ## Weapons and spells
 
@@ -72,6 +78,13 @@ Pools are kept in the save.
 A Bruiser needs a carried greatsword, battleaxe or warhammer, and fights only with two-handed
 melee weapons while they are one.
 
+**Role weapons** (Settings > Battle plan > Roles, or `bRoleWeapons` in the INI's `[Loadout]`
+section, on by default) keeps each role to its own weapons: a Bruiser to a two-hander, a Mage
+or Healer to a staff beside their spells, and with Path of the Companions every role to its
+path's weapons. Switched off, any role may use any weapon or shield the companion carries, a
+Bruiser no longer needs a two-hander, and nothing is greyed out in the pools. Pools you choose
+still apply, and the Skald keeps its lute.
+
 ## Path of the Companions (optional)
 
 Path of the Companions is a mod of its own: a perk tree for each role, the abilities on it,
@@ -80,7 +93,8 @@ the role you give a companion here is the path that counts there, the enemy you 
 after is the one their abilities go for, and Fight With Me carries out what the abilities ask
 of a fight (a volley's target, a healer's circle to walk into, enemies a taunt holds). Its
 panel opens on Numpad 9 (LB + D-pad right on a pad), beside the battle plan. Update both
-together.
+together: Fight With Me 0.6.0 pairs with Path of the Companions 1.2, and neither connects to
+the other's older versions.
 
 ### From Fight With Me 0.3
 
@@ -97,7 +111,7 @@ charcoal panels, silver borders and white selection marks.
 Nordic reskins the same windows with dark stone surfaces, engraved corners, beveled metal
 emblems and inset selection highlights. Window placement, dimensions, typography metrics,
 navigation and controls stay the same in every theme. The choice applies to
-the battle plan, HUD notices and settings together, and to Path of the Companions' panel, and is saved without a restart.
+the battle plan, HUD notices and settings together, Path of the Companions' panel, and Walk With Me's wheel and settings. Changing the theme in any of the three menus updates the others and saves without a restart. Update all three DLLs together.
 It can also be set with `iTheme` in the INI's `[Interface]` section: `0` for Vanilla, `1` for
 Oxblood, or `2` for Nordic. Health, magicka, stamina and warning colors keep their meaning
 in every theme.
@@ -116,6 +130,12 @@ stick click or the switch top left shows the whole fight from above: the party i
 enemies in red, you in white. Drag with the middle mouse button (or the left stick, or WASD)
 to move the view about; a middle click brings it back over the fight. Where a roof or a cave
 ceiling hides the fight, it is cut away above everyone's heads; in the open, nothing is.
+
+The battle plan and standalone Path of the Companions panel use a pointed metal
+cursor matching the selected theme. It disappears on gamepad button, stick or
+trigger input and returns on actual mouse movement, clicks or scrolling. Neutral
+controller events and small stick drift do not change input mode. Closing these
+panels leaves the framework's ordinary cursor handling intact.
 
 ## Translating
 

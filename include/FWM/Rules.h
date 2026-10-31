@@ -198,6 +198,14 @@ namespace FWM::Rules
 		return a_resolved != Position::kHoldBack && !a_playerSneaking;
 	}
 
+	// Weapons out at the sight of an enemy are part of auto battle: without it companions wait
+	// for a fight with their weapons away, and a dungeon full of sleeping draugr stays quiet.
+	// Nor do they draw while you sneak past.
+	[[nodiscard]] constexpr bool DrawsOnSight(bool a_autoBattle, bool a_drawSwitch, bool a_playerSneaking)
+	{
+		return a_autoBattle && a_drawSwitch && !a_playerSneaking;
+	}
+
 	// Weapons drawn on sight go away once nothing has been in view for a_after seconds,
 	// unless the player's are out: then theirs follow the player's, as they always have.
 	[[nodiscard]] constexpr bool SheathesAfterSight(float a_clearFor, float a_after, bool a_playerDrawn)
@@ -228,7 +236,7 @@ namespace FWM::Rules
 
 	[[nodiscard]] constexpr bool IsRanged(Role a_role)
 	{
-		return a_role == Role::kArcher || a_role == Role::kMage || a_role == Role::kHealer;
+		return a_role == Role::kArcher || a_role == Role::kMage || a_role == Role::kHealer || a_role == Role::kSkald;
 	}
 
 	// --- Path bonus --------------------------------------------------------

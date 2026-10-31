@@ -1,3 +1,5 @@
+#include "FWM/Skald.h"
+#include "FWM/SkaldPolicy.h"
 #include "FWM/AbilityAuto.h"
 #include "FWM/Battle.h"
 #include "FWM/PartyBalance.h"
@@ -110,6 +112,7 @@ namespace FWM::Battle
 				// The perk hooks weaken actual damage; this notification also registers blocked
 				// and harmless impacts, including magic that a tank completely resisted.
 				if (a_event && a_event->cause && a_event->target) {
+					Skald::OnHit(a_event);
 					TankActs::Attack(a_event->cause->As<RE::Actor>(), a_event->target->As<RE::Actor>(), false);
 				}
 				if (a_event && a_event->cause && a_event->cause->IsPlayerRef() && a_event->target) {
@@ -301,6 +304,7 @@ namespace FWM::Battle
 			StopMarkGlows();
 			Specials::Clear();
 			TankActs::Clear();
+            Skald::EndCombat();
 			Arts::Clear();
 			Circles::Clear();
 			Orbs::Clear();
@@ -353,15 +357,18 @@ namespace FWM::Battle
                 if(!orders) continue;
                 auto actor=member.handle.get(); if(!actor)continue;
                 if(actor->IsInCombat()){Loadouts::BeginBattle(actor.get(),*orders);orders=Party::FindOrders(member.id);}
-                Loadouts::Enforce(actor.get(),orders->role);
+                if(!Skald::Performing(member.id))Loadouts::Enforce(actor.get(),orders->role);
                 auto pools=Loadouts::Effective(member.id);
                 if(!ChoosesSpells(orders->role)){pools[0].clear();pools[1].clear();}
-                if(!pools[0].empty() || !pools[1].empty() || !pools[2].empty() || orders->role==Role::kBruiser || ChoosesSpells(orders->role)) {
+                if(!pools[0].empty() || !pools[1].empty() || !pools[2].empty() || orders->role==Role::kBruiser || orders->role==Role::kSkald || ChoosesSpells(orders->role)) {
                     Overrides::HandsEntry entry;entry.actor=Game::Native(member.handle);entry.body=actor.get();
                     entry.hands=ChoosesSpells(orders->role)?Loadouts::Hands(member.id):Hands{};
-                    entry.pools=std::move(pools);entry.twoHandedOnly=orders->role==Role::kBruiser;
+                    const bool roleWeapons=Settings::Get().roleWeapons;
+                    entry.pools=std::move(pools);entry.twoHandedOnly=orders->role==Role::kBruiser&&roleWeapons;entry.anyWeapon=!roleWeapons;
                     entry.roleRestricted=AbilityLink::LoadoutMask(orders->role).has_value();
                     entry.caster=ChoosesSpells(orders->role);entry.recovering=entry.caster && member.drained && actor->IsInCombat();
+                    entry.unarmedOnly=orders->role==Role::kSkald;entry.fistsReady=entry.unarmedOnly&&Skald::FistsReady(actor.get());
+                    entry.stance=entry.unarmedOnly&&Skald::CasterStance(actor.get());
                     const auto manual=Loadouts::Of(member.id);
                     entry.explicitSpells={!manual[0].empty(),!manual[1].empty()};
                     entry.battleLocked=Loadouts::Locked(member.id);
@@ -934,6 +941,39 @@ namespace FWM::Battle
 			}
 		}
 
+        void ProtectSkalds(std::vector<Overrides::Entry>& entries){
+            std::vector<std::uint32_t> skalds;
+            for(const auto& member:Party::Members()){
+                const auto* orders=Party::FindOrders(member.id);
+                if(orders&&orders->role==Role::kSkald)skalds.push_back(Game::Native(member.handle));
+            }
+            if(skalds.empty())return;
+            for(const auto& profile:Enemies::All()){
+                auto enemy=profile.handle.get();auto* controller=enemy?Game::Controller(enemy.get()):nullptr;
+                if(!controller||!Game::Usable(enemy.get())||!enemy->IsInCombat())continue;
+                const auto address=reinterpret_cast<std::uintptr_t>(controller);
+                // Existing taunts and other explicit ability targets retain priority.
+                if(std::ranges::any_of(entries,[address](const auto& entry){return entry.controller==address;}))continue;
+                RE::ActorHandle alternative;float best=2000.f;
+                auto consider=[&](RE::Actor* who){
+                    if(!who||!Game::Usable(who)||!who->Is3DLoaded()||who->AsActorState()->IsBleedingOut()||
+                        std::find(skalds.begin(),skalds.end(),Game::Native(who->GetHandle()))!=skalds.end())return;
+                    if(who->GetParentCell()!=enemy->GetParentCell()&&(!enemy->GetWorldspace()||enemy->GetWorldspace()!=who->GetWorldspace()))return;
+                    const float distance=Game::Distance(enemy.get(),who);
+                    if(distance>best||!Overrides::Takes(controller,who->GetHandle())||Unreachable(controller,who))return;
+                    alternative=who->GetHandle();best=distance;
+                };
+                // Keep a valid current target stable before considering the nearest alternative.
+                if(auto current=controller->targetHandle.get();current&&Party::IsPartyActor(current.get()))consider(current.get());
+                if(!alternative){
+                    consider(RE::PlayerCharacter::GetSingleton());
+                    for(const auto& member:Party::Members())if(auto who=member.handle.get())consider(who.get());
+                }
+                if(!alternative)continue; // the bard remains attackable when nobody else can be reached
+                entries.emplace_back(address,Game::Native(profile.handle),Game::Native(alternative));
+                entries.back().onlyFrom=skalds;
+            }
+        }
 		void Decide(RE::PlayerCharacter* a_player, float a_dt)
 		{
 			const auto& settings = Settings::Get();
@@ -956,7 +996,7 @@ namespace FWM::Battle
 			}
 
 			for (auto& member : Party::Members()) {
-				if (!member.CanTakeRole()) {
+				if (!member.CanTakeRole() || Skald::Performing(member.id)) {
 					continue;
 				}
 				auto actor = member.handle.get();
@@ -990,7 +1030,7 @@ namespace FWM::Battle
 					continue;
 				}
 				const auto orders = *own;
-				auto       resolved = orders.position;
+				auto       resolved = orders.role==Role::kSkald?Skald::SupportPosition(orders.position):orders.position;
 				const bool down = actor->AsActorState()->IsBleedingOut();
 				if (member.down && !down) {
 					Log::Info("[Battle] {} is back up: {}, {}."sv, member.name, Info(orders.role).name, Info(resolved).name);
@@ -1023,7 +1063,7 @@ namespace FWM::Battle
 				// stay on it. Guard, Hold back and With me make melee slow to commit, a tank's
 				// dueling and shield keep them circling at arm's length, and the combat AI circles
 				// while it waits a turn: all of it reads as ignoring the order.
-				bool markLive = member.marked && orders.focus == Focus::kMarked;
+				bool markLive = member.marked && orders.focus == Focus::kMarked && orders.role!=Role::kSkald;
 				if (markLive && !member.markStuck && !Rules::IsRanged(fightAs.role) && OutOfReach(member, member.marked)) {
 					if (auto mark = member.marked.get()) {
 						MarkOutOfReach(member, mark.get(), "no way there on foot"sv);
@@ -1032,7 +1072,7 @@ namespace FWM::Battle
 				}
 				if (!Loadouts::Locked(member.id) && markLive && member.markRanged != Role::kCount && !(member.markRanged == Role::kMage && member.drained)) {
 					fightAs.role = member.markRanged;
-				} else if (!Loadouts::Locked(member.id) && !Rules::IsRanged(fightAs.role)) {
+				} else if (orders.role!=Role::kSkald && !Loadouts::Locked(member.id) && !Rules::IsRanged(fightAs.role)) {
 					// Nobody left that they can get to: a bow or spells, if they have them, beat
 					// standing under a ledge.
 					const bool nobody = !member.outOfReach.empty() && std::all_of(profiles.begin(), profiles.end(), [&](const auto& a_profile) {
@@ -1068,10 +1108,12 @@ namespace FWM::Battle
 				const bool casterRole = ChoosesSpells(orders.role);
                 const bool spellsChosen = ChoosesSpells(fightAs.role) && Loadouts::Hands(member.id) != Hands{};
 				auto tweaks = asked ? asked->tweaks : StyleTweaks{};
-                tweaks.recovery = returningToCircle;
+                // A Skald walking back into its leash is not to give ground on the way.
+                tweaks.recovery = returningToCircle || (orders.role == Role::kSkald && Skald::Relocating(member.id));
                 tweaks.caster = casterRole;
                 tweaks.magickaRecovery = recovering;
                 Styles::Apply(actor.get(), fightAs, charge ? Position::kFrontLine : resolved, charge, spellsChosen, tweaks);
+                // A Skald takes the same leash as a healer for its position.
                 if (pull) {
 					// Hurt: into a healer's circle until they are well again.
 					Leash::Apply(actor.get(), pullRadius, circle.get(), true);
@@ -1175,10 +1217,12 @@ namespace FWM::Battle
 				member.desired = desired;
 				// Caster roles avoid melee in automatic and manual modes; recovery
 				// suspends attacks until their magicka reserve is ready again.
+				// A Skald walking to support ground keeps its fists: with nothing it may
+				// use, the combat AI runs from the fight instead of following the leash.
 				entries.emplace_back(reinterpret_cast<std::uintptr_t>(controller), Game::Native(member.handle), Game::Native(desired), false,
 					recovering, casterRole);
 				// Their chosen spells in use, whatever kind they are: cast for them when the combat AI will not.
-				if (!Loadouts::Locked(member.id) && !recovering && !returningToCircle && ChoosesSpells(fightAs.role)) {
+				if (!Skald::Performing(member.id) && !Loadouts::Locked(member.id) && !recovering && !returningToCircle && ChoosesSpells(fightAs.role)) {
 					auto on = desired ? desired.get() : controller->targetHandle.get();
 					if (!pull || (on && Game::Distance(on.get(), circle.get()) <= pullRadius * 2.0f))
                         Spells::Drive(member, actor.get(), on.get(), a_dt);
@@ -1207,6 +1251,7 @@ namespace FWM::Battle
 				raw.push_back(enemy.get());
 			}
 			Styles::Press(raw);
+            ProtectSkalds(entries);
 			Overrides::Publish(std::move(entries));
 		}
 
@@ -1217,7 +1262,7 @@ namespace FWM::Battle
 		{
 			std::vector<Overrides::Entry> entries;
 			for (auto& member : Party::Members()) {
-				auto  actor = member.CanTakeRole() ? member.handle.get() : nullptr;
+				auto  actor = member.CanTakeRole() && !Skald::Performing(member.id) ? member.handle.get() : nullptr;
 				auto* controller = actor ? Game::Controller(actor.get()) : nullptr;
 				const auto* orders = Party::FindOrders(member.id);
 				if (!actor || !Game::Usable(actor.get()) || !actor->IsInCombat() || !controller || !orders) {
@@ -1227,13 +1272,16 @@ namespace FWM::Battle
                 Drain(member,actor.get(),*orders);
                 const bool recovering=member.drained && ChoosesSpells(orders->role);
 				member.down = actor->AsActorState()->IsBleedingOut();
-				const auto pull = Circles::PullFor(actor.get());
+				auto pull = Circles::PullFor(actor.get());
                 const bool returningToCircle = pull && Game::Distance(actor.get(), pull->centre) > pull->radius * 2.0f;
                 auto tweaks = Arts::TweaksFor(member.id, PathsLink::KitOf(member.id, orders->role));
-                tweaks.recovery = returningToCircle;
+                tweaks.recovery = returningToCircle || (orders->role == Role::kSkald && Skald::Relocating(member.id));
                 tweaks.caster=ChoosesSpells(orders->role);tweaks.magickaRecovery=recovering;
-                Styles::Apply(actor.get(), *orders, returningToCircle || recovering ? Position::kHoldBack : Position::kFree, false, false, tweaks);
-                if (pull) {
+                Styles::Apply(actor.get(), *orders, returningToCircle || recovering || orders->role==Role::kSkald ? Position::kHoldBack : Position::kFree, false, false, tweaks);
+                if(orders->role==Role::kSkald&&!pull){
+                    // Alone there are no position orders: a bard keeps the With Me leash, like a healer at your side.
+                    Leash::Apply(actor.get(),Settings::Get().tuning.withMeRadius);member.leashMoved=true;
+                } else if (pull) {
 					Leash::Apply(actor.get(), pull->radius, pull->centre, true);
 					member.leashMoved = true;
 				} else if (member.leashMoved) {
@@ -1247,8 +1295,9 @@ namespace FWM::Battle
 				}
 				if (returningToCircle) desired = {};
 				member.desired = desired;
-                if (desired || ChoosesSpells(orders->role)) {
-                    entries.emplace_back(reinterpret_cast<std::uintptr_t>(controller), Game::Native(member.handle), Game::Native(desired),false,recovering,ChoosesSpells(orders->role));
+                if (desired || ChoosesSpells(orders->role) || orders->role==Role::kSkald) {
+                    entries.emplace_back(reinterpret_cast<std::uintptr_t>(controller), Game::Native(member.handle), Game::Native(desired),false,
+                        recovering,ChoosesSpells(orders->role));
                 }
 			}
 
@@ -1272,6 +1321,7 @@ namespace FWM::Battle
 				raw.push_back(enemy.get());
 			}
 			Styles::Press(raw);
+            ProtectSkalds(entries);
 			Overrides::Publish(std::move(entries));
 		}
 
@@ -1285,12 +1335,15 @@ namespace FWM::Battle
 				}
 				member.marked = OrdersLink::MarkOf(member.id);
 				const auto  role = OrdersLink::RoleOf(member.id);
+				const auto position = OrdersLink::PositionOf(member.id);
 				const auto* orders = Party::FindOrders(member.id);
-				if (role && orders && orders->role != *role) {
+				if (role && orders && (orders->role != *role || (position && orders->position != *position))) {
 					auto now = *orders;
 					now.role = *role;
+                    if(position)now.position=*position;
 					Party::SetOrders(member.id, now);
-					if (const auto* after = Party::FindOrders(member.id); after && after->role == *role) Log::Info("[Orders] {} follows the {} now, the role Fight With Me gives them."sv, member.name, Paths::Info(*role).title);
+                    if(const auto* after=Party::FindOrders(member.id);after&&after->role==*role)
+                        Log::Info("[Orders] {} follows Fight With Me: {}, {}.",member.name,Paths::Info(*role).title,Info(after->position).name);
 				}
 			}
 		}
@@ -1323,6 +1376,7 @@ namespace FWM::Battle
 		bool SetOrders(RE::FormID a_id, const Orders& a_orders)
 		{
             if (!Party::CanHaveRole(a_id)) return false;
+            if(a_orders.role==Role::kSkald && Party::LackFor(a_id,Role::kSkald)!=Lack::kNothing)return false;
 			const auto* before = Party::FindOrders(a_id);
 			if (before && *before == a_orders) {
 				return false;
@@ -1395,6 +1449,7 @@ namespace FWM::Battle
 					}
 					if (const auto lack = Party::LackFor(command.member, command.orders.role); lack != Lack::kNothing) {
 						Log::Info("[Party] {} refused for {:08X}: {}"sv, Info(command.orders.role).name, command.member, Why(lack));
+						if(member)Party::Answer(*member,Tr(Why(lack)));
 						break;
 					}
 					// Roles are settled before a fight; in one, only focus, position and the switches change.
@@ -1513,6 +1568,22 @@ namespace FWM::Battle
 						}
 					}
 					break;
+                case Command::Type::kUnlockSkald:
+                    if(member && member->CanTakeRole()) {
+                        PathsLink::Outcome outcome;
+                        if(Host::Abilities())outcome=PathsLink::Learn(member->id,Role::kSkald,Paths::kNodes);
+                        else if(!AbilityLink::Active())outcome={false,std::string(Tr("Path of the Companions is not installed."))};
+                        else {
+                            View::Member progress;progress.id=member->id;AbilityLink::SkaldProgress(progress);
+                            const auto block=AbilityLink::UnlockSkald(member->id);
+                            outcome={block==Paths::Block::kNone,block==Paths::Block::kNone ? std::string(progress.unlimited ?
+                                Tr("Skald unlocked for Debug Mode. Disabling debug restores the previous unlock.") : Tr("Skald unlocked. 10 skill points invested.")) : std::string(Paths::Why(block))};
+                        }
+                        Party::Answer(*member,outcome.text,outcome.done);
+                        if(outcome.done)Notices::Push(outcome.text,Notices::Kind::kInfo);
+                        slowParts.erase(command.member);
+                    }
+                    break;
 				case Command::Type::kLearn:
 				case Command::Type::kForget:
 				case Command::Type::kResetPath:
@@ -1746,24 +1817,9 @@ namespace FWM::Battle
 		{
 			using Tint = View::Status::Tint;
 			auto& out = a_view.statuses;
-			// A taunt's armor and Rejuvenate, given with or without a path (paths tag theirs).
-			auto either = [&](RE::ActorValue a_value, Paths::Perk a_perk) {
-				auto on = Abilities::BoostOn(a_member.id, a_value, 0);
-				return on ? on : Abilities::BoostOn(a_member.id, a_value, static_cast<std::uint16_t>(a_perk));
-			};
-			if (Host::Abilities()) {
-				if (const auto brace = either(RE::ActorValue::kDamageResist, Paths::Perk::kTauntBrace)) {
-					out.push_back({ std::string(Tr("Braced")), Trf("+{:.0f} armor from their taunt", brace->amount), 0xF3ED, Tint::kArmor, brace->left, brace->length });
-				}
-				if (const auto quick = RejuvenateField::On(a_actor); quick.left > 0) {
-					out.push_back(
-						{ std::string(Tr("Rejuvenated")), Trf("Restoring {:g}% magicka per second, up to {:.0f}, inside the circle",RejuvenatePolicy::Rate(quick.rank)*100,RejuvenatePolicy::Cap(quick.rank)), 0xF5BB, Tint::kMagicka, quick.left, quick.length });
-				}
-                if(const auto moon=AzurasMoon::On(a_actor);moon.left>0) {
-                    out.push_back({std::string(Tr("Azura's Blessing")),Trf("{:.0f}% chance to ignore hostile damage",moon.chance*100),0xF186,Tint::kMagicka,moon.left,moon.length});
-                }
-				Arts::Statuses(a_member.id, out);
-			}
+            if(Host::Abilities())out=ActiveStatuses(a_member.id);
+            else AbilityLink::Statuses(a_member.id,out);
+
 			if (a_member.drained) {
 				// The ring fills as the magicka comes back, full when they return to their place.
 				const float cost = CastCost(a_member, a_actor);
@@ -1832,6 +1888,8 @@ namespace FWM::Battle
 				m.walkWithMe = member.managedByWalkWithMe;
 				m.arsenal = member.arsenal;
 				m.arsenalKnown = member.arsenalKnown;
+                m.hasLute = Skald::HasLute(actor.get());
+                m.skaldLack = Party::LackFor(member.id,Role::kSkald);
 				if (const auto* orders = Party::FindOrders(member.id)) {
 					m.orders = *orders;
 				}
@@ -1931,8 +1989,18 @@ namespace FWM::Battle
 						}
 					}
 					m.asked = m.asked || Arts::Asked(member.id);
+				} else if (member.CanTakeRole()) {
+					AbilityLink::SkaldProgress(m);
+					// Levels earned in battle live in Path of the Companion; the plan shows them all the same.
+					if (const auto progress = AbilityLink::Level(member.id)) {
+						m.leveling = true;
+						m.xp = progress->xp;
+						m.xpNext = progress->next;
+						m.levelUpAge = progress->sinceLevelUp;
+						m.levelCapped = progress->capped;
+					}
 				}
-				m.head = Screen(Game::HeadPosition(actor.get()) + RE::NiPoint3{ 0.0f, 0.0f, 22.0f });
+				m.head =Screen(Game::HeadPosition(actor.get()) + RE::NiPoint3{ 0.0f, 0.0f, 22.0f });
 				if (snapshot->overhead) {
 					Footprint(actor.get(), m.foot, m.footRing);
 				}
@@ -2005,6 +2073,31 @@ namespace FWM::Battle
 		}
 	}
 
+	std::vector<View::Status> ActiveStatuses(RE::FormID actorID)
+	{
+		std::vector<View::Status> out;
+		if(!Host::Abilities())return out;
+		auto* actor=RE::TESForm::LookupByID<RE::Actor>(actorID);if(!actor)return out;
+		using Tint=View::Status::Tint;
+		auto either=[&](RE::ActorValue value,Paths::Perk perk){
+			auto on=Abilities::BoostOn(actorID,value,0);
+			return on?on:Abilities::BoostOn(actorID,value,static_cast<std::uint16_t>(perk));
+		};
+		if (const auto brace = either(RE::ActorValue::kDamageResist, Paths::Perk::kTauntBrace)) {
+			out.push_back({ std::string(Tr("Braced")), Trf("+{:.0f} armor from their taunt", brace->amount), 0xF3ED, Tint::kArmor, brace->left, brace->length });
+		}
+		if (const auto quick = RejuvenateField::On(actor); quick.left > 0) {
+			out.push_back(
+				{ std::string(Tr("Rejuvenated")), Trf("Restoring {:g}% magicka per second, up to {:.0f}, inside the circle",RejuvenatePolicy::Rate(quick.rank)*100,RejuvenatePolicy::Cap(quick.rank)), 0xF5BB, Tint::kMagicka, quick.left, quick.length });
+		}
+                if(const auto moon=AzurasMoon::On(actor);moon.left>0) {
+                    out.push_back({std::string(Tr("Azura's Blessing")),Trf("{:.0f}% chance to ignore hostile damage",moon.chance*100),0xF186,Tint::kMagicka,moon.left,moon.length});
+                }
+		Arts::Statuses(actorID, out);
+                Skald::Statuses(actorID,out);
+		return out;
+	}
+
 	void Update(float a_dt)
 	{
 		auto* player = RE::PlayerCharacter::GetSingleton();
@@ -2060,7 +2153,7 @@ namespace FWM::Battle
 					if (member.CanTakeRole()) {
 						const auto* own = Party::FindOrders(member.id);
 						auto actor = member.handle.get();
-						if (actor && own) {
+						if (actor && own && !Skald::Performing(member.id)) {
 							Loadouts::Recheck(actor.get(), own->role);
 						}
 					}
@@ -2090,6 +2183,8 @@ namespace FWM::Battle
 			Circles::Tick(a_dt);
 			Blasts::Tick(a_dt);
 			DragonBreaths::Tick(a_dt);
+            Skald::Tick(a_dt);
+            PartyBalance::Update(a_dt);
 			Orbs::Tick(a_dt);
 			Quakes::Tick(a_dt);
 			Rainfall::Tick(a_dt);
@@ -2149,7 +2244,7 @@ namespace FWM::Battle
 			Party::Refresh();
 			if (abilities) {
                 Enemies::Update(0);
-                PartyBalance::Update(0);
+
 				PathBonus::Publish();
 			}
 			Log::Info("[Battle] Combat with {} companion(s)."sv, Party::Members().size());
@@ -2182,7 +2277,7 @@ namespace FWM::Battle
 		decideIn -= a_dt;
 		if (decideIn <= 0.0f) {
 			Enemies::Update(pendingDt);
-            if (abilities) PartyBalance::Update(pendingDt);
+
 			if (abilities) {
 				if (!Host::PathsAlone()) {
 					Mirror();  // marks change mid-fight, and abilities aim at them
@@ -2235,6 +2330,7 @@ namespace FWM::Battle
 		Sight::Reset();
 		Traits::Reset();
 		Leveling::Reset();
+        Skald::Clear();
 		Arts::Reset();
 		PathBonus::Clear();
 		PathsLink::Clear();

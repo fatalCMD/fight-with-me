@@ -1,0 +1,57 @@
+{
+  "provenance": "Derived from Bethesda Skyrim lute recordings, for use with Skyrim. Tempo changed with FFmpeg atempo; no oscillators or added instruments.",
+  "tracks": [
+    {
+      "song": "Fervor",
+      "source": "mus_bardlute_01.wav",
+      "source_sha256": "32bf6b60d23968d98a6b71eda25bbd2616080cda1ac93d32dad60e496dc0cd64",
+      "source_bpm": 101.0,
+      "source_phase": 0.16,
+      "tempo_factor": 1.3663366336633664,
+      "output": "SkaldFervor.wav",
+      "sha256": "f28581a1e2f0c3372022e80c15a216c4956f240a261b498988f2adae05854ace",
+      "seconds": 8.893,
+      "peak": 0.8799999999999999,
+      "rms": 0.11347739202020612
+    },
+    {
+      "song": "Echoes",
+      "source": "mus_bardlute_02.wav",
+      "source_sha256": "620f3f75c698355b01763ea75c086e017738beff62cc478011487d076dcb1957",
+      "source_bpm": 87.4,
+      "source_phase": 0.6,
+      "tempo_factor": 1.4416475972540044,
+      "output": "SkaldEchoes.wav",
+      "sha256": "dfa405fb6c363aa6dcc4d6c36aa103cab200d5baa9163ecc8e7365fa7156751c",
+      "seconds": 10.02,
+      "peak": 0.8800000000000001,
+      "rms": 0.14830801303395924
+    },
+    {
+      "song": "Hollow",
+      "source": "mus_bardlute_03.wav",
+      "source_sha256": "dc86a1a37851c2ef4cf5f467d5022972601b496bec30fba6041efe4fcb99f4bf",
+      "source_bpm": 89.6,
+      "source_phase": 0.03,
+      "tempo_factor": 1.40625,
+      "output": "SkaldHollow.wav",
+      "sha256": "b77fcc24b1bbfcceb953c3e22e7f730709cbb56f370175f5787eebd749efb60e",
+      "seconds": 9.625,
+      "peak": 0.88,
+      "rms": 0.11393655093661745
+    },
+    {
+      "song": "Glory",
+      "source": "mus_bardlute_04.wav",
+      "source_sha256": "762b799116907a186b9464fb4db2e43a4306be4f028867d4b7e10e32678b52b6",
+      "source_bpm": 100.2,
+      "source_phase": 0.59,
+      "tempo_factor": 1.3173652694610778,
+      "output": "SkaldGlory.wav",
+      "sha256": "b7a57b0674df38c76e79d4b8e89aba1cbb2355dedd2c1df91a2620c81055f33b",
+      "seconds": 9.619,
+      "peak": 0.88,
+      "rms": 0.12943018821684854
+    }
+  ]
+}

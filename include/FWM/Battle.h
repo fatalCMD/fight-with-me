@@ -64,7 +64,8 @@ namespace FWM::Battle
 			kUnlimited,   // unlimited points for one companion (on), or back to what they had (off)
 			kInvest,      // a leftover point straight into a mastered path's bonus
 			kDivest,      // one back out of it
-			kDebugAbility // temporary rank test, authorized only for Debug Mode
+			kDebugAbility, // temporary rank test, authorized only for Debug Mode
+            kUnlockSkald  // role/tree entry purchase, routed to the owning Paths plugin
 		};
 
 		Type        type{ Type::kSetOrders };
@@ -107,6 +108,8 @@ namespace FWM::Battle
 		StyleTweaks         tweaks;
 	};
 	[[nodiscard]] std::vector<Steer> Steering();
+	// Local ability state only, main thread; the optional Paths export shares this with core.
+	[[nodiscard]] std::vector<View::Status> ActiveStatuses(RE::FormID actor);
 
 	// Enemies a taunt holds on a tank: (enemy, tank).
 	[[nodiscard]] std::vector<std::pair<RE::ActorHandle, RE::ActorHandle>> Holds();

@@ -1,6 +1,8 @@
 #include "FWM/Menu.h"
 #include "FWM/AbilityResource.h"
 #include "FWM/TreeNavigation.h"
+#include "FWM/Skald.h"
+#include "FWM/SkaldPolicy.h"
 
 #include "FWM/AbilityLink.h"
 #include "FWM/Battle.h"
@@ -350,6 +352,12 @@ namespace FWM::Menu
 		// or its file did not load. Loaded once each, at a size that stays sharp on a big screen.
 		auto Picture(std::uint32_t a_code)
 		{
+			if (Paths::IsSkaldGlyph(a_code)) {
+				static std::unordered_map<std::uint32_t, decltype(MF::LoadTexture(""))> skald;
+				auto [it, inserted] = skald.try_emplace(a_code);
+				if (inserted) it->second = MF::LoadTexture(std::format("Data/Interface/FightWithMe/glyphs/{:04x}.svg",a_code),{256,256});
+				return it->second;
+			}
 			switch (a_code) {
 			case Paths::kGlyphWolfHead:
 				{
@@ -414,7 +422,7 @@ namespace FWM::Menu
 					return;
 				}
 			}
-			if (a_code == Paths::kGlyphWolfHead || a_code == Paths::kGlyphBarbedSun || a_code == Paths::kGlyphSteelHelm || a_code == Paths::kGlyphBastion) {
+			if (Paths::IsSkaldGlyph(a_code) || a_code == Paths::kGlyphWolfHead || a_code == Paths::kGlyphBarbedSun || a_code == Paths::kGlyphSteelHelm || a_code == Paths::kGlyphBastion) {
 				if (const auto picture = Picture(a_code)) {
 					// The pictures fill their square where a glyph leaves a margin: a little larger than the size.
 					const float half = a_size * 0.58f;
@@ -425,7 +433,7 @@ namespace FWM::Menu
 					Draw::AddImage(a_draw, picture, { a_centre.x - half, a_centre.y - half }, { a_centre.x + half, a_centre.y + half }, { 0, 0 }, { 1, 1 }, a_color);
 					return;
 				}
-				a_code = a_code == Paths::kGlyphWolfHead ? 0xF6D3 :
+				a_code = Paths::IsSkaldGlyph(a_code) ? 0xF001 : a_code == Paths::kGlyphWolfHead ? 0xF6D3 :
 					a_code == Paths::kGlyphBarbedSun ? 0xF4BE :
 					a_code == Paths::kGlyphSteelHelm ? 0xF6E8 : 0xF3ED;
 			}
@@ -492,7 +500,20 @@ namespace FWM::Menu
 			}
 		}
 
-		// Vanilla medallions, Oxblood pointed seals, Nordic carved hexagonal stones.
+		struct SealContour { std::array<V,64> points{}; int count{0}; };
+		// Vanilla medallions, Oxblood pointed seals, Nordic carved hexagonal stones, from the top
+		// point clockwise. Vanilla's circle is 48 sides.
+		SealContour EmblemContour(V c, float r, int kind = 0)
+		{
+			SealContour shape;
+			shape.count = palette.style == UITheme::Style::Vanilla && kind != 2 ? 48 :
+				palette.Engraved() ? (kind == 1 ? 8 : 6) : (kind == 1 ? 6 : kind == 2 ? 8 : 4);
+			for (int i=0; i<shape.count; ++i) {
+				const float a = -1.5707963f + 6.2831853f * static_cast<float>(i)/static_cast<float>(shape.count);
+				shape.points[static_cast<std::size_t>(i)] = {c.x+std::cos(a)*r,c.y+std::sin(a)*r};
+			}
+			return shape;
+		}
 		void Emblem(Im::ImDrawList* d, V c, float r, U32 fill, U32 edge, float thickness, int kind = 0)
 		{
 			if (palette.style == UITheme::Style::Vanilla && kind != 2) {
@@ -500,14 +521,9 @@ namespace FWM::Menu
 				Draw::AddCircle(d,c,r,edge,48,thickness);
 				return;
 			}
-			const int n = palette.Engraved() ? (kind == 1 ? 8 : 6) : (kind == 1 ? 6 : kind == 2 ? 8 : 4);
-			std::array<V,8> p{};
-			for (int i=0; i<n; ++i) {
-				const float a = -1.5707963f + 6.2831853f * static_cast<float>(i)/static_cast<float>(n);
-				p[static_cast<std::size_t>(i)] = {c.x+std::cos(a)*r,c.y+std::sin(a)*r};
-			}
-			Draw::AddConvexPolyFilled(d,p.data(),n,fill);
-			for (int i=0; i<n; ++i) Draw::AddLine(d,p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+1)%n)],edge,thickness);
+			const auto p = EmblemContour(c,r,kind);
+			Draw::AddConvexPolyFilled(d,p.points.data(),p.count,fill);
+			for (int i=0; i<p.count; ++i) Draw::AddLine(d,p.points[static_cast<std::size_t>(i)],p.points[static_cast<std::size_t>((i+1)%p.count)],edge,thickness);
 		}
 		// One readable face throughout each theme, including rank III, details and callouts.
         const char* MenuFontName() { return palette.Engraved() ? "BarlowSemiCondensed-SemiBold" : palette.Subdued() ? "Spectral-SemiBold" : "Lora-SemiBold"; }
@@ -519,7 +535,6 @@ namespace FWM::Menu
 		{
 			explicit MasterFont(bool enabled = true) : ScopedFont(MenuFontName(), enabled) {}
 		};
-		struct SealContour { std::array<V,64> points{}; int count{0}; };
 		SealContour MasterContour(V c,float r)
 		{
 			SealContour shape;
@@ -886,20 +901,38 @@ namespace FWM::Menu
 			}
 		}
 
-		// Progress round a diamond, from its top point clockwise as far as a_t: XP toward a level.
-		void DiamondRing(Im::ImDrawList* a_draw, V c, float r, float a_t, U32 a_track, U32 a_fill, float a_thickness)
+		// Progress along an outline from its top point clockwise, as far as a_t of the way round:
+		// the whole outline as a track, the part done over it. XP toward a level.
+		void OutlineProgress(Im::ImDrawList* a_draw, const SealContour& a_shape, float a_t, U32 a_track, U32 a_fill, float a_thickness)
 		{
-			const std::array<V, 5> points{ V{ c.x, c.y - r }, V{ c.x + r, c.y }, V{ c.x, c.y + r }, V{ c.x - r, c.y }, V{ c.x, c.y - r } };
-			for (std::size_t i = 0; i < 4; ++i) {
-				Draw::AddLine(a_draw, points[i], points[i + 1], a_track, a_thickness);
+			const auto& points = a_shape.points;
+			const int   n = a_shape.count;
+			Draw::AddPolyline(a_draw, points.data(), n, a_track, Im::ImDrawFlags_Closed, a_thickness);
+			const float t = Clamp01(a_t);
+			if (t >= 0.999f) {
+				Draw::AddPolyline(a_draw, points.data(), n, a_fill, Im::ImDrawFlags_Closed, a_thickness);
+				return;
 			}
-			float left = Clamp01(a_t) * 4.0f;
-			for (std::size_t i = 0; i < 4 && left > 0.0f; ++i) {
-				const float part = std::min(left, 1.0f);
-				const V     a = points[i], b = points[i + 1];
-				Draw::AddLine(a_draw, a, { a.x + (b.x - a.x) * part, a.y + (b.y - a.y) * part }, a_fill, a_thickness);
-				left -= part;
+			float perimeter = 0.0f;
+			for (int i = 0; i < n; ++i) {
+				const V a = points[static_cast<std::size_t>(i)], b = points[static_cast<std::size_t>((i + 1) % n)];
+				perimeter += std::hypot(b.x - a.x, b.y - a.y);
 			}
+			float left = t * perimeter;
+			if (left < a_thickness) {
+				return;  // a sliver would read as a speck, not a start
+			}
+			std::array<V, 65> done{};
+			int count = 0;
+			done[static_cast<std::size_t>(count++)] = points[0];
+			for (int i = 0; i < n && left > 0.0f; ++i) {
+				const V     a = points[static_cast<std::size_t>(i)], b = points[static_cast<std::size_t>((i + 1) % n)];
+				const float side = std::hypot(b.x - a.x, b.y - a.y);
+				const float part = std::min(left / std::max(side, 0.001f), 1.0f);
+				done[static_cast<std::size_t>(count++)] = { a.x + (b.x - a.x) * part, a.y + (b.y - a.y) * part };
+				left -= side;
+			}
+			Draw::AddPolyline(a_draw, done.data(), count, a_fill, 0, a_thickness);
 		}
 
 		// The colours rarity has in most games: grey, green, blue, purple, orange.
@@ -948,9 +981,39 @@ namespace FWM::Menu
 			}
 			Im::SetCursorScreenPos(a_pos);
 			const bool clicked = Im::InvisibleButton(a_id, a_size);
-			a_hovered = Im::IsItemHovered();
+			a_hovered = !padUsed.load() && Im::IsItemHovered();
 			return clicked;
 		}
+
+        // The framework draws its own cursor after windows. Suppress that cursor
+        // for this frame only; ImGui resets the request at the next NewFrame.
+        // The host window owns this, so embedded Paths never draws a second one.
+        bool DrawMenuPointer(float scale,float alpha)
+        {
+            Im::SetMouseCursor(Im::ImGuiMouseCursor_None);
+            if(padUsed.load()||alpha<=0.f)return false;
+            const auto* io=Im::GetIO();const auto at=io->MousePos;
+            if(!std::isfinite(at.x)||!std::isfinite(at.y)||at.x<0||at.y<0||at.x>=io->DisplaySize.x||at.y>=io->DisplaySize.y)return false;
+            const float s=std::clamp(scale,.8f,2.5f);
+            constexpr std::array<V,7> shape{{{0,0},{2,27},{8,21},{14,32},{19,29},{13,18},{25,17}}};
+            std::array<V,7> points,shadow;
+            for(std::size_t i=0;i<shape.size();++i){
+                points[i]={at.x+shape[i].x*s,at.y+shape[i].y*s};
+                shadow[i]={points[i].x+2.f*s,points[i].y+2.f*s};
+            }
+            auto* draw=Im::GetForegroundDrawList();
+            Draw::AddPolyline(draw,shadow.data(),static_cast<int>(shadow.size()),Alpha(kShade,alpha*.65f),Im::ImDrawFlags_Closed,4.f*s);
+            // Triangulate the notch rather than filling a concave outline as convex.
+            constexpr std::array<std::array<int,3>,5> faces{{{0,1,2},{0,2,5},{0,5,6},{2,3,4},{2,4,5}}};
+            for(std::size_t i=0;i<faces.size();++i){const auto& face=faces[i];
+                const U32 fill=i==2?kText:i==0?Mix(kText,kEdge,.4f):Mix(kGlass,kEdge,.48f);
+                Draw::AddTriangleFilled(draw,points[face[0]],points[face[1]],points[face[2]],Alpha(fill,alpha));
+            }
+            Draw::AddPolyline(draw,points.data(),static_cast<int>(points.size()),Alpha(kShade,alpha),Im::ImDrawFlags_Closed,3.f*s);
+            Draw::AddPolyline(draw,points.data(),static_cast<int>(points.size()),Alpha(kEdge,alpha),Im::ImDrawFlags_Closed,1.2f*s);
+            Draw::AddLine(draw,points[0],points[5],Alpha(kText,alpha*.85f),.9f*s);
+            return true;
+        }
 
 		U32 DangerColour(Rules::Danger a_danger)
 		{
@@ -1620,7 +1683,7 @@ namespace FWM::Menu
 					std::string tip = Trf("{}, level {}\n{}, {} for {}.", enemy.name, enemy.level, Describe(enemy), DangerWord(danger),
 						a_selected ? a_selected->name : std::string(Tr("you")));
 					if (enemy.healthMax > 0.0f) {
-						tip += Trf("\nHealth {:.0f} / {:.0f}  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  Magicka {:.0f} / {:.0f}  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  Stamina {:.0f} / {:.0f}", std::max(enemy.healthNow, 0.0f),
+						tip += Trf("\nHealth {:.0f} / {:.0f}  |  Magicka {:.0f} / {:.0f}  |  Stamina {:.0f} / {:.0f}", std::max(enemy.healthNow, 0.0f),
 							enemy.healthMax, std::max(enemy.magickaNow, 0.0f), enemy.magickaMax, std::max(enemy.staminaNow, 0.0f), enemy.staminaMax);
 					}
 					if (const auto* tank = enemy.heldBy ? findMember(enemy.heldBy) : nullptr) {
@@ -1981,7 +2044,7 @@ namespace FWM::Menu
 		// it: armor and damage, then what turns aside.
 		// The roles in the order a line forms up, front to back: the order the role list shows them in.
 		constexpr std::array<Role, static_cast<std::size_t>(Role::kCount)> kRoleRow{ Role::kTank, Role::kFighter, Role::kBruiser, Role::kArcher, Role::kMage,
-			Role::kHealer };
+			Role::kHealer, Role::kSkald };
 
 		int RoleSlot(Role a_role)
 		{
@@ -2070,8 +2133,9 @@ namespace FWM::Menu
 			}
 		}
 
-		// A companion's level, big, in a diamond framed in their rarity's colour, the XP toward the
-		// next running round it. A level just earned flares gold for a moment.
+		// A companion's level, big, on the theme's medallion framed in their rarity's colour, the XP
+		// toward the next running round just inside its edge. A level just earned flares gold for a
+		// moment.
 		void LevelMark(Im::ImDrawList* a_draw, const View::Member& a_member, V c, float r, float a_alpha, float a_s, float a_size)
 		{
 			const U32   frame = a_member.rarity > Traits::Rarity::kCommon ? RarityColour(a_member.rarity) : kEdge;
@@ -2081,20 +2145,26 @@ namespace FWM::Menu
 			if (fresh > 0.0f) {
 				Halo(a_draw, c, rr * 2.2f, kGold, a_alpha * fresh);
 			}
-			Diamond(a_draw, c, rr, Alpha((palette.Subdued() ? palette.inset : IM_COL32(24, 11, 11, 250)), a_alpha), Alpha(Mix(frame, kGold, fresh), a_alpha), 1.6f * a_s);
-			Diamond(a_draw, c, rr - 4.5f * a_s, Alpha(kShade, 0.0f), Alpha(kText, a_alpha * 0.28f), 1.0f);
+			Emblem(a_draw, c, rr, Alpha((palette.Subdued() ? palette.inset : IM_COL32(24, 11, 11, 250)), a_alpha), Alpha(Mix(frame, kGold, fresh), a_alpha), 1.6f * a_s);
+			// The same distance in from every side: a polygon's sides sit closer to its centre than its corners.
+			const auto  edge = EmblemContour(c, rr);
+			const float apothem = std::cos(3.1415927f / static_cast<float>(edge.count));
+			const auto  track = EmblemContour(c, rr - 4.0f * a_s / apothem);
 			if (a_member.leveling) {
-				// Caught up with the player: a full ring, quieter, as nothing more can be earned for now.
+				// Caught up with the player: a full track, quieter, as nothing more can be earned for now.
 				const float t = a_member.levelCapped ? 1.0f : (a_member.xpNext > 0.0f ? a_member.xp / a_member.xpNext : 0.0f);
-				// Keyed by level too: a new level starts its ring afresh instead of running it backwards.
+				// Keyed by level too: a new level starts its track afresh instead of running it backwards.
 				const float shown = state.tw.Toward("xpRing", (static_cast<std::uint64_t>(a_member.id) << 16) | static_cast<std::uint64_t>(a_member.level), t, 5.0f);
-				const U32   fill = a_member.levelCapped ? Alpha(Mix(frame, kShade, 0.4f), a_alpha * 0.85f) : Alpha(Mix(frame, kGold, 0.55f), a_alpha);
-				DiamondRing(a_draw, c, rr + 6.0f * a_s, shown, Alpha(kShade, a_alpha * 0.55f), fill, 3.2f * a_s);
+				// XP is gold in every theme; half the frame's colour would turn it grey against blue or purple.
+				const U32   fill = a_member.levelCapped ? Alpha(Mix(frame, kShade, 0.4f), a_alpha * 0.85f) : Alpha(Mix(kGold, frame, 0.15f), a_alpha);
+				OutlineProgress(a_draw, track, shown, Alpha(kText, a_alpha * 0.16f), fill, 2.6f * a_s);
+			} else {
+				Draw::AddPolyline(a_draw, track.points.data(), track.count, Alpha(kText, a_alpha * 0.28f), Im::ImDrawFlags_Closed, 1.0f);
 			}
 			InkCentered(a_draw, c, Alpha(Mix(kText, kGold, fresh), a_alpha), a_size, std::format("{}", a_member.level));
 		}
 
-		// What the level's diamond says when pointed at.
+		// What the level's medallion says when pointed at.
 		std::string LevelReadout(const View::Member& a_member)
 		{
 			if (!a_member.leveling) {
@@ -2205,7 +2275,7 @@ namespace FWM::Menu
 						if (!text.empty()) {
 							text += overflow ? "\n" : "\n\n";
 						}
-						text += std::format("{}  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  {}", item.name, Tr(Traits::KindName(item.kind)));
+						text += std::format("{}  |  {}", item.name, Tr(Traits::KindName(item.kind)));
 						if (overflow) {
 							if (item.locked) {
 								text += std::format(" ({})", Tr("Locked"));
@@ -2228,6 +2298,65 @@ namespace FWM::Menu
 			return y + static_cast<float>((slots + 1) / 2) * (chipH + chipGap) - chipGap - a_pos.y;
 		}
 
+        bool PathLocked(const View::Member& member, Role role)
+        {
+            return role==Role::kSkald && !member.record.skaldUnlocked;
+        }
+
+        bool CanUnlockSkald(const View::Member& member)
+        {
+            return member.CanTakeRole() && PathLocked(member,Role::kSkald) && member.hasLute &&
+                (member.unlimited || member.pointsEarned-member.pointsSpent>=SkaldPolicy::kUnlockCost);
+        }
+
+        std::string SkaldUnlockHint(const View::Member& member)
+        {
+            if(!member.hasLute)return std::string(Tr("Give this companion a lute to unlock Skald."));
+            if(member.unlimited)return std::string(Tr("Free while Debug Mode is enabled. Turning it off restores the previous unlock and perks."));
+            return Trf("Unlock Skald for 10 skill points. {} available. The lute stays in their inventory.",std::max(0,member.pointsEarned-member.pointsSpent));
+        }
+
+        void RequestSkaldUnlock(const View::Member& member)
+        {
+            if(!CanUnlockSkald(member)){Sound("UIMenuCancel");return;}
+            Battle::Command command;
+            command.type=Battle::Command::Type::kUnlockSkald;
+            command.member=member.id;
+            Battle::Queue(command);
+        }
+
+        // A sealed, engraved medallion, shared by the role list and the closed tree.
+        void SkaldSeal(Im::ImDrawList* d,V c,float r,float alpha)
+        {
+            const U32 metal=Mix(kTextDim,kFocusRing,.55f);
+            const float breath=.5f+.5f*std::sin(state.clock*1.6f);
+            Halo(d,c,r*1.8f,kRed,alpha*(.16f+.09f*breath));
+            Emblem(d,c,r,Alpha(palette.inset,alpha),Alpha(metal,alpha*.8f),std::max(1.f,r*.025f));
+            Diamond(d,c,r*.83f,0,Alpha(metal,alpha*.45f),std::max(1.f,r*.018f));
+            for(int i=0;i<12;++i){
+                const float angle=static_cast<float>(i)*.5235988f;
+                const V a{c.x+std::cos(angle)*r*1.12f,c.y+std::sin(angle)*r*1.12f};
+                const V b{c.x+std::cos(angle)*r*1.22f,c.y+std::sin(angle)*r*1.22f};
+                Draw::AddLine(d,a,b,Alpha(metal,alpha*.55f),std::max(1.f,r*.018f));
+            }
+            Glyph(d,c,r*.83f,0xF023,Alpha(kText,alpha));
+        }
+
+        bool SkaldUnlockButton(Im::ImDrawList* d,const char* id,const View::Member& member,V min,V size,float s,float alpha,bool live,bool activate=false)
+        {
+            const bool enabled=CanUnlockSkald(member);
+            bool over=false;
+            const bool clicked=live && Hit(id,min,size,over);
+            const V max{min.x+size.x,min.y+size.y};
+            PanelFill(d,min,max,Alpha(enabled ? Mix(palette.inset,kRed,over?.45f:.28f) : palette.inset,alpha),0.f,0);
+            PanelEdge(d,min,max,Alpha(enabled ? kFocusRing : kGlassEdge,alpha*(over?1.f:.7f)),0.f,0,1.f*s);
+            const auto label=member.unlimited ? Tr("UNLOCK · FREE") : Tr("UNLOCK · 10");
+            TextCentered(d,{(min.x+max.x)*.5f,(min.y+max.y)*.5f},Alpha(enabled?kText:kTextFaint,alpha),12.f*s,label);
+            if(over)Tip(SkaldUnlockHint(member));
+            if(live && (clicked || activate)){RequestSkaldUnlock(member);return enabled;}
+            return false;
+        }
+
 		// Beside the card, out of a fight: every role, front of the line to the back, each with what
 		// it does and the special that comes with it. Choosing one closes the list and returns it.
 		Rect DrawRoleList(Im::ImDrawList* a_draw, const View::Member& a_member, float a_right, float a_bottom, float a_s, float a_appear, const Input& a_input, int a_dy,
@@ -2238,7 +2367,7 @@ namespace FWM::Menu
 			const float headH = 46.0f * a_s;
 			const float rowH = 48.0f * a_s;
 			const float pad = 12.0f * a_s;
-			const float height = headH + rowH * static_cast<float>(kRoleRow.size()) + pad;
+			const float height = headH + rowH * static_cast<float>(kRoleRow.size()) + pad + (PathLocked(a_member,Role::kSkald)?22.f*a_s:0.f);
 			const float open = Smooth((state.clock - list.openedAt) / 0.16f);
 			const float alpha = a_appear * open;
 			const float top = std::clamp(list.tileMin.y - headH, 112.0f * a_s, std::max(a_bottom - height, 112.0f * a_s));
@@ -2261,14 +2390,16 @@ namespace FWM::Menu
 			for (std::size_t i = 0; i < kRoleRow.size(); ++i) {
 				const Role  role = kRoleRow[i];
 				const auto& info = Info(role);
-				const auto  lack = a_member.arsenalKnown ? LackFor(role, a_member.arsenal) : Lack::kNothing;
+				const auto  lack = role==Role::kSkald ? a_member.skaldLack : a_member.arsenalKnown ? LackFor(role, a_member.arsenal, Settings::Get().roleWeapons) : Lack::kNothing;
 				const bool  current = role == a_member.orders.role;
-				const bool  playable = lack == Lack::kNothing || current;
+				const bool  playable = lack == Lack::kNothing || (current && role!=Role::kSkald);
+                const bool sealed=PathLocked(a_member,role);
+                const float thisRowH=rowH+(sealed?22.f*a_s:0.f);
 				const V     rmin{ min.x + pad * 0.5f, y };
-				const V     rmax{ max.x - pad * 0.5f, y + rowH - 4.0f * a_s };
+				const V     rmax{ max.x - pad * 0.5f, y + thisRowH - 4.0f * a_s };
 				bool        hovered = false;
 				Im::PushID(2600 + static_cast<int>(i));
-				const bool clicked = Hit("roleRow", rmin, { rmax.x - rmin.x, rmax.y - rmin.y }, hovered) && open > 0.6f;
+				const bool clicked = Hit("roleRow", rmin, { rmax.x - rmin.x - (sealed?154.f*a_s:0.f), rmax.y - rmin.y }, hovered) && open > 0.6f;
 				Im::PopID();
 				const bool  focused = list.viaPad && list.item == static_cast<int>(i);
 				const float lit = state.tw.Toward("roleRow", static_cast<std::uint64_t>(a_member.id) * 8 + i, hovered || focused ? 1.0f : 0.0f, 16.0f);
@@ -2280,16 +2411,23 @@ namespace FWM::Menu
 				if (focused) {
 					FocusOutline(a_draw, rmin, rmax, 7.0f * a_s, alpha);
 				}
-				const float dim = playable ? 1.0f : 0.4f;
+				const float dim = playable || sealed ? 1.0f : 0.4f;
 				const V     ec{ rmin.x + 28.0f * a_s, (rmin.y + rmax.y) * 0.5f };
+                if(sealed)SkaldSeal(a_draw,ec,18.f*a_s,alpha);
+                else {
 				Emblem(a_draw, ec, 18.0f * a_s, Alpha(IM_COL32(17, 17, 18, 245), alpha), Alpha(Mix(kGlassEdge, RoleAccent(role), current ? 1.0f : lit), alpha * dim), 1.3f * a_s);
 				Glyph(a_draw, ec, 15.0f * a_s, info.glyph, Alpha(Mix(kTextDim, kText, current ? 1.0f : lit), alpha * dim));
+                }
 				const float tx = rmin.x + 58.0f * a_s;
 				Text(a_draw, { tx, rmin.y + 7.0f * a_s }, Alpha(current ? kText : Mix(kTextDim, kText, lit), alpha * dim), 16.0f * a_s, Tr(info.name));
 				// Theirs now, not on offer, or the special that comes with it.
 				std::string tag;
 				U32         tagTone = kTextFaint;
-				if (current) {
+				if (sealed) {
+                    SkaldUnlockButton(a_draw,"roleUnlockSkald",a_member,{rmax.x-148.f*a_s,rmin.y+6.f*a_s},{138.f*a_s,30.f*a_s},a_s,alpha,open>.6f,focused&&a_input.activate);
+                    Text(a_draw,{tx,rmin.y+38.f*a_s},Alpha(a_member.hasLute?kTextDim:kRed,alpha),11.f*a_s,
+                        a_member.hasLute?Tr("LOCKED · Lute ready"):Tr("LOCKED · Lute required"));
+                } else if (current) {
 					tag = Upper(Tr("Their role"));
 				} else if (!playable) {
 					tag = Upper(Tr("Not on offer"));
@@ -2301,11 +2439,11 @@ namespace FWM::Menu
 					const float tw = LabelWidth(10.0f * a_s, tag, 1.6f * a_s);
 					Label(a_draw, { rmax.x - 10.0f * a_s - tw, rmin.y + 10.0f * a_s }, Alpha(tagTone, alpha), 10.0f * a_s, tag, 1.6f * a_s);
 				}
-				if (hovered || focused) Tip(std::string(playable ? Tr(info.summary) : Tr(Why(lack))));
+				if (hovered || focused) Tip(sealed ? SkaldUnlockHint(a_member) : std::string(playable ? Tr(info.summary) : Tr(Why(lack))));
 				if (hovered) {
 					Hovering(0x2600 + static_cast<std::uint64_t>(i));
 				}
-				if (clicked || (focused && a_input.activate)) {
+				if (!sealed && (clicked || (focused && a_input.activate))) {
 					if (!playable) {
 						Sound("UIMenuCancel");
 					} else {
@@ -2317,7 +2455,7 @@ namespace FWM::Menu
 						return { min, max };
 					}
 				}
-				y += rowH;
+				y += thisRowH;
 			}
 
 			if (a_back) {
@@ -2584,7 +2722,7 @@ namespace FWM::Menu
                             Hovering(0x190);
                             Readout(LevelReadout(a_member));
                         }
-                        // A level just earned is called out beside the diamond, where the slashes sit.
+                        // A level just earned is called out beside the medallion, where the slashes sit.
                         const float fresh = a_member.leveling && a_member.levelUpAge < 3.0f ? 1.0f - a_member.levelUpAge / 3.0f : 0.0f;
                         Slashes(a_draw, { mc.x - mr - 40.0f * a_s, bandTop + bandH * 0.3f }, bandH * 0.4f, Alpha(kText, alpha * 0.45f * (1.0f - fresh)));
                         if (fresh > 0.0f) {
@@ -2600,11 +2738,11 @@ namespace FWM::Menu
                     std::string status;
                     const bool  noArrows = orders.role == Role::kArcher && a_member.bow && a_member.ammoName.empty();
                     if (a_member.down) {
-                        status += Tr("  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  down");
+                        status += Tr("  |  down");
                     } else if (noArrows) {
-                        status += Tr("  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  no arrows");
+                        status += Tr("  |  no arrows");
                     } else if (a_member.drained) {
-                        status += Tr("  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  out of magicka, falling back");
+                        status += Tr("  |  out of magicka, falling back");
                     } else if (a_member.inCombat && !a_member.targetName.empty()) {
 						status = a_member.targetName;
                     }
@@ -3590,8 +3728,8 @@ namespace FWM::Menu
 					} else if(weapons) {
                         tip=spell->shield?Trf("{}\nPairs with a one-handed weapon.\nClick to add or remove.",spell->name):Trf("{}\n{:.0f} base damage, {} in inventory.\nClick to add or remove.",spell->name,spell->cost,spell->count);
                     } else {
-						tip = Trf("{}\n{} {}  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  {:.0f} magicka{}{}", spell->name, Tr(Rules::tierNames[static_cast<std::size_t>(spell->tier)]),
-							Tr(Rules::schoolNames[static_cast<std::size_t>(spell->school)]), spell->cost, spell->twoHanded ? Tr("  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  takes both hands") : "",
+						tip = Trf("{}\n{} {}  |  {:.0f} magicka{}{}", spell->name, Tr(Rules::tierNames[static_cast<std::size_t>(spell->tier)]),
+							Tr(Rules::schoolNames[static_cast<std::size_t>(spell->school)]), spell->cost, spell->twoHanded ? Tr("  |  takes both hands") : "",
 							spell->known ? "" : Tr("\nOne of yours: choosing it teaches them, and they keep it."));
 					}
 					if (pointed) {
@@ -4063,6 +4201,8 @@ namespace FWM::Menu
 		{
 			auto&       page = state.page;
 			const auto  path = page.path;
+			// Skald's entry cost unlocks its songs; it has no per-point passive bonus.
+			if (path == Role::kSkald) return { bonusMin, bonusMin };
 			const auto& tree = Paths::PathOf(path);
 			const auto& record = a_member.record;
 			const int   onPath = Paths::Spent(record, path);
@@ -4104,7 +4244,7 @@ namespace FWM::Menu
 				Alpha(Mix((palette.Subdued() ? palette.inset : IM_COL32(26, 12, 11, 235)), kAccent, 0.25f * hover + 0.35f * flash), alpha * (0.6f + 0.4f * dim)), 0.0f, 0);
 			PanelEdge(a_draw, bmin, bmax, Alpha(Mix(kGlassEdge, kEdge, working ? 0.6f + 0.4f * hover : 0.25f * hover), alpha), 0.0f, 0, 1.0f);
 			PanelFill(a_draw, bmin, { bmin.x + 2.0f * a_s, bmax.y }, Alpha(working ? kEdge : kTextFaint, alpha), 0.0f, 0);
-			constexpr std::array<std::uint32_t, 6> glyphs{ 0xF0E7, 0xF3ED, 0xF21E, 0xF6E3, 0xF2EA, 0xF0D0 };  // bolt, shield, heartbeat, hammer, arrow back, wand
+			constexpr std::array<std::uint32_t, 7> glyphs{ 0xF0E7, 0xF3ED, 0xF21E, 0xF6E3, 0xF2EA, 0xF0D0, 0xF001 };  // bolt, shield, heartbeat, hammer, arrow back, wand
 			const float                            cy = (bmin.y + bmax.y) * 0.5f;
 			float                                  x = bmin.x + 12.0f * a_s;
 			Glyph(a_draw, { x + 8.0f * a_s, cy }, 13.0f * a_s, glyphs[static_cast<std::size_t>(path) % glyphs.size()], Alpha(working ? kEdge : kTextDim, alpha));
@@ -4276,13 +4416,13 @@ namespace FWM::Menu
 		void DrawPathBackdrop(Im::ImDrawList* d, V origin, float width, float height, float scale, float alpha, Role role)
 		{
 			constexpr std::array<const char*, 3> themes{"vanilla", "oxblood", "nordic"};
-			constexpr std::array<const char*, 6> classes{"fighter", "tank", "healer", "bruiser", "archer", "mage"};
+			constexpr std::array<const char*, 7> classes{"fighter", "tank", "healer", "bruiser", "archer", "mage", "skald"};
 			const auto theme = static_cast<std::size_t>(palette.style);
 			const auto path = static_cast<std::size_t>(role);
 			if (theme >= themes.size() || path >= classes.size()) return;
 			using Picture = decltype(MF::LoadTexture(""));
-			static std::array<Picture, 18> pictures{};
-			static std::array<bool, 18> attempted{};
+			static std::array<Picture, 21> pictures{};
+			static std::array<bool, 21> attempted{};
 			const auto slot = theme * classes.size() + path;
 			if (!attempted[slot]) {
 				attempted[slot] = true;
@@ -4407,6 +4547,7 @@ namespace FWM::Menu
 			const auto  path = page.path;
 			const auto& tree = Paths::PathOf(path);
 			const auto& record = a_member.record;
+            if(PathLocked(a_member,path))return;
 			const int   onPath = Paths::Spent(record, path);
 			const bool  mastered = Paths::Mastered(record, path);
 			const int   bonusRoom = Rules::PathBonusRoom(path, onPath, a_tuning);
@@ -4458,7 +4599,7 @@ namespace FWM::Menu
 			const bool  known = isAbility && rank > 0;
 			const auto& slots = record.slots[static_cast<std::size_t>(path)];
 			const bool bruiserBlocked=!a_member.unlimited&&path==Role::kBruiser&&!a_member.arsenal.twoHanded;
-			const bool canLearn = !bruiserBlocked && learnBlock == Paths::Block::kNone;
+            const bool canLearn = !bruiserBlocked && (path!=Role::kSkald || a_member.hasLute) && learnBlock == Paths::Block::kNone;
 			const bool  canForget = forgetBlock == Paths::Block::kNone && a_member.respec;
 			const int   cost = a_member.unlimited ? 0 : Paths::CostOf(path, chosen, rank + 1);
 			auto        textMid = [&](V a_at, U32 a_color, float a_size, std::string_view a_text) {
@@ -4634,6 +4775,7 @@ namespace FWM::Menu
 					}
 				}
 				if(bruiserBlocked)why=Tr("Requires a two-handed melee weapon in inventory.");
+                if(path==Role::kSkald && !a_member.hasLute)why=Tr("Requires a lute in this companion inventory.");
                 // What stands in the way may need two lines; the plate grows upwards from the button's floor.
 				const float whyH = why.empty() ? 0.0f : RichText(nullptr, {}, 13.5f * a_s, why, mainW - 52.0f * a_s, 0, 0);
 				const float plateH = why.empty() ? actionH : std::max(actionH, whyH + 18.0f * a_s);
@@ -4853,25 +4995,33 @@ namespace FWM::Menu
             const bool live = !state.closing && !state.guide.open && !page.transition && entrance.interactive;
 			const bool pickerTakingInput = page.pathPickerOpen;
 			if (page.pathPickerOpen && live) {
-				page.pathPickerCursor = (page.pathPickerCursor + dy + 6) % 6;
+				page.pathPickerCursor = (page.pathPickerCursor + dy + static_cast<int>(Role::kCount)) % static_cast<int>(Role::kCount);
 				if (input.activate) {
-					page.path = static_cast<Role>(page.pathPickerCursor);
+                    const auto pick=static_cast<Role>(page.pathPickerCursor);
+                    if(PathLocked(member,pick))RequestSkaldUnlock(member);
+                    else {
+					page.path = pick;
 					page.cursor = FirstWorthy(member, page.path);
 					page.tabAt = state.clock;
 					page.detailOpen = false;
 					page.pathPickerOpen = false;
 					Sound("UIMenuOK");
+                    }
 				}
 			}
-			const bool treeLive = live && !pickerTakingInput;
 			if (tab && live) {
 				page.pathPickerOpen = false;
-				page.path = static_cast<Role>((static_cast<int>(page.path) + tab + 6) % 6);
+                do {
+				    page.path = static_cast<Role>((static_cast<int>(page.path) + tab + static_cast<int>(Role::kCount)) % static_cast<int>(Role::kCount));
+                } while(PathLocked(member,page.path));
 				page.tabAt = state.clock;
 				page.resetArmed = false;
 				page.detailOpen = false;
 			}
 			const auto  role = page.path;
+            const bool sealed=PathLocked(member,role);
+            const bool treeLive=live && !pickerTakingInput && !sealed;
+            if(sealed){page.detailOpen=false;page.detailT=0;page.previewNode=-1;page.previewRank=0;page.resetArmed=false;page.tabAt=state.clock;}
 			const auto& tree = Paths::PathOf(role);
 			const auto& ranks = member.record.ranks[static_cast<std::size_t>(role)];
 			
@@ -4902,7 +5052,7 @@ namespace FWM::Menu
 				page.lastUnspent = Unspent(member);
 				page.pointsAt = state.clock;
 			}
-			if (state.guide.open)
+			if (state.guide.open && !sealed)
 				page.detailOpen = true;
 			page.detailT = std::clamp(page.detailT + (page.detailOpen ? 1.0f : -1.0f) * std::min(Im::GetIO()->DeltaTime, .05f) / .42f, 0.0f, 1.0f);
 			page.pickerT = std::clamp(page.pickerT + (page.pathPickerOpen ? 1.0f : -1.0f) * std::min(Im::GetIO()->DeltaTime, .05f) / .24f, 0.0f, 1.0f);
@@ -4948,7 +5098,7 @@ namespace FWM::Menu
 				ink(vanilla?IM_COL32(9,9,9,255):manuscript?IM_COL32(19,20,16,255):IM_COL32(22,9,8,255)),
 				ink(vanilla?IM_COL32(2,2,2,255):manuscript?IM_COL32(8,10,9,255):IM_COL32(7,3,3,255)),
 				ink(vanilla?IM_COL32(6,6,6,255):manuscript?IM_COL32(14,15,12,255):IM_COL32(14,6,5,255)));
-			DrawPathBackdrop(d, lo, canvasW, h, s, alpha * Smooth((state.clock - page.tabAt) / .65f), role);
+			DrawPathBackdrop(d, lo, canvasW, h, s, alpha * (sealed ? .5f : Smooth((state.clock - page.tabAt) / .65f)), role);
 			DrawPathAtmosphere(d, lo, canvasW, h, s, alpha, state.clock);
 			for (const float side : { -1.0f, 1.0f }) {
 				const float x = side < 0 ? 18.0f : w - 18;
@@ -4966,9 +5116,22 @@ namespace FWM::Menu
 			line(canvasW * .5f + 12, 108, canvasW * .5f + 155, 108, edge, .24f);
 			Diamond(d, pos(canvasW * .5f, 108), 4 * s, 0, ink(edge, .7f), s);
 			const Rect bonusBounds = DrawPathBonus(d, member, tuning, pos(w - 510, 43), s * 1.05f, alpha * .85f, treeLive);
-			const Rect utilityBounds = DrawPathUtilities(d, member, pos(w - 55, 48), s * 1.2f, alpha, treeLive);
+			const Rect utilityBounds = DrawPathUtilities(d, member, pos(w - 55, 48), s * 1.2f, alpha, live && !pickerTakingInput);
 			const int points = Unspent(member);
 			state.guide.areas[kGuideTabs] = { pickerBounds.min, pickerBounds.max };
+            if(sealed) {
+                const float cx=canvasW*.5f,cy=h*.43f;
+                // The locked page renders no nodes, purchase controls, or ability previews.
+                SkaldSeal(d,pos(cx,cy),66.f*s,alpha);
+                midcaps(cx,cy+100.f,26.f,Upper(Tr("THE SKALD IS SEALED")),ivory,3.f);
+                TextCentered(d,pos(cx,cy+151.f),ink(muted),16.f*s,Tr("Four Ljodhs. One voice to carry the company."));
+                TextCentered(d,pos(cx,cy+186.f),ink(member.hasLute?muted:kRed),15.f*s,
+                    member.hasLute ? Tr("Lute in inventory · Ready") : Tr("Requires a lute in this companion's inventory"));
+                SkaldUnlockButton(d,"sealedSkaldUnlock",member,pos(cx-116.f,cy+220.f),{232.f*s,46.f*s},s*1.2f,alpha,live&&!pickerTakingInput,input.activate);
+                TextCentered(d,pos(cx,cy+292.f),ink(faint),13.f*s,member.unlimited ?
+                    Tr("Temporary unlock · Relocks when Debug Mode ends") : Trf("10 skill points to unlock · {} available",points));
+                state.guide.areas[kGuideTree]={pos(cx-200.f,cy-90.f),pos(cx+200.f,cy+304.f)};
+            } else {
 
 			// Fixed levels make the parent/branch relationship readable without boxed columns.
 			state.guide.areas[kGuideTree] = { pos(30, 126), pos(canvasW - 30, h - 38) };
@@ -5229,15 +5392,16 @@ namespace FWM::Menu
 					caps(56, 114, 11, Upper(Tr("The path they follow")), muted, 1.8f);
 				} else {
 					const bool fight = member.inCombat;
-					const bool follow = GhostButton(d, "followPath", pos(30, 104), { 294 * s, 34 * s }, Info(role).glyph, Upper(Tr("Follow this path")), !fight, false,
+                    const bool eligible=role!=Role::kSkald || member.skaldLack==Lack::kNothing;
+					const bool follow = GhostButton(d, "followPath", pos(30, 104), { 294 * s, 34 * s }, Info(role).glyph, Upper(Tr("Follow this path")), !fight && eligible, false,
 						s, alpha, 0x4E0);
 					if (Im::IsItemHovered() && treeLive) {
-						Tip(fight ? std::string(Tr("Paths are changed out of a fight.")) :
+						Tip(!eligible ? std::string(Tr(Why(member.skaldLack))) : fight ? std::string(Tr("Paths are changed out of a fight.")) :
 						            Trf("{} fights by the {} from now on: its abilities and traits count, and the points on the others wait.", member.name,
 										Tr(Paths::Info(role).title)));
 					}
 					if (follow && treeLive) {
-						if (fight) {
+						if (fight || !eligible) {
 							Sound("UIMenuCancel");
 						} else {
 							SetOrders(member, Retask(member.orders, role));
@@ -5247,6 +5411,7 @@ namespace FWM::Menu
 				}
 			}
 
+            } // Unlocked tree content.
 			// Draw the selector last so its list stays above nodes and consumes their input.
 			bool pickerOver = false;
 			const bool pickerClicked = live && Hit("pathPicker", pickerBounds.min, { 294 * s, 72 * s }, pickerOver);
@@ -5260,29 +5425,35 @@ namespace FWM::Menu
 				ink(palette.inset, .35f + .4f * pickerGlow), ink(palette.inset, 0), ink(palette.inset, 0), ink(palette.inset, .35f + .4f * pickerGlow));
 			line(87, 94, 319, 94, edge, .2f + .4f * pickerGlow);
 			Emblem(d, pos(61, 59), 28 * s, ink(palette.inset, .6f), ink(edge, .45f + .3f * pickerGlow), s);
-			Glyph(d, pos(61, 59), 26 * s, Info(role).glyph, ink(ivory));
+			Glyph(d, pos(61, 59), 26 * s, sealed?0xF023:Info(role).glyph, ink(ivory));
 			TextCentered(d, pos(195, 59), ink(ivory), 23*s, Tr(Info(role).name));
 			Glyph(d, pos(300, 60), 13 * s, page.pathPickerOpen ? 0xF077 : 0xF078, ink(muted));
 			if (pickerOver)
 				Tip(std::string(Tr("Choose a path to inspect. Q / E or the triggers also switch paths.")));
 			if (pickerReveal > .001f && live) {
-				const Rect listBounds{ pos(30, 103), pos(324, 429) };
-				Draw::PushClipRect(d, listBounds.min, pos(324, 103 + 326 * pickerReveal), true);
+				const Rect listBounds{ pos(30, 103), pos(374, 509) };
+				Draw::PushClipRect(d, listBounds.min, pos(374, 103 + 406 * pickerReveal), true);
 				Frame(d, listBounds.min, listBounds.max, alpha * pickerReveal);
-				for (int i = 0; i < 6; ++i) {
+				for (int i = 0; i < static_cast<int>(Role::kCount); ++i) {
 					const auto pick = static_cast<Role>(i);
 					const float yy = 110 + 52.0f * i;
+                    const bool locked=PathLocked(member,pick);
 					bool over = false;
 					Im::PushID(9100 + i);
-					const bool clicked = page.pathPickerOpen && pickerReveal > .92f && Hit("pathChoice", pos(37, yy), { 280 * s, 52 * s }, over);
+					const bool clicked = page.pathPickerOpen && pickerReveal > .92f && Hit("pathChoice", pos(37, yy), { (locked?176.f:330.f) * s, (locked?80.f:52.f) * s }, over);
 					Im::PopID();
 					if (pick == role || over || (state.keyboardNav && i == page.pathPickerCursor))
-						Highlight(d, pos(37, yy), pos(317, yy + 52), alpha * (pick == role ? .8f : .5f));
-					Glyph(d, pos(62, yy + 26), 21 * s, Info(pick).glyph, ink(pick == role ? ivory : muted));
+						Highlight(d, pos(37, yy), pos(367, yy + (locked?80.f:52.f)), alpha * (pick == role ? .8f : .5f));
+                    if(locked)SkaldSeal(d,pos(62,yy+26),17.f*s,alpha);
+					else Glyph(d, pos(62, yy + 26), 21 * s, Info(pick).glyph, ink(pick == role ? ivory : muted));
 					text(88, yy + 12, 21, Tr(Info(pick).name), pick == role ? ivory : muted);
-					if (pick == member.orders.role)
-						Diamond(d, pos(298, yy + 26), 4 * s, ink(edge), ink(ivory, .6f), 1 * s);
-					if (clicked) {
+                    if(locked) {
+                        SkaldUnlockButton(d,"pickerUnlockSkald",member,pos(220,yy+8),{138.f*s,32.f*s},s,alpha,page.pathPickerOpen&&pickerReveal>.92f);
+                        text(88,yy+50,11,member.hasLute?Tr("LOCKED · Lute ready"):Tr("LOCKED · Lute required"),member.hasLute?muted:kRed);
+                        if(over)Tip(SkaldUnlockHint(member));
+                    } else if (pick == member.orders.role)
+						Diamond(d, pos(348, yy + 26), 4 * s, ink(edge), ink(ivory, .6f), 1 * s);
+					if (clicked && !locked) {
 						page.path = pick;
 						page.cursor = FirstWorthy(member, pick);
 						page.tabAt = state.clock;
@@ -5752,9 +5923,9 @@ namespace FWM::Menu
 				if (hovered) {
 					Hovering(0x720);
 				}
-				auto tip = Trf("Auto battle: {}\nOn: a companion who sees an enemy starts the fight. Those on Hold back wait, and nobody starts one while you sneak.\n"
-									   "Off: they wait until an enemy attacks, or you do.{}",
-					shown ? "on" : "off", a_view.drawOnSight ? Tr("\nEither way, weapons come out when an enemy is in view.") : "");
+				auto tip = Trf("Auto battle: {}\nOn: a companion who sees an enemy starts the fight{}. Those on Hold back wait, and nobody starts one while you sneak.\n"
+									   "Off: they wait until an enemy attacks, or you do, and keep their weapons away until then.",
+					shown ? "on" : "off", a_view.drawOnSight ? Tr(", and weapons come out at the sight of one") : "");
 				if (hovered) {
 					Tip(std::move(tip));
 				} else {
@@ -6032,9 +6203,15 @@ namespace FWM::Menu
 					hints.insert(hints.end() - 1, padUsed.load() ? Hint{ Tr("LT / RT"), Tr("Zoom") } : Hint{ Tr("Wheel"), Tr("Zoom") });
 				}
 			}
+            const auto hintView=Battle::ReadView();
+            const auto* hintMember=hintView?Selected(*hintView):nullptr;
+            const bool sealed=state.page.member && hintMember && PathLocked(*hintMember,state.page.path);
 			if (state.page.member && state.guide.open) {
 				hints = padUsed.load() ? std::vector<Hint>{ { "A", Tr("Next") }, { Tr("D-pad"), Tr("Back / Next") }, { "B", Tr("Close guide") } } :
 				                         std::vector<Hint>{ { Tr("Enter"), Tr("Next") }, { Tr("Left / Right"), Tr("Back / Next") }, { Tr("Esc"), Tr("Close guide") } };
+			} else if (sealed) {
+                hints=padUsed.load() ? std::vector<Hint>{{"A",Tr("Unlock")},{Tr("LT / RT"),Tr("Path")},{Tr("LB / RB"),Tr("Companion")},{"B",Tr("Back")}} :
+                    std::vector<Hint>{{Tr("Enter"),Tr("Unlock")},{"Q / E",Tr("Path")},{Tr("Tab"),Tr("Companion")},{Tr("Esc"),Tr("Back")}};
 			} else if (state.page.member) {
 				hints = padUsed.load() ? std::vector<Hint>{ { Tr("D-pad"), Tr("Choose") }, { "A", Tr("Learn") }, { "X", Tr("Carry") }, { "Y", Tr("Give back") }, { Tr("LT / RT"), Tr("Path") }, { Tr("LB / RB"), Tr("Companion") }, { Tr("View"), Tr("Guide") }, { "B", Tr("Back") } } :
 				                         std::vector<Hint>{ { Tr("Click"), Tr("Choose") }, { Tr("Enter"), Tr("Learn") }, { "1 / 2", Tr("Carry") }, { Tr("Right-click"), Tr("Give back") }, { "Q / E", Tr("Path") }, { Tr("Tab"), Tr("Companion") }, { "F1", Tr("Guide") }, { Tr("Esc"), Tr("Back") } };
@@ -6248,7 +6425,7 @@ namespace FWM::Menu
 					if (input.dx || dy || input.activate || shoulder || input.now || input.flipAuto) {
 						state.keyboardNav = true;
 					}
-					if (std::abs(io->MouseDelta.x) + std::abs(io->MouseDelta.y) > 2.0f) {
+					if (!padUsed.load() && std::abs(io->MouseDelta.x) + std::abs(io->MouseDelta.y) > 2.0f) {
 						state.keyboardNav = false;
 					}
 					// The spell list, while open, takes the pad and the arrows, and B and Esc close it
@@ -6704,6 +6881,7 @@ namespace FWM::Menu
 			roleListOpen = state.roles.member != 0;
 			pathPageOpen = state.page.member != 0 || planFrame.tree;  // Esc goes back in the tree, Path of the Companions's or ours
             DrawTreeTransition(display);
+            DrawMenuPointer(s,appear);
 
 			// A soft tick whenever the pointer or the pad moves onto something new.
 			if (state.hoverKey != 0 && state.hoverKey != state.hoverKeyLast && !state.closing && state.clock - state.lastTick > 0.045f) {
@@ -6886,7 +7064,7 @@ namespace FWM::Menu
 			if (input.dx || dy || input.activate || shoulder || input.now || input.flipAuto) {
 				state.keyboardNav = true;
 			}
-			if (std::abs(io->MouseDelta.x) + std::abs(io->MouseDelta.y) > 2.0f) {
+			if (!padUsed.load() && std::abs(io->MouseDelta.x) + std::abs(io->MouseDelta.y) > 2.0f) {
 				state.keyboardNav = false;
 			}
 			in.close = cancel;
@@ -7155,6 +7333,7 @@ namespace FWM::Menu
 			uiScale = s;
 			pathPageOpen = state.page.member != 0;
             DrawTreeTransition(display);
+            DrawMenuPointer(s,appear);
 
 			if (state.hoverKey != 0 && state.hoverKey != state.hoverKeyLast && !state.closing && state.clock - state.lastTick > 0.045f) {
 				Sound("UIMenuFocus");
@@ -7393,6 +7572,38 @@ namespace FWM::Menu
 			InkCentered(a_draw, c, Alpha(IM_COL32(255, 255, 255, 255), alpha), 22.0f * a_s, std::format("{}", a_badge.points));
 		}
 
+		// Over an enemy a Single Note struck: the discord's icon in a small dark coin with
+		// its colour for the rim, and the stack count once it builds past one. Several over
+		// one enemy sit side by side; each pops in, holds a moment, rises and fades. A
+		// crescendo's icon is larger, stays for its whole hold and rings down the time left.
+		void NoteMarkBadge(Im::ImDrawList* a_draw, const Skald::NoteMark& a_mark, V a_display, float a_s)
+		{
+			const float alpha = SkaldPolicy::MarkAlpha(a_mark.age, a_mark.life);
+			if (alpha <= 0.01f) {
+				return;
+			}
+			const float size = a_mark.major ? SkaldPolicy::kMajorMarkScale : 1.0f;
+			const float r = 11.0f * a_s * size * Swell(a_mark.age / 0.3f);
+			const float rise = a_mark.major ? 0.0f : Smooth(Clamp01(a_mark.age / a_mark.life)) * 14.0f * a_s;
+			const float across = (static_cast<float>(a_mark.slot) - (static_cast<float>(a_mark.slots) - 1.0f) * 0.5f) * 25.0f * a_s * size;
+			const V     c{ a_mark.x * a_display.x + across, a_mark.y * a_display.y - rise - (a_mark.major ? 6.0f * a_s : 0.0f) };
+			const U32   tint = a_mark.color;
+			Halo(a_draw, c, r * (a_mark.major ? 2.4f : 1.9f), tint, alpha * (a_mark.major ? 0.65f : 0.45f));
+			Draw::AddCircleFilled(a_draw, c, r, Alpha(IM_COL32(18, 14, 22, 230), alpha), 24);
+			Draw::AddCircle(a_draw, c, r, Alpha(tint, alpha), 24, 1.6f * a_s);
+			if (a_mark.major && a_mark.life > 0.0f) {
+				const float left = Clamp01(1.0f - a_mark.age / a_mark.life);
+				Draw::PathArcTo(a_draw, c, r + 3.5f * a_s, -1.5707963f, -1.5707963f + 6.2831853f * left, std::max(6, static_cast<int>(40.0f * left)));
+				Draw::PathStroke(a_draw, Alpha(kGold, alpha), 0, 2.2f * a_s);
+			}
+			Glyph(a_draw, c, 12.0f * a_s * size, a_mark.glyph, Alpha(tint, alpha));
+			if (a_mark.count > 1) {
+				const V b{ c.x + r * 0.78f, c.y + r * 0.62f };
+				Draw::AddCircleFilled(a_draw, b, 6.2f * a_s, Alpha(tint, alpha), 16);
+				InkCentered(a_draw, b, Alpha(IM_COL32(16, 12, 18, 255), alpha), 11.0f * a_s, std::format("{}", a_mark.count));
+			}
+		}
+
 		void __stdcall RenderHUD()
 		{
 			SelectTheme();
@@ -7413,13 +7624,17 @@ namespace FWM::Menu
 			}
 			const auto notices = Notices::Recent(4800);
 			const auto badges = Leveling::Badges();
-			if (notices.empty() && badges.empty()) {
+			const auto noteMarks = Skald::Marks();
+			if (notices.empty() && badges.empty() && noteMarks.empty()) {
 				return;
 			}
 			auto*       draw = Im::GetForegroundDrawList();
 			const V     display = Im::GetIO()->DisplaySize;
 			const float s = std::clamp(display.y / 1080.0f, 0.65f, 2.5f) * Settings::Get().uiScale;
 			uiScale = s;
+			for (const auto& mark : noteMarks) {
+				NoteMarkBadge(draw, mark, display, s);
+			}
 			for (const auto& badge : badges) {
 				LevelBadge(draw, badge, display, s);
 			}
@@ -7942,9 +8157,15 @@ namespace FWM::Menu
 				const bool fight = a_view.inCombat || !a_view.enemies.empty();
 				Im::BeginDisabled(fight);
 				RosterCombo("##role", role, static_cast<int>(Role::kCount), RoleName,
-					[&](int i) { return m.arsenalKnown ? Tr(Why(LackFor(static_cast<Role>(i), m.arsenal))) : std::string_view{}; }, changed);
+					[&](int i) { return static_cast<Role>(i)==Role::kSkald ? Tr(Why(m.skaldLack)) : m.arsenalKnown ? Tr(Why(LackFor(static_cast<Role>(i), m.arsenal, Settings::Get().roleWeapons))) : std::string_view{}; }, changed);
 				Im::EndDisabled();
 				Help(fight ? Trc("Roles are set out of a fight.") : roles[static_cast<std::size_t>(role)].summary.data());
+                if(PathLocked(m,Role::kSkald)) {
+                    Im::BeginDisabled(fight || !CanUnlockSkald(m));
+                    if(Im::Button(m.unlimited ? Trc("Unlock Skald · Free") : Trc("Unlock Skald · 10 points")))RequestSkaldUnlock(m);
+                    Im::EndDisabled();
+                    Help(SkaldUnlockHint(m).c_str());
+                }
 				Im::TableNextColumn();
 				RosterCombo("##focus", focus, static_cast<int>(Focus::kCount), FocusName, nullptr, changed);
 				Help(focuses[static_cast<std::size_t>(focus)].summary.data());
@@ -8017,25 +8238,29 @@ namespace FWM::Menu
 					Check(Trc("Guess roles for new companions"), draft.guessRoles,
 						Trc("The first time a companion joins: a shield makes a Tank, a two-hander a Bruiser, a bow an Archer, a staff or spells a Mage or Healer. "
 						"An NFF tank or healer role is kept. Off: everyone starts as a Fighter."));
+					Check(Trc("Role weapons"), draft.roleWeapons,
+						Trc("Each role keeps to its own weapons: a Bruiser to a two-hander, a Mage or Healer to a staff beside its spells, and with Path of the "
+						"Companions every role to its path's weapons. Off: any role may use any weapon or shield the companion carries, and nothing is greyed "
+						"out in their pools. The Skald keeps its lute."));
 					Im::EndTable();
 				}
 			}
 			if (Group(Trc("Before a fight"), 0xF06E)) {
 				if (Checks("sight")) {
-					Check(Trc("Weapons out when an enemy is in view"), draft.drawOnSight,
-						Trc("Out of a fight, an enemy that a companion or you can see brings their weapons out. They put them away a few seconds after the last one is "
-						"out of view, unless yours are out."));
 					Check(Trc("Auto battle"), draft.autoBattle,
 						Trc("A companion who sees an enemy starts the fight instead of waiting to be attacked. Companions on Hold back wait, and nobody starts one "
-						"while you sneak. Also a switch at the top right of the battle plan."));
+						"while you sneak. Also a switch at the top right of the battle plan. Off: they wait for a fight with their weapons away."));
+					Im::BeginDisabled(!draft.autoBattle);
+					Check(Trc("Weapons out when an enemy is in view"), draft.drawOnSight,
+						Trc("With auto battle on, an enemy that a companion or you can see brings their weapons out, unless you are sneaking. They put them away "
+						"a few seconds after the last one is out of view, unless yours are out."));
+					Im::EndDisabled();
 					Im::EndTable();
 				}
-				Im::BeginDisabled(!draft.drawOnSight && !draft.autoBattle);
 				if (Rows("sightRange")) {
 					Slider(Trc("Sight range"), draft.sightRange, 1000.0f, 5000.0f, "%.0f", Trc("How far away an enemy can be and still count as in view. 2500 is about a long bowshot."));
 					Im::EndTable();
 				}
-				Im::EndDisabled();
 			}
 			if (Group(Trc("When the fight is over"), 0xF252)) {
 				if (Checks("emptyFights")) {
@@ -8050,10 +8275,11 @@ namespace FWM::Menu
 				}
 				Im::EndDisabled();
 			}
-			if (ResetButton(Trc("Role strength, role guessing, what happens before a fight and standing down back to their defaults. Companions' orders are not touched."))) {
+			if (ResetButton(Trc("Role strength, role guessing, role weapons, what happens before a fight and standing down back to their defaults. Companions' orders are not touched."))) {
 				const auto d = Settings::Defaults();
 				draft.styleWeight = d.styleWeight;
 				draft.guessRoles = d.guessRoles;
+				draft.roleWeapons = d.roleWeapons;
 				draft.drawOnSight = d.drawOnSight;
 				draft.autoBattle = d.autoBattle;
 				draft.sightRange = d.sightRange;
@@ -8189,12 +8415,13 @@ namespace FWM::Menu
 						for (int i = 0; i < UITheme::kCount; ++i) {
 							if (Im::Selectable(Trc(UITheme::Name(i)), draft.uiTheme == i) && draft.uiTheme != i) {
 								draft.uiTheme = i;
+								shareTheme = true;
 								dirty = true;
 							}
 						}
 						Im::EndCombo();
 					}
-					Help(Trc("Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights. All use the same windows and controls. Applies to the battle plan, Paths, notices and these settings."));
+					Help(Trc("Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights. All use the same windows and controls. Applies to Walk With Me, the battle plan, Paths, notices and these settings."));
 					Slider(Trc("Menu scale"), draft.uiScale, 0.6f, 2.0f, Trc("%.2fx"), Trc("Size of the battle plan on top of the screen-height scaling."));
 					Im::EndTable();
 				}
@@ -8231,6 +8458,7 @@ namespace FWM::Menu
 				draft.cutawayMargin = d.cutawayMargin;
 				draft.uiScale = d.uiScale;
 				draft.uiTheme = d.uiTheme;
+				shareTheme = true;
 				draft.notices = d.notices;
 				draft.sounds = d.sounds;
 				draft.tooltips = d.tooltips;
@@ -8492,14 +8720,8 @@ namespace FWM::Menu
                 if (Rows("partyBalance")) {
                     Toggle(Trc("Scale follower damage"), draft.partyBalance,
                         Trc("Reduce follower weapon, spell and ability damage as the fighting party grows. Outnumbering enemies adds a further reduction. Player damage is unchanged."));
-                    Im::BeginDisabled(!draft.partyBalance);
-                    Slider(Trc("Per extra follower"), draft.partyExtraPenalty, 0.0f, 25.0f, "%.0f%%",
-                        Trc("Damage reduction for each fighting follower after the first."));
-                    Slider(Trc("Outnumbering enemies"), draft.partyAdvantagePenalty, 0.0f, 25.0f, "%.0f%%",
-                        Trc("Additional reduction for each follower beyond the number of nearby enemies."));
-                    Slider(Trc("Minimum damage"), draft.partyMinimumDamage, 10.0f, 100.0f, "%.0f%%",
-                        Trc("Follower damage never falls below this percentage. One follower always deals full damage."));
-                    Im::EndDisabled();
+                    Slider(Trc("Follower damage"), draft.followerDamage, 0.0f, 100.0f, "%.0f%%",
+                        Trc("One multiplier for all follower weapon, spell and POTC ability damage. 100% is normal; 0% prevents damage. Also works with a single follower and with party scaling off."));
                     Im::EndTable();
                 }
             }
@@ -8594,7 +8816,7 @@ namespace FWM::Menu
 							}
 							Im::EndCombo();
 						}
-						Help(Trc("Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights."));
+						Help(Trc("Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights. Changes all installed companion mods together."));
 					}
 					Im::EndTable();
 				}
@@ -8671,6 +8893,16 @@ namespace FWM::Menu
 			if (!a_event) {
 				return false;
 			}
+            // Raw device events distinguish real mouse use from a framework's
+            // gamepad-driven mouse coordinates. Releases and stick drift do not
+            // switch the pointer back on or steal the active input device.
+            if(a_event->GetDevice()==RE::INPUT_DEVICE::kMouse){
+                if(const auto* move=a_event->AsMouseMoveEvent();move&&(move->mouseInputX||move->mouseInputY))padUsed=false;
+                if(const auto* button=a_event->AsButtonEvent();button&&button->IsPressed())padUsed=false;
+            }else if(a_event->GetDevice()==RE::INPUT_DEVICE::kGamepad){
+                if(const auto* stick=a_event->AsThumbstickEvent();stick&&std::hypot(stick->xValue,stick->yValue)>.24f)padUsed=true;
+                if(const auto* button=a_event->AsButtonEvent();button&&button->Value()>.15f)padUsed=true;
+            }
 			// Binding a key on the Controls page: the next key press is the answer.
 			if (capturing.load()) {
 				if (a_event->GetDevice() != RE::INPUT_DEVICE::kKeyboard || a_event->GetEventType() != RE::INPUT_EVENT_TYPE::kButton) {
@@ -8739,7 +8971,6 @@ namespace FWM::Menu
 					padHeld &= ~key;
 				}
 				if (open) {
-					padUsed = true;
 					if (fresh && settings.overheadGamepadKey && key == settings.overheadGamepadKey) {
 						overheadToggle = true;
 						return true;

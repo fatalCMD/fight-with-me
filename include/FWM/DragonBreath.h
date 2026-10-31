@@ -7,6 +7,10 @@
 namespace FWM::DragonBreath
 {
     inline constexpr float kRelease = 0.90f, kFade = 0.8f, kMinDistance = 140.f; // two metres
+    inline constexpr float kTurnRate = 1.2f;       // radians a second the head turns after its target, sweeping the stream
+    inline constexpr float kRetargetCone = .26f;   // a new target must be within about 75 degrees of the stream's line
+    inline constexpr float kStaggerGrace = 1.2f;   // a stagger shorter than this is ridden out; a longer one is a heavy blow
+    inline constexpr float kMostResist = 85.f;     // resistances count up to this much, as for Elemental Burst
     inline constexpr std::array<float,3> kReach{600,850,1100}, kDPS{20,30,45}, kDuration{2.4f,2.8f,3.2f};
     constexpr int Tier(int rank) { return std::clamp(rank,1,3)-1; }
     inline float Reach(int rank, int branch=0) { return kReach[Tier(rank)]*(1+0.1f*std::clamp(branch,0,3)); }
@@ -57,6 +61,22 @@ namespace FWM::DragonBreath
     {
         return std::isfinite(along)&&std::isfinite(radial)&&reach>0 && along>=0 && along<=reach*front && radial>=0 && radial<=Radius(rank,reach)*BeamProfile(along/reach)+25.f;
     }
+    // The head stands between the caster and the mouth: whoever is under it, a_along in front of the
+    // caster and a_side off its line on the level, takes the stream as well.
+    inline bool UnderHead(float along, float side, float mouth, int rank, float reach)
+    {
+        return std::isfinite(along) && std::isfinite(side) && std::isfinite(mouth) && along >= 0 && along <= mouth &&
+            std::abs(side) <= .5f * Radius(rank, reach) + 25.f;
+    }
+    // A heading turned from a_yaw toward a_toward, by at most kTurnRate over a_dt, the short way round.
+    inline float Turn(float yaw, float toward, float dt)
+    {
+        if (!std::isfinite(yaw) || !std::isfinite(toward) || !std::isfinite(dt) || dt <= 0) return yaw;
+        constexpr float pi = 3.14159265f;
+        const float delta = std::remainder(toward - yaw, 2 * pi);
+        const float step = kTurnRate * dt;
+        return yaw + std::clamp(delta, -step, step);
+    }
     struct ArcPose { float angle{}, x{}, z{}, alpha{}; };
     inline ArcPose ArcAt(float age,int index) {
         const float frame=age*22.f+index*.173f, step=std::floor(frame), blend=Ease((frame-step)*4.f);
@@ -81,6 +101,6 @@ namespace FWM::DragonBreath
     inline float Damage(float dps,float dt,float magic,float element)
     {
         if (!std::isfinite(dps)||!std::isfinite(dt)||!std::isfinite(magic)||!std::isfinite(element)) return 0;
-        return std::max(dps,0.f)*std::max(dt,0.f)*(1-std::clamp(magic,-100.f,100.f)/100)*(1-std::clamp(element,-100.f,100.f)/100);
+        return std::max(dps,0.f)*std::max(dt,0.f)*(1-std::clamp(magic,-100.f,kMostResist)/100)*(1-std::clamp(element,-100.f,kMostResist)/100);
     }
 }

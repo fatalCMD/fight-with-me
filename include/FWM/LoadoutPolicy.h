@@ -14,6 +14,7 @@ constexpr std::uint32_t WeaponBit(WeaponKind kind) { return 1u << static_cast<un
 constexpr std::uint32_t RoleWeapons(Role role) {
  using enum WeaponKind;
  switch(role) {
+ case Role::kSkald:return 0; // An engaged optional zero mask means fists only, not unrestricted.
  case Role::kFighter:return WeaponBit(OneHanded);
  case Role::kTank:return WeaponBit(OneHanded)|WeaponBit(TwoHanded)|WeaponBit(Shield);
  case Role::kBruiser:return WeaponBit(TwoHanded);

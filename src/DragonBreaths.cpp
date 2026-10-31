@@ -39,10 +39,17 @@ namespace FWM::DragonBreaths
             int rank{},element{},copy{};
             float age{},loading{},duration{},reach{},dps{},dealt{},markClock{};
             bool found{},released{},compact{};
+            // Whom the head follows, and where they were while the stream was live, for the log.
+            RE::ActorHandle target; std::string targetName;
+            std::array<float,7> seen{};
+            float underHead{},turned{},staggered{};
+            int retargets{},staggers{};
             EffectAudio::ID audio{};
             Posing::Lamp lamp;
         };
         std::vector<Live> live;
+        enum Where { kIn, kBeside, kBehind, kBeyond, kBlocked, kUnseen, kGone };
+        constexpr std::array<const char*,7> kWhere{"in it","beside it","behind the mouth","beyond its reach","behind cover","out of sight","down or gone"};
         constexpr std::array<std::array<float,3>,3> colors{{{1,.28f,.035f},{.32f,.72f,1},{.45f,.42f,1}}};
         constexpr std::array<RE::ActorValue,3> resists{RE::ActorValue::kResistFire,RE::ActorValue::kResistFrost,RE::ActorValue::kResistShock};
         RE::NiMatrix3 Facing(RE::NiPoint3 forward) {
@@ -82,6 +89,25 @@ namespace FWM::DragonBreaths
             if(v.rank==3&&v.element==1)for(int i=0;i<16;i++)v.ice[i]=Find(flow,std::format("Ice{}",i));
             if(v.rank==3&&v.element==2)for(int i=0;i<4;i++)v.ground[i]=Find(flow,std::format("Ground{}",i));
             v.found=true; return true;
+        }
+        bool Hostile(const Live& v,RE::Actor* a) {
+            return a&&Game::Usable(a)&&!Party::IsPartyActor(a)&&a->GetParentCell()==v.cell;
+        }
+        // Whom the head follows: its target while it stands, else the enemy nearest the stream's line.
+        RE::NiPointer<RE::Actor> Quarry(Live& v,RE::Actor* caster,float mouth) {
+            if(auto target=v.target.get();target&&Hostile(v,target.get())) return target;
+            if(!v.target) return {};  // aimed at a point, not at anyone
+            RE::NiPointer<RE::Actor> best; float bestCos=DragonBreath::kRetargetCone;
+            for(const auto& entry:Enemies::All()) {
+                auto enemy=entry.handle.get(); if(!Hostile(v,enemy.get())) continue;
+                auto to=enemy->GetPosition()-v.origin; to.z=0;
+                const float distance=to.Length(); if(distance<1||distance>mouth+v.reach) continue;
+                const float cos=(to.x*v.direction.x+to.y*v.direction.y)/distance;
+                bool unused=false; if(cos<=bestCos||!caster->HasLineOfSight(enemy.get(),unused)) continue;
+                best=enemy; bestCos=cos;
+            }
+            if(best) {v.target=best->GetHandle();v.targetName=Game::Name(best.get());++v.retargets;}
+            return best;
         }
         void Finish(Live& v) {
             if(auto caster=v.caster.get()) Freeze::ReleaseAnchor(caster.get());
@@ -189,6 +215,7 @@ namespace FWM::DragonBreaths
         int copy=0; for(;copy<4;copy++) if(std::ranges::none_of(live,[&](const auto& v){return v.copy==copy;})) break;
         if(copy==4) return false;
         Live v; v.caster=caster->GetHandle();v.cell=caster->GetParentCell();v.rank=std::clamp(rank,1,3);v.element=element;v.copy=copy;
+        if(target&&!point) {v.target=target->GetHandle();v.targetName=Game::Name(target);}
         if(!v.cell||!v.cell->IsAttached()) return false;
         v.compact=Settings::Get().compactEffects;
         v.duration=DragonBreath::Duration(v.rank,durationRank);v.reach=DragonBreath::Reach(v.rank,reachRank);v.dps=DragonBreath::kDPS[DragonBreath::Tier(v.rank)];
@@ -218,10 +245,32 @@ namespace FWM::DragonBreaths
         if(!std::isfinite(dt)||dt<=0) return;
         std::erase_if(live,[dt](Live& v){
             auto caster=v.caster.get();
-            if(!Settings::Get().enabled||!caster||caster->IsDead()||!caster->Is3DLoaded()||caster->GetParentCell()!=v.cell||!v.cell->IsAttached()||caster->IsInRagdollState()||caster->AsActorState()->IsBleedingOut()||caster->AsActorState()->IsStaggered()) {Finish(v);return true;}
+            const char* cut=!Settings::Get().enabled?"as abilities were switched off":!caster||!caster->Is3DLoaded()?"as the caster unloaded":
+                caster->IsDead()?"by death":caster->GetParentCell()!=v.cell||!v.cell->IsAttached()?"by leaving the cell":
+                caster->IsInRagdollState()?"by a knockdown":caster->AsActorState()->IsBleedingOut()?"by bleeding out":caster->IsInKillMove()?"by a kill move":nullptr;
+            // A light stagger is ridden out; one that lasts is a heavy blow.
+            if(!cut&&caster->AsActorState()->IsStaggered()) {
+                if(v.staggered==0) ++v.staggers;
+                v.staggered+=dt;
+                if(v.staggered>DragonBreath::kStaggerGrace) cut="by a heavy stagger";
+            } else v.staggered=0;
+            if(cut) {
+                Log::Info("[Dragon's Breath] {} is cut off {} {:.1f} s in: {:.1f} damage dealt."sv,caster?Game::Name(caster.get()):std::string("A caster"),cut,v.age,v.dealt);
+                Finish(v);return true;
+            }
             if(!v.found&&v.headFX&&v.streamFX&&!Find(v)&&v.loading<1) {v.loading+=dt;return false;}
             const float before=v.age;v.age+=dt;
             const auto pose=DragonBreath::At(v.age,v.rank,v.duration,v.compact);
+            const float mouthAhead=pose.forward+pose.muzzleY*pose.scale;
+            // The head turns after its target, sweeping the stream with it.
+            if(v.age<DragonBreath::kRelease+v.duration) if(auto quarry=Quarry(v,caster.get(),mouthAhead)) {
+                auto to=quarry->GetPosition()-v.origin; to.z=0;
+                if(to.Length()>1) {
+                    const float yaw=std::atan2(v.direction.x,v.direction.y),next=DragonBreath::Turn(yaw,std::atan2(to.x,to.y),dt);
+                    v.turned+=std::abs(next-yaw);
+                    v.direction={std::sin(next),std::cos(next),0};v.heading=Facing(v.direction);v.aim=v.heading;
+                }
+            }
             v.headAt=v.origin+v.direction*pose.forward+RE::NiPoint3{0,0,pose.height};
             v.mouth=v.headAt+v.direction*(pose.muzzleY*pose.scale)+RE::NiPoint3{0,0,pose.muzzleZ*pose.scale};
             caster->SetHeading(std::atan2(v.direction.x,v.direction.y));
@@ -246,14 +295,30 @@ namespace FWM::DragonBreaths
             else { for(auto& flame:v.flames) if(flame.fx) flame.fx->lifetime=0; v.flames.clear(); if(v.headFX) v.headFX->lifetime=0; if(v.streamFX) v.streamFX->lifetime=0; Posing::Out(v.lamp); }
             const float active=DragonBreath::ActiveTime(before,v.age,v.duration);
             v.markClock-=dt;const bool mark=v.markClock<=0;if(mark)v.markClock=.65f;
+            const auto followed=v.target.get();
+            bool counted=false;
             if(active>0) for(const auto& entry:Enemies::All()) {
                 auto enemy=entry.handle.get();
-                if(!enemy||!Game::Usable(enemy.get())||!enemy->Is3DLoaded()||Party::IsPartyActor(enemy.get())||enemy->GetParentCell()!=v.cell) continue;
+                if(!Hostile(v,enemy.get())) continue;
+                // Under the head, measured on the level from the caster; in the stream, from the mouth.
+                auto flat=enemy->GetPosition()-v.origin; flat.z=0;
+                const float ahead=flat.x*v.direction.x+flat.y*v.direction.y,side=flat.x*v.direction.y-flat.y*v.direction.x;
+                const bool under=DragonBreath::UnderHead(ahead,side,mouthAhead,v.rank,v.reach);
                 const auto relative=enemy->GetPosition()+RE::NiPoint3{0,0,70}-v.mouth;
                 const float along=relative.Dot(v.direction),radial=(relative-v.direction*along).Length();
-                const float front=DragonBreath::At(v.age,v.rank,v.duration,v.compact).front;
-                if(!DragonBreath::Contains(along,radial,v.reach,front,v.rank)||along>clear+55) continue;
-                bool unused=false; if(!caster->HasLineOfSight(enemy.get(),unused)) continue;
+                Where where=kIn;
+                if(!under) {
+                    if(along<0) where=kBehind;
+                    else if(along>v.reach*pose.front) where=kBeyond;
+                    else if(!DragonBreath::Contains(along,radial,v.reach,pose.front,v.rank)) where=kBeside;
+                    else if(along>clear+55) where=kBlocked;
+                }
+                bool unused=false; if(where==kIn&&!caster->HasLineOfSight(enemy.get(),unused)) where=kUnseen;
+                if(followed&&enemy==followed) {
+                    v.seen[where]+=active;counted=true;
+                    if(where==kIn&&under) v.underHead+=active;
+                }
+                if(where!=kIn) continue;
                 auto* values=enemy->AsActorValueOwner();
                 const float amount=DragonBreath::Damage(v.dps,active,values->GetActorValue(RE::ActorValue::kResistMagic),values->GetActorValue(resists[v.element]));
                 if(amount<=0) continue;
@@ -262,8 +327,17 @@ namespace FWM::DragonBreaths
                 if(v.element==2) values->DamageActorValue(RE::ActorValue::kMagicka,amount*.5f);
                 if(mark&&Settings::Get().abilityEffects) Effects::Struck(enemy.get(),v.element,.8f);
             }
+            if(active>0&&!v.targetName.empty()&&!counted) v.seen[kGone]+=active;
             if(v.age>=DragonBreath::kRelease+v.duration+DragonBreath::kFade) {
-                Log::Info("[Dragon's Breath] {} completes: {:.1f} total damage to enemies in the stream."sv,Game::Name(caster.get()),v.dealt);
+                std::string report;
+                if(!v.targetName.empty()) {
+                    std::string out;
+                    for(int w=kBeside;w<=kGone;++w) if(v.seen[w]>=.05f) out+=std::format("{}{:.1f} s {}",out.empty()?"":", ",v.seen[w],kWhere[w]);
+                    report=std::format(" {} in it {:.1f} of {:.1f} s{}{}.",v.retargets?std::format("Its targets (last {}) were",v.targetName):v.targetName+" was",
+                        v.seen[kIn],v.duration,v.underHead>=.05f?std::format(" ({:.1f} s under the head)",v.underHead):"",out.empty()?"":"; otherwise "+out);
+                }
+                Log::Info("[Dragon's Breath] {} completes: {:.1f} total damage to enemies in the stream.{} The head turned {:.0f} degrees{}{}."sv,Game::Name(caster.get()),v.dealt,
+                    report,v.turned*57.29578f,v.retargets?std::format(" and found {} new target(s)",v.retargets):"",v.staggers?std::format("; rode out {} stagger(s)",v.staggers):"");
                 Finish(v);return true;
             }
             return false;

@@ -1,3 +1,5 @@
+#include "FWM/SkaldPolicy.h"
+#include "FWM/SkaldMusic.h"
 #include "FWM/Paths.h"
 #include "FWM/DebugAbility.h"
 #include "FWM/Archery.h"
@@ -30,6 +32,373 @@ namespace
 	using namespace FWM::Paths;
 
 	std::size_t At(Role a_role, Perk a_perk) { return static_cast<std::size_t>(IndexOf(a_role, a_perk)); }
+
+    void SkaldProgression()
+    {
+        CHECK(SkaldLack(false,false)==Lack::kLute);
+        CHECK(SkaldLack(false,true)==Lack::kLute);
+        CHECK(SkaldLack(true,false)==Lack::kSkaldLocked);
+        CHECK(SkaldLack(true,true)==Lack::kNothing);
+        static_assert(static_cast<int>(Role::kSkald)==6); // Existing six saved role numbers stay fixed.
+        static_assert(kAbilityCount<32); // The manual-use bit mask still holds all songs.
+        Book book;
+        book.Meet(42,19); // Nine points above level ten.
+        CHECK(book.UnlockSkald(42)==Block::kNoPoints);
+        CHECK(!book.Find(42)->skaldUnlocked && book.Unspent(42)==9);
+        CHECK(book.Learn(42,Role::kSkald,0)==Block::kSkaldLocked);
+        book.Meet(42,20);
+        CHECK(book.UnlockSkald(42)==Block::kNone);
+        CHECK(book.Find(42)->skaldUnlocked && book.Unspent(42)==0);
+        CHECK(Spent(*book.Find(42),Role::kSkald)==10);
+        CHECK(book.UnlockSkald(42)==Block::kMaxed);
+        CHECK(book.Learn(42,Role::kSkald,0)==Block::kNoPoints);
+        book.Meet(42,50);
+        CHECK(book.Learn(42,Role::kSkald,1)==Block::kParent);
+        CHECK(book.Learn(42,Role::kSkald,0)==Block::kNone);
+        CHECK(book.Learn(42,Role::kSkald,1)==Block::kNone);
+        CHECK(book.Learn(42,Role::kSkald,1)==Block::kParent);
+        CHECK(book.Learn(42,Role::kSkald,3)==Block::kNone);
+        CHECK(book.Learn(42,Role::kSkald,6)==Block::kNone);
+        CHECK(book.Learn(42,Role::kSkald,9)==Block::kNone);
+        CHECK(book.Equip(42,Role::kSkald,1,Ability::kGlory)==Block::kNone);
+        CHECK(book.Find(42)->slots[6][1]==Ability::kGlory);
+        const auto bytes=Encode(book.Records());
+        const auto loaded=Decode(bytes,kRecordVersion);
+        CHECK(loaded.size()==1 && loaded[0].second==*book.Find(42));
+        Book after;after.Load(loaded,{});
+        CHECK(after.Unspent(42)==book.Unspent(42));
+        CHECK(after.SetUnlimited(42,true)==Block::kNone);
+        CHECK(after.Reset(42,Role::kSkald)==Block::kNone);
+        CHECK(!after.Find(42)->skaldUnlocked);
+        CHECK(after.SetUnlimited(42,false)==Block::kNone);
+        CHECK(after.Find(42)->skaldUnlocked && after.Unspent(42)==book.Unspent(42));
+        CHECK(after.Reset(42,Role::kSkald)==Block::kNone);
+        CHECK(!after.Find(42)->skaldUnlocked && after.Unspent(42)==40);
+        CHECK(after.Find(42)->slots[6][0]==Ability::kNone);
+        // A corrupt unlock tail must never invent a free unlock, or discard earlier valid trees.
+        auto cut=bytes;cut.pop_back();
+        auto partial=Decode(cut,kRecordVersion);
+        CHECK(partial.size()==1);
+        CHECK(!partial[0].second.skaldUnlocked && Spent(partial[0].second,Role::kSkald)==0);
+        auto insufficient=*book.Find(42);
+        CHECK(Repair(insufficient,9));
+        CHECK(!insufficient.skaldUnlocked && Spent(insufficient)==0);
+        // Actual v4 shape, with six roles and a nonzero existing investment.
+        std::vector<std::uint8_t> old;
+        const auto put=[&](std::uint32_t n,int count){for(int i=0;i<count;++i)old.push_back(static_cast<std::uint8_t>(n>>(8*i)));};
+        put(1,4);put(66,4);put(40,2);put(6,1);
+        for(int role=0;role<6;++role){
+            put(role==0?static_cast<std::uint32_t>(Ability::kDisarm):0,1);put(0,1);put(role==0?1:0,1);
+            if(role==0){put(static_cast<std::uint32_t>(Perk::kDisarm),1);put(2,1);}
+        }
+        put(0,4);
+        const auto legacy=Decode(old,4);
+        CHECK(legacy.size()==1 && legacy[0].second.peak==40);
+        CHECK(!legacy[0].second.skaldUnlocked && Rank(legacy[0].second,Role::kFighter,Ability::kDisarm)==2);
+        CHECK(Spent(legacy[0].second)==3);
+        const auto migrated=Decode(Encode(legacy),kRecordVersion);
+        CHECK(migrated==legacy);
+        // Debug unlocks are free, survive saves during debug, and disappear with debug.
+        Book guarded;guarded.Meet(91,10);
+        CHECK(guarded.SetUnlimited(91,true)==Block::kNone);
+        CHECK(guarded.UnlockSkald(91)==Block::kNone);
+        CHECK(guarded.UnlockSkald(91)==Block::kMaxed);
+        CHECK(guarded.Learn(91,Role::kSkald,0)==Block::kNone);
+        CHECK(guarded.Learn(91,Role::kFighter,0)==Block::kNone);
+        CHECK(!guarded.KeptAside()[0].second.skaldUnlocked);
+        Book repaired;repaired.Load(Decode(Encode(guarded.Records()),kRecordVersion),Decode(Encode(guarded.KeptAside()),kRecordVersion));
+        CHECK(repaired.Unlimited(91) && repaired.Find(91)->skaldUnlocked);
+        CHECK(repaired.Find(91)->ranks[6][0]==1);
+        CHECK(repaired.SetUnlimited(91,false)==Block::kNone);
+        CHECK(!repaired.Find(91)->skaldUnlocked && Spent(*repaired.Find(91),Role::kSkald)==0);
+        CHECK(repaired.Unspent(91)==0);
+        CHECK(repaired.Learn(91,Role::kSkald,0)==Block::kSkaldLocked);
+        CHECK(repaired.UnlockSkald(91)==Block::kNoPoints);
+        CHECK(repaired.SetUnlimited(91,true)==Block::kNone);
+        CHECK(!repaired.Find(91)->skaldUnlocked); // Enabling debug still needs an explicit unlock.
+        CHECK(repaired.SetUnlimited(91,false)==Block::kNone);
+        repaired.Meet(91,50);
+        CHECK(repaired.Unspent(91)==40);
+        CHECK(repaired.UnlockSkald(91)==Block::kNone && repaired.Unspent(91)==30);
+        CHECK(repaired.SetUnlimited(91,true)==Block::kNone);
+        Book paid;paid.Load(repaired.Records(),repaired.KeptAside());
+        CHECK(paid.Find(91)->skaldUnlocked);
+        CHECK(paid.Learn(91,Role::kSkald,0)==Block::kNone);
+        CHECK(paid.SetUnlimited(91,false)==Block::kNone);
+        CHECK(paid.Find(91)->skaldUnlocked && paid.Unspent(91)==30);
+        CHECK(paid.Find(91)->ranks[6][0]==0); // Only the earned unlock survives.
+    }
+    void SkaldLuteEntry()
+    {
+        using A=SkaldPolicy::LuteEntryAction;
+        SkaldPolicy::LuteEntry entry;
+        CHECK(entry.Next(0,false,false,false)==A::Sheathe);
+        CHECK(entry.Next(.2f,false,true,false)==A::Wait);
+        CHECK(entry.Next(3.f,false,true,false)==A::Wait); // slow sheathing is allowed to finish
+        CHECK(entry.Next(3.1f,true,false,false)==A::Reset); // clear a stale idle before every request
+        CHECK(entry.Next(3.15f,true,false,false)==A::Wait);
+        CHECK(entry.Next(3.25f,true,false,false)==A::Idle);
+        CHECK(entry.Next(3.8f,true,false,false)==A::Wait); // a request gets about a second to produce its prop
+        CHECK(entry.Next(4.3f,true,false,false)==A::Reset);
+        CHECK(entry.Next(4.45f,true,false,false)==A::Graph); // attempts alternate the AI idle and the graph event
+        CHECK(entry.Next(4.9f,true,false,true)==A::Wait); // never restart an animation that produced its prop
+        CHECK(entry.Next(5.f,false,false,false)==A::Sheathe); // the combat AI drew the fists meanwhile
+        CHECK(entry.Next(5.2f,true,false,false)==A::Reset);   // a redraw restarts the attempt at once
+        CHECK(entry.Next(5.35f,true,false,false)==A::Idle);
+        CHECK(entry.Next(SkaldPolicy::kLuteStartup,true,false,false)==A::Timeout);
+        // Replay the logged stall: an idle accepted mid-walk stayed current for
+        // eight seconds and repeating the request never cleared it.
+        SkaldPolicy::LuteEntry stalled;unsigned resets=0,requests=0;
+        for(float age=0;age<SkaldPolicy::kLuteStartup;age+=1.f/60.f){
+            const auto next=stalled.Next(age,true,false,false);
+            resets+=next==A::Reset;requests+=next==A::Idle||next==A::Graph;
+            CHECK(next!=A::Timeout);
+        }
+        CHECK(requests>=4 && resets>=requests && resets<=requests+1); // each attempt cleared first, none every frame
+        SkaldPolicy::LuteEntry fast;
+        CHECK(fast.Next(0,true,false,false)==A::Reset);
+        CHECK(fast.Next(.1f,true,false,false)==A::Idle);
+        for(int i=2;i<59;++i)CHECK(fast.Next(i*.1f,true,false,true)==A::Wait);
+        CHECK(fast.requests==1);
+        using P=SkaldPolicy::PropAction;
+        SkaldPolicy::PropRecovery recovery;
+        CHECK(recovery.Next(true,.1f)==P::Ready);
+        CHECK(recovery.Next(false,.1f)==P::Retry);
+        CHECK(recovery.Next(false,.5f)==P::Wait);
+        CHECK(recovery.Next(true,.1f)==P::Resume);
+        CHECK(recovery.Next(true,.1f)==P::Ready);
+        CHECK(recovery.Next(false,.1f)==P::Abort); // one repair, never an endless loop
+        SkaldPolicy::PropRecovery missing;
+        CHECK(missing.Next(false,0)==P::Retry);
+        CHECK(missing.Next(false,1.25f)==P::Abort);
+        CHECK(SkaldPolicy::NoteInterval(0)==1.f&&SkaldPolicy::NoteInterval(1)==3.f);
+        CHECK(SkaldPolicy::NoteInterval(-1)==1.f&&SkaldPolicy::NoteInterval(2)==3.f);
+        CHECK(SkaldPolicy::kNoteSlowSeconds<SkaldPolicy::NoteInterval(.5f)); // audible gaps, not a permanent root
+    }
+    void SkaldNumbers()
+    {
+        using namespace FWM::SkaldPolicy;
+        CHECK(Near(Speed(1),.1f) && Near(Speed(3),.2f));
+        CHECK(Near(Duration(Song::Fervor,3),11.6f));
+        CHECK(Near(Duration(Song::Glory,3),14.5f));
+        CHECK(Near(CriticalMultiplier(Critical(3)),2.1f));
+        CHECK(Near(CriticalMultiplier(Critical(3)*2),2.7f));
+        CHECK(Near(Advance(1,Recovery(3)),1.6f));
+        CHECK(Near(Advance(1,Recovery(3)*2),2.2f));
+        CHECK(Advance(-1,1)==0);
+        float shield=30;
+        CHECK(Absorb(20,shield)==0 && shield==10);
+        CHECK(Absorb(25,shield)==15 && shield==0);
+        CHECK(Absorb(3,shield)==3);
+        CHECK(Near(DamageShare(20),.2f));
+        CHECK(DamageShare(-10)==0 && DamageShare(200)==1);
+        CHECK(DamageShare(std::numeric_limits<float>::quiet_NaN())==1);
+        for(const auto song:{Song::Fervor,Song::Echoes,Song::Hollow,Song::Glory})CHECK(Cooldown(song)>Duration(song,3));
+    }
+    void SkaldPositions()
+    {
+        using namespace FWM::SkaldPolicy;
+        // A bard plays where it stands, like a healer: it leaves to rejoin only well
+        // past its leash and plays again well inside it, so the edge cannot flap.
+        for(const float radius:{400.f,700.f,1000.f}){
+            CHECK(!LeaveToRejoin(radius,radius)&&!LeaveToRejoin(radius+kLeashSlack,radius));
+            CHECK(LeaveToRejoin(radius+kLeashSlack+1.f,radius));
+            CHECK(BackInLeash(radius-kLeashInside,radius)&&!BackInLeash(radius,radius));
+            CHECK(!BackInLeash(radius+kLeashSlack+1.f,radius));
+        }
+        // No leash (Fight With Me's leash switched off): it never leaves to rejoin.
+        CHECK(!LeaveToRejoin(5000.f,0.f)&&BackInLeash(5000.f,0.f));
+        CHECK(kLeashSlack+kLeashInside>=150.f);
+        // Unable to get closer, it plays where it stands for a while rather than freezing.
+        CHECK(kRejoinPatience>kFollowStall&&kRejoinRest>kRejoinPatience&&kRejoinProgress>kFollowProgress);
+        CHECK(kUnstickInterval>kFollowStall);
+        // The lute's swing in from the back is hidden, not the playing itself.
+        CHECK(kLiftIn>0.f&&kLiftIn<kLayerSettle+.5f&&kOffPose>0.f&&kOffPose<30.f);
+        CHECK(kNoteReach/kNoteSpeed>2.f&&kNoteReach/kNoteSpeed<kNoteLifetime);
+        // A held lute sits within arm's reach of the chest; one across the room is a stray.
+        CHECK(!Astray(0.f)&&!Astray(80.f)&&!Astray(kLuteReach)&&Astray(kLuteReach+1.f)&&Astray(600.f));
+        CHECK(kLuteReach>kOffPose*4.f);
+        // A left-over still settling from the exit is not mistaken for one an idle plays again.
+        CHECK(!StrayMoving(0.f,40.f)&&!StrayMoving(kStraySettle-.01f,40.f));
+        CHECK(!StrayMoving(kStraySettle,kStrayMoved)&&StrayMoving(kStraySettle,kStrayMoved+.5f)&&StrayMoving(10.f,5.f));
+        CHECK(kStrayStop>=kStraySettle);
+        // A strummed lute barely moves between frames; a swing in from the back does.
+        const float frame=1.f/40.f;
+        CHECK(!Swinging(1.f,frame)&&!Swinging(kSettledSpeed*frame,frame)&&Swinging(kSettledSpeed*frame+.5f,frame));
+        CHECK(!Swinging(50.f,0.f)&&!Swinging(10.f,.2f)&&Swinging(40.f,.2f));
+        CHECK(kOverlayRetry>.5f&&kOverlayRetry<3.f);
+        // The spectral lute fades in once the hands have it, and a finished song's
+        // lute waits only a moment for the walk to take it.
+        CHECK(Appear(-1.f)==0.f&&Appear(0.f)==0.f&&Appear(kLuteAppear)==1.f&&Appear(100.f)==1.f);
+        CHECK(Appear(kLuteAppear*.5f)>.4f&&Appear(kLuteAppear*.5f)<.6f);
+        CHECK(kSpareFor>.1f&&kSpareFor<kOverlayRetry);
+    }
+    void SkaldWaves()
+    {
+        using namespace FWM::SkaldPolicy;
+        WaveStacks normal;
+        for(unsigned hit=1;hit<=20;++hit){
+            const auto before=normal.count;
+            const bool next=normal.NextIsStack();
+            CHECK(normal.Hit(false)==next);
+            CHECK(normal.hits==std::min(hit,10u));
+            CHECK(normal.count==(hit<3?0u:hit<5?1u:hit<10?2u:3u));
+            CHECK(Near(normal.factor,hit<3?0.f:hit<5?1.f:hit<10?1.5f:2.f));
+            CHECK(normal.count>=before);
+        }
+        // Every combination retains earlier rolls; a later normal stack never weakens a proc.
+        for(unsigned mask=0;mask<8;++mask){
+            WaveStacks stacks;float previous=0.f;
+            for(unsigned hit=1;hit<=10;++hit){
+                const bool doubled=stacks.NextIsStack()&&(mask&(1u<<stacks.count));
+                stacks.Hit(doubled);CHECK(stacks.factor>=previous);previous=stacks.factor;
+            }
+            CHECK(stacks.empowered==mask);
+            CHECK(Near(stacks.factor,2.f+((mask&1)?1.f:0.f)+((mask&2)?.5f:0.f)+((mask&4)?.5f:0.f)));
+        }
+        CHECK(Near(WaveRadius(.5f),400.f));
+        CHECK(WaveRadius(-1)==0 && WaveRadius(100)==kReach);
+        CHECK(WaveAlpha(0)==0 && WaveAlpha(kWaveSeconds)==0 && WaveAlpha(.5f)>0);
+        WaveContact standing;
+        CHECK(!CrossWave(standing,0,100,400,true));
+        CHECK(CrossWave(standing,100,700,400,true)); // A low-frame-rate sweep still hits.
+        CHECK(!CrossWave(standing,700,1000,400,true)); // Never twice from this wave.
+        WaveContact moving;
+        CHECK(!CrossWave(moving,0,100,500,true));
+        CHECK(CrossWave(moving,100,200,20,true)); // Running inward crosses the front.
+        WaveContact late,blocked,far;
+        CHECK(!CrossWave(late,600,800,100,true)); // Entering behind an old wave earns nothing.
+        CHECK(!CrossWave(blocked,0,500,400,false));
+        CHECK(!CrossWave(blocked,500,800,400,true)); // Opening line of sight after it passed is too late.
+        CHECK(!CrossWave(far,0,1000,1001,true));
+        WaveContact self;CHECK(CrossWave(self,0,1,0,true));
+        WaveContact otherWave;CHECK(CrossWave(otherWave,0,500,400,true));
+        WaveStacks otherListener;CHECK(otherListener.hits==0 && otherListener.factor==0);
+        CHECK(Near(Advance(1,Recovery(3)*4),3.4f));
+        CHECK(HitAlpha(-1)==0 && HitAlpha(0)==0 && HitAlpha(kHitSeconds)==0);
+        CHECK(std::abs(TimidDamage(10.f)-.1f)<.0001f && TimidDamage(10000.f)==1.f && TimidDamage(0.f)==0.f);
+        CHECK(HitAlpha(.06f)>HitAlpha(.25f) && HitAlpha(.25f)>HitAlpha(.45f));
+        CHECK(BardCount(1)<BardCount(2)&&BardCount(3)==2*BardCount(2));
+        CHECK(HitCount(1)<HitCount(2)&&HitCount(3)==2*HitCount(2));
+        CHECK(RankSpread(3)>RankSpread(2)&&RankGlow(3)>RankGlow(2));
+        CHECK(RecipientAura(3,.2f)>2*RecipientAura(2,.2f)&&RecipientAura(3,kHitParticleSeconds)==0);
+        for(int rank=1;rank<=3;++rank)for(std::size_t i=0;i<kWaveMotes;++i)for(float age=-.1f;age<1.6f;age+=.04f){
+            const auto mote=WaveMote(0,i,age,rank);
+            CHECK(std::isfinite(mote.x)&&std::isfinite(mote.y)&&std::isfinite(mote.z));
+            CHECK(mote.alpha>=0&&mote.alpha<=1&&mote.scale>0&&mote.scale<3);
+            CHECK(std::hypot(mote.x,mote.y)<=kReach&&mote.z>=0&&mote.z<100);
+            if(age<0||age>=kWaveSeconds||i>=WaveCount(rank))CHECK(mote.alpha==0);
+        }
+        for(int song=0;song<4;++song)for(std::size_t i=0;i<kBardMotes;++i)for(float time=-.1f;time<12.f;time+=.13f){
+            const auto mote=BardMote(song,i,time,.1f);
+            CHECK(std::isfinite(mote.x)&&std::isfinite(mote.y)&&std::isfinite(mote.z));
+            CHECK(mote.alpha>=0&&mote.alpha<=1&&mote.scale>0&&mote.scale<2);
+            CHECK(std::hypot(mote.x,mote.y)<80&&mote.z>=0&&mote.z<=162);
+            if(time<0)CHECK(mote.alpha==0);
+        }
+        for(int song=0;song<4;++song)for(std::size_t i=0;i<kHitMotes;++i)for(float age=-.1f;age<2.f;age+=.03f){
+            const auto mote=HitMote(song,i,age);
+            CHECK(std::isfinite(mote.x)&&std::isfinite(mote.y)&&std::isfinite(mote.z));
+            CHECK(mote.alpha>=0&&mote.alpha<=1&&mote.scale>0&&mote.scale<2);
+            CHECK(std::hypot(mote.x,mote.y)<54&&mote.z>=0&&mote.z<=162);
+            if(age<0||age>=kHitParticleSeconds)CHECK(mote.alpha==0);
+        }
+        CHECK(WaveCount(3)==4*WaveCount(1));
+        CHECK(LuteVolume(true)<.25f*LuteVolume(false)&&Near(LuteVolume(false),.7f));
+        // Single Note discords build in steps to a cap and never invert.
+        for(unsigned stacks=0;stacks<=8;++stacks){
+            const unsigned capped=std::min(stacks,kDiscordStacks);
+            CHECK(Near(DiscordWeaken(stacks),.04f*capped)&&Near(DiscordOffBeat(stacks),.05f*capped));
+            CHECK(Near(DiscordExposed(stacks),.04f*capped)&&Near(DiscordDrain(stacks),.04f*capped));
+            CHECK(DiscordWeaken(stacks)<1.f&&DiscordOffBeat(stacks)<1.f);
+        }
+        CHECK(DiscordWeaken(0)==0.f&&DiscordExposed(1)>0.f);
+        // Every kind comes up, and only the ones that can matter.
+        std::array<unsigned,kDiscords> seen{};
+        for(int i=0;i<600;++i)++seen[static_cast<std::size_t>(PickDiscord(static_cast<float>(i)/600.f,true,true))];
+        for(const auto count:seen)CHECK(count>=95&&count<=105);
+        for(int i=0;i<=100;++i){
+            const float roll=static_cast<float>(i)/100.f;
+            CHECK(PickDiscord(roll,false,true)!=Discord::Muddled);
+            CHECK(PickDiscord(roll,true,false)!=Discord::Jarred);
+            const auto either=PickDiscord(roll,false,false);
+            CHECK(either!=Discord::Muddled&&either!=Discord::Jarred);
+        }
+        CHECK(PickDiscord(-1.f,true,true)==Discord::Weakened&&PickDiscord(5.f,true,true)==Discord::Jarred);
+        CHECK(kJarredCooldown>NoteInterval(1.f)); // a stagger every note would be crowd control, not a debuff
+        // Crescendos: rare, never twice on one enemy inside its immunity, every kind reachable.
+        CHECK(CrescendoLands(0.f,kCrescendoImmunity)&&!CrescendoLands(kCrescendoChance,kCrescendoImmunity));
+        CHECK(!CrescendoLands(0.f,kCrescendoImmunity-.01f)); // a volley cannot chain-lock its target
+        CHECK(kCrescendoChance>0.f&&kCrescendoChance<=.1f&&kCrescendoImmunity>CrescendoSeconds(Crescendo::Lullaby)*2.f);
+        std::array<unsigned,kCrescendos> held{};
+        for(int i=0;i<400;++i)++held[static_cast<std::size_t>(PickCrescendo(static_cast<float>(i)/400.f,true))];
+        for(const auto count:held)CHECK(count==100);
+        for(int i=0;i<=100;++i)CHECK(PickCrescendo(static_cast<float>(i)/100.f,false)!=Crescendo::Silenced);
+        for(std::size_t i=0;i<kCrescendos;++i){const float hold=CrescendoSeconds(static_cast<Crescendo>(i));CHECK(hold>=3.f&&hold<=6.f);}
+        // A crescendo's icon lasts its whole hold; a discord's fades within a second.
+        CHECK(MarkAlpha(2.f,3.f)>.99f&&MarkAlpha(2.75f,3.f)>0.f&&MarkAlpha(2.75f,3.f)<.99f&&MarkAlpha(3.f,3.f)==0.f);
+        CHECK(MarkAlpha(2.f)==0.f&&kMajorMarkScale>1.f);
+        // Overhead icons fade in quickly, hold, then fade out before they pile up.
+        CHECK(MarkAlpha(-.1f)==0.f&&MarkAlpha(0.f)==0.f&&MarkAlpha(kMarkSeconds)==0.f);
+        CHECK(MarkAlpha(.12f)>.99f&&MarkAlpha(.4f)>.99f&&MarkAlpha(.9f)>0.f&&MarkAlpha(.9f)<.99f);
+        CHECK(kMarkSeconds<NoteInterval(0.f)+.2f);
+        // The recorded playing arms loop without a jump where each pass wraps.
+        for(const float length:{2.4f,3.2f}){
+            const float body=length-kLayerSeam;
+            for(float elapsed=0.f;elapsed<12.f;elapsed+=.01f){
+                const auto at=LoopAt(elapsed,length);
+                CHECK(at.time>=kLayerSeam-.0001f&&at.time<length+.0001f);
+                CHECK(at.blend>=0.f&&at.blend<=1.f);
+                if(at.blend>0.f)CHECK(at.other>=0.f&&at.other<=kLayerSeam+.0001f);
+            }
+            // Just before a wrap the pose is almost entirely the start of the next pass.
+            const auto wrap=LoopAt(body-.001f,length);
+            CHECK(wrap.blend>.99f&&std::abs(wrap.other-kLayerSeam)<.01f);
+            CHECK(LoopAt(0.f,length).blend==0.f&&Near(LoopAt(0.f,length).time,kLayerSeam));
+        }
+        CHECK(kLayerMinimum>2.f*kLayerSeam&&kLayerRecord>kLayerMinimum);
+        CHECK(LayerWeight(0.f,-1.f)==0.f&&LayerWeight(kLayerFade,-1.f)==1.f&&LayerWeight(10.f,-1.f)==1.f);
+        CHECK(LayerWeight(10.f,0.f)==1.f&&LayerWeight(10.f,kLayerFade)==0.f&&LayerWeight(10.f,kLayerFade*.5f)>0.f);
+        CHECK(LayerWeight(kLayerFade*.5f,-1.f)>0.f&&LayerWeight(kLayerFade*.5f,-1.f)<1.f);
+        // The Single Note's lute reads white, not the cyan of Echoes.
+        CHECK(std::ranges::all_of(kNoteLute,[](float channel){return channel>=.85f&&channel<=1.f;}));
+        // Hits walk a pentatonic phrase within one octave.
+        for(unsigned i=0;i<20;++i){const float pitch=NotePitch(i);CHECK(pitch>=1.f&&pitch<=2.f);}
+        CHECK(NotePitch(0)==1.f&&Near(NotePitch(4),2.f)&&NotePitch(1)!=NotePitch(0));
+        for(float time=0;time<20.f;time+=.07f){
+            const auto veil=LuteVeil(time,.5f);
+            CHECK(std::abs(veil.x)<=1.3f&&std::abs(veil.y)<=.8f&&std::abs(veil.z)<=.6f);
+            CHECK(veil.scale>1.f&&veil.scale<1.05f&&veil.glow>.5f&&std::isfinite(veil.scroll));
+        }
+        MusicDuck duck;
+        float music=.6f;
+        music=duck.Update(music,true,.2f);CHECK(std::abs(music-.168f)<.0001f);
+        // Multiple performers share one active flag; finishing one cannot restore the mix.
+        music=duck.Update(music,true,5.f);CHECK(std::abs(music-.168f)<.0001f);
+        music=duck.Update(music,false,.325f);CHECK(music>.168f&&music<.6f);
+        music=duck.Update(music,false,.325f);CHECK(std::abs(music-.6f)<.0001f&&!duck.owned);
+        music=duck.Update(.6f,true,.2f);
+        music=duck.Update(.4f,true,.1f); // User or another mod adjusts the music during the song.
+        CHECK(std::abs(music-.112f)<.0001f);
+        CHECK(std::abs(duck.Restore(music)-.4f)<.0001f&&!duck.owned);
+        music=duck.Update(.5f,true,.2f);CHECK(duck.Restore(.7f)==.7f);
+        for(const auto& track:FWM::SkaldMusic::tracks){
+            CHECK(track.waves.size()==10 && track.beats.size()==20);
+            for(std::size_t n=0;n<track.waves.size();++n){
+                CHECK(track.waves[n]==track.beats[n*2]);
+                if(n)CHECK(std::abs(track.waves[n]-track.waves[n-1]-120.f/track.bpm)<.0011f);
+            }
+            CHECK(track.waves.back()<track.seconds);
+            WaveStacks atEdge;
+            for(const auto wave:track.waves){
+                WaveContact contact;
+                CHECK(CrossWave(contact,0,WaveRadius(track.seconds+kWaveSeconds-wave),kReach,true));
+                atEdge.Hit(false);
+            }
+            CHECK(atEdge.count==3 && Near(atEdge.factor,2.f));
+        }
+    }
+
 
 	void SteadyBreathRules()
 	{
@@ -381,25 +750,25 @@ namespace
     void AbilityLevels()
     {
         for(std::size_t r=0;r<kRoles;++r){
-            const auto role=static_cast<Role>(r);const auto& path=PathOf(role);
+            const auto role=static_cast<Role>(r);const auto& path=PathOf(role);const int entry=role==Role::kSkald?10:0;
             for(const auto index:{std::size_t{6},std::size_t{9}}){
-                auto record=Fresh();const int required=index==6?35:50;
+                auto record=Fresh();record.skaldUnlocked=role==Role::kSkald;const int required=index==6?35:50;
                 record.peak=static_cast<std::uint16_t>(required-1);
                 CHECK(CanLearn(record,role,index,kUnlimited)==Block::kLevel);
                 record.peak=static_cast<std::uint16_t>(required);
                 if(path[index].capstone)continue;
                 CHECK(CanLearn(record,role,index,0)==Block::kNoPoints);
-                CHECK(Learn(record,role,index,1)==Block::kNone);
-                CHECK(Spent(record)==1); // No earlier ability purchases.
+                CHECK(Learn(record,role,index,1+entry)==Block::kNone);
+                CHECK(Spent(record)==1+entry); // No earlier ability purchases.
                 CHECK(Repair(record,99)==false);
-                CHECK(Learn(record,role,index+1,2)==Block::kNone);
+                CHECK(Learn(record,role,index+1,2+entry)==Block::kNone);
                 CHECK(CanForget(record,role,index)==Block::kHolds); // Its own branch still depends on it.
                 auto loaded=Decode(Encode(std::vector<Entry>{{42,record}}),kRecordVersion);
                 CHECK(loaded.size()==1 && !Repair(loaded[0].second,99));
                 CHECK(Rank(loaded[0].second,role,path[index].ability)==1);
                 record.peak=static_cast<std::uint16_t>(required-1);
                 CHECK(Repair(record,99));
-                CHECK(Spent(record)==0); // Refund only newly level-locked purchases and branches.
+                CHECK(Spent(record)==entry); // Refund only newly level-locked purchases and branches.
             }
         }
         CHECK(Why(Block::kNoPoints)=="Not enough perk points");
@@ -418,22 +787,22 @@ namespace
 	void TraitLevels()
 	{
 		for (std::size_t r = 0; r < kRoles; ++r) {
-			const auto role = static_cast<Role>(r);
+			const auto role = static_cast<Role>(r);const int entry=role==Role::kSkald?10:0;
 			for (std::size_t i = 12; i < kNodes; ++i) {
-				auto record = Fresh(); record.peak = 1;
-				CHECK(Learn(record, role, i, 1) == Block::kNone);
+				auto record = Fresh(); record.peak = 1;record.skaldUnlocked=role==Role::kSkald;
+				CHECK(Learn(record, role, i, 1+entry) == Block::kNone);
 				record.peak = 24;
 				CHECK(CanLearn(record, role, i, kUnlimited) == Block::kLevel);
 				record.peak = 25;
-				CHECK(Learn(record, role, i, 2) == Block::kNone);
+				CHECK(Learn(record, role, i, 2+entry) == Block::kNone);
 				record.peak = 49;
 				CHECK(CanLearn(record, role, i, kUnlimited) == Block::kLevel);
 				record.peak = 50;
-				CHECK(Learn(record, role, i, 3) == Block::kNone);
-				CHECK(Spent(record) == 3);
+				CHECK(Learn(record, role, i, 3+entry) == Block::kNone);
+				CHECK(Spent(record) == 3+entry);
 				record.peak = 24;
 				CHECK(Repair(record, kUnlimited));
-				CHECK(record.ranks[r][i] == 1 && Spent(record) == 1);
+				CHECK(record.ranks[r][i] == 1 && Spent(record) == 1+entry);
 			}
 		}
 	}
@@ -570,9 +939,9 @@ namespace
 		CHECK(out[0].first == 0x0001A2B3u && out[0].second == a);
 		CHECK(out[1].first == 0xFE000801u && out[1].second == b);
 		// Short or unknown data loads what it can and never reads past the end. The last four bytes
-		// are the count of bonus entries (none here).
+		// are the unlock count, preceded by the bonus count (both empty here).
 		auto cut = bytes;
-		cut.resize(cut.size() - 4 - 3);
+		cut.resize(cut.size() - 8 - 3);
 		CHECK(Decode(cut, kRecordVersion).size() == 1);
 		auto trailer = bytes;
 		trailer.resize(trailer.size() - 2);
@@ -838,7 +1207,7 @@ namespace
         CHECK(CanLearn(record,mage,10,99)==Block::kBadNode);
 		// A save from before Magnus: the Atronach's ranks are dropped and the points come back.
 		std::vector<std::uint8_t> old{ 1, 0, 0, 0, 0x34, 0x12, 0, 0, 30, 0, 6 };
-		for (std::size_t r = 0; r < kRoles; ++r) {
+		for (std::size_t r = 0; r < 6; ++r) {
 			const bool m = r == static_cast<std::size_t>(mage);
 			old.insert(old.end(), { static_cast<std::uint8_t>(m ? Ability::kAtronachRetired : Ability::kNone), 0, static_cast<std::uint8_t>(m ? 1 : 0) });
 			if (m) {
@@ -863,7 +1232,8 @@ namespace
 			CHECK(std::abs((at[0]-10)*std::cos(heading)-(at[1]-20)*std::sin(heading))<0.001f);
 		}
 		Book book;
-		book.Meet(71, 1);
+		book.Meet(71, 20);
+        CHECK(book.UnlockSkald(71)==Block::kNone); // entry cost is paid before Debug Mode
 		const auto original=*book.Find(71);
 		CHECK(book.SetUnlimited(71,true)==Block::kNone);
 		// Every node can be tested at a low level, including branches before their parents.
@@ -931,6 +1301,11 @@ int main()
     CHECK(FWM::Paths::Value(FWM::Paths::Perk::kPinningShot, 1) == 2);
     CHECK(FWM::Paths::Value(FWM::Paths::Perk::kPinningShot, 3) == 4);
     CHECK(FWM::Paths::Value(FWM::Paths::Perk::kPinningHeavy, 3) == 3);
+    SkaldProgression();
+    SkaldLuteEntry();
+    SkaldNumbers();
+    SkaldPositions();
+    SkaldWaves();
     MageRework();
 	TraitLevels();
 	AbilityLevels();

@@ -10,6 +10,7 @@
 #include "FWM/Party.h"
 #include "FWM/Save.h"
 #include "FWM/Settings.h"
+#include "FWM/Skald.h"
 #include "FWM/Text.h"
 #include "FWM/TimeBend.h"
 #include "FWM/WalkWithMe.h"
@@ -104,6 +105,9 @@ namespace
 		case SKSE::MessagingInterface::kPreLoadGame:
 			FWM::Battle::Reset();
 			break;
+		case SKSE::MessagingInterface::kSaveGame:
+			FWM::Skald::BeforeSave();  // nothing lent for a fight goes into the save
+			break;
 		default:
 			break;
 		}
@@ -141,6 +145,12 @@ extern "C" FIGHTWITHME_API bool FightWithMe_SetTheme(int theme)
 extern "C" FIGHTWITHME_API std::uint32_t FightWithMe_GetMark(std::uint32_t a_actorFormID)
 {
 	return FWM::Battle::MarkOf(a_actorFormID).native_handle();
+}
+
+extern "C" FIGHTWITHME_API std::int32_t FightWithMe_GetPosition(std::uint32_t a_actorFormID)
+{
+    const auto* orders=FWM::Party::FindOrders(a_actorFormID);
+    return orders?static_cast<std::int32_t>(orders->position):-1;
 }
 
 EXTERN_C [[maybe_unused]] __declspec(dllexport) bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadInterface* a_skse)

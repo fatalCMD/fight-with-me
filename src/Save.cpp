@@ -1,3 +1,4 @@
+#include "FWM/Skald.h"
 #include "FWM/Save.h"
 #include "FWM/Loadouts.h"
 
@@ -76,6 +77,8 @@ namespace FWM::Save
 				Log::Info("[Save] Orders for {} companion(s) saved{}."sv, orders.size(), hands.empty() ? ""s : std::format(", spells chosen for {}", hands.size()));
 				return;
 			}
+            const auto performers=Skald::SavedPerformers();
+            if(!performers.empty()&&!Write(a_intfc,'SKLD',1,Pairs(performers)))Log::Error("[Save] Could not write the Skald performance cleanup record.");
 			// Armor and quickened magicka added go where 0.2.0 already looks for them, so a save
 			// taken back to it still sheds them; everything else (lowered values, other values) in
 			// the newer record.
@@ -215,6 +218,7 @@ namespace FWM::Save
 				Abilities::LoadRejuvenated(ReadPairs(a_intfc, a_bytes));
 				return true;
 			}
+            if(a_type=='SKLD'){if(a_version==1&&Host::Abilities())Skald::LoadPerformers(ReadPairs(a_intfc,a_bytes));return true;}
 			if (a_type == kBoosts) {
 				std::vector<Abilities::SavedBoost> saved;
 				for (std::size_t at = 0; at + 12 <= a_bytes.size(); at += 12) {

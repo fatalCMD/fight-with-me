@@ -23,6 +23,7 @@ namespace FWM::Overrides
 		bool           noBound{ false };  // may not conjure a bound weapon (a ranged role)
 		bool           resting{ false };  // a caster out of magicka: no weapon, not even fists, so they stand off
 		bool           noMelee{ false };  // a mage or healer: spells, not a blade, a bow or fists (a conjured weapon is still theirs)
+		std::vector<std::uint32_t> onlyFrom; // optional native choices this target may replace
 		// Written by the hook: what the combat AI chose before we looked.
 		mutable std::atomic<std::uint32_t> engine{ 0 };
 
@@ -31,6 +32,7 @@ namespace FWM::Overrides
 			controller(a_controller), attacker(a_attacker), target(a_target), noBound(a_noBound), resting(a_resting), noMelee(a_noMelee) {}
 		Entry(const Entry& a_other) :
 			controller(a_other.controller), attacker(a_other.attacker), target(a_other.target), noBound(a_other.noBound), resting(a_other.resting), noMelee(a_other.noMelee),
+			onlyFrom(a_other.onlyFrom),
 			engine(a_other.engine.load(std::memory_order_relaxed)) {}
 		Entry& operator=(const Entry& a_other)
 		{
@@ -40,6 +42,7 @@ namespace FWM::Overrides
 			noBound = a_other.noBound;
 			resting = a_other.resting;
 			noMelee = a_other.noMelee;
+			onlyFrom = a_other.onlyFrom;
 			engine.store(a_other.engine.load(std::memory_order_relaxed), std::memory_order_relaxed);
 			return *this;
 		}
@@ -93,6 +96,10 @@ namespace FWM::Overrides
         bool staffLocked{false};
         bool roleRestricted{false};
         bool caster{false};
+        bool unarmedOnly{false};
+        bool fistsReady{false};
+        bool stance{false};  // a Skald that may hold its stance spell
+        bool anyWeapon{false};  // role weapons off: a caster may carry any weapon too
         bool recovering{false};
         std::array<bool,2> explicitSpells{};
 

@@ -45,6 +45,7 @@ namespace FWM::PathsLink
 				out.bonus[r] = a_in.bonus[r];
 			}
 			out.peak = a_in.peak;
+            out.skaldUnlocked=(a_in.flags & FightWithMePathsAPI::kSkaldUnlockedFlag)!=0;
 			return out;
 		}
 
@@ -274,12 +275,18 @@ namespace FWM::PathsLink
 
 	Outcome Learn(RE::FormID a_id, Role a_role, std::size_t a_node)
 	{
-		if (static_cast<std::size_t>(a_role)>=Paths::kRoles || a_node>=Paths::kNodes) return {false, std::string(Tr("Invalid perk."))};
+		if (static_cast<std::size_t>(a_role)>=Paths::kRoles || (a_node>=Paths::kNodes && !(a_role==Role::kSkald && a_node==Paths::kNodes))) return {false, std::string(Tr("Invalid perk."))};
         if (!Unlimited(a_id) && a_role == Role::kBruiser && Party::LackFor(a_id, a_role) != Lack::kNothing) return {false, std::string(Tr("Requires a two-handed melee weapon in inventory."))};
         if (!Party::CanHaveRole(a_id)) return { false, std::string(Tr("Roles are unavailable for creature companions and summons.")) };
 		if (!api) {
 			return { false, std::string(Tr("Path of the Companions is not installed.")) };
 		}
+        if(a_role==Role::kSkald && a_node==Paths::kNodes){
+            const bool debug=Unlimited(a_id);
+            const auto result=api->Learn(a_id,static_cast<std::uint32_t>(a_role),static_cast<std::uint32_t>(a_node));
+            copies.erase(a_id);
+            return Answered(result,std::string(debug ? Tr("Skald unlocked for Debug Mode. Disabling debug restores the previous unlock.") : Tr("Skald unlocked. 10 skill points invested.")));
+        }
 		const auto& node = Paths::PathOf(a_role)[std::min(a_node, Paths::kNodes - 1)];
 		const auto  result = api->Learn(a_id, static_cast<std::uint32_t>(a_role), static_cast<std::uint32_t>(a_node));
 		auto*       copy = Read(a_id);

@@ -1,4 +1,5 @@
 #include "FWM/Freeze.h"
+#include "FWM/Skald.h"
 #include "FWM/Windsteps.h"
 #include "FWM/FreezeClock.h"
 #include "FWM/FreezeMotion.h"
@@ -123,6 +124,7 @@ namespace FWM::Freeze
 					animationSteps.fetch_add(1, std::memory_order_relaxed);
 				}
 				original(a_this, a_delta);
+				Skald::AfterAnimation(a_this);  // a walking bard's playing arms go over the new pose
 			}
 
 			static inline REL::Relocation<decltype(Thunk)> original;

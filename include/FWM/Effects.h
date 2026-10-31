@@ -9,6 +9,10 @@
 
 namespace FWM::Effects
 {
+    RE::BSTempEffectParticle* SkaldModel(RE::Actor* actor,int song,bool lute,float seconds);
+    RE::BSTempEffectParticle* SkaldHit(RE::Actor* actor,std::size_t song,float seconds);
+    enum class SkaldCloud { Aura, Wave, Hit };
+    RE::BSTempEffectParticle* SkaldParticles(RE::Actor* actor,std::size_t song,SkaldCloud kind,int rank,const RE::NiPoint3& at);
 	enum class Look : std::uint8_t
 	{
 		kHeld,             // an enemy a taunt holds: red, for as long as it holds (red is only ever an enemy)

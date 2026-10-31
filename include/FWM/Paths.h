@@ -49,18 +49,39 @@ namespace FWM::Paths
 		kAtronachRetired,  // on no path any more; kept so the values after it keep their meaning
 		kMagnus,
 		kDragonBreath,
+		kFervor,
+		kEchoes,
+		kHollow,
+		kGlory,
 		kCount
 	};
 
 	inline constexpr std::size_t kAbilityCount = static_cast<std::size_t>(Ability::kCount);
 
-	// Icons that are pictures rather than font glyphs (Interface/FightWithMe/*.svg, from
-	// game-icons.net by Lorc), under codepoints of their own in the private use area the font
+	// Icons that are pictures rather than font glyphs (Interface/FightWithMe/*.svg),
+	// under codepoints of their own in the private use area the font
 	// leaves alone. The menu draws the picture, or the glyph after "or" if it cannot be loaded.
 	inline constexpr std::uint32_t kGlyphWolfHead = 0xEF00;   // or 0xF6D3, a dog
 	inline constexpr std::uint32_t kGlyphBarbedSun = 0xEF01;  // or 0xF4BE, a hand holding a heart
 	inline constexpr std::uint32_t kGlyphSteelHelm = 0xEF02;
 	inline constexpr std::uint32_t kGlyphBastion = 0xEF03;
+	// Skald-only Game-icons.net artwork by Lorc and Delapouite (CC BY 3.0).
+	inline constexpr std::uint32_t kGlyphFervor = 0xEF10;
+	inline constexpr std::uint32_t kGlyphSpellweave = 0xEF11;
+	inline constexpr std::uint32_t kGlyphRelentlessRhythm = 0xEF12;
+	inline constexpr std::uint32_t kGlyphEchoes = 0xEF13;
+	inline constexpr std::uint32_t kGlyphEncore = 0xEF14;
+	inline constexpr std::uint32_t kGlyphInspiredCasting = 0xEF15;
+	inline constexpr std::uint32_t kGlyphHollow = 0xEF16;
+	inline constexpr std::uint32_t kGlyphLeadfootVerse = 0xEF17;
+	inline constexpr std::uint32_t kGlyphBrokenConcentration = 0xEF18;
+	inline constexpr std::uint32_t kGlyphGlory = 0xEF19;
+	inline constexpr std::uint32_t kGlyphKeenChorus = 0xEF1A;
+	inline constexpr std::uint32_t kGlyphVictoriousVerse = 0xEF1B;
+	inline constexpr std::uint32_t kGlyphSpectralAegis = 0xEF1C;
+	inline constexpr std::uint32_t kGlyphLingeringVerse = 0xEF1D;
+	inline constexpr std::uint32_t kGlyphOldTongue = 0xEF1E;
+	constexpr bool IsSkaldGlyph(std::uint32_t glyph) { return glyph >= kGlyphFervor && glyph <= kGlyphOldTongue; }
 	inline constexpr std::size_t kSlots = 2;
 
 	struct AbilityInfo
@@ -97,6 +118,10 @@ namespace FWM::Paths
 		{ "", 0, "" },
 		{ "Magnus", 0xF185, "When magicka is low against a nearby boss or several enemies." },
 		{ "Dragon's Breath", 0xF6D5, "Against a durable enemy or nearby cluster in front, with room for the stream." },
+		{ "Ljodh of Fervor", kGlyphFervor, "When nearby allies can benefit and there is room to perform." },
+		{ "Ljodh of Echoes", kGlyphEchoes, "When nearby allies can benefit and there is room to perform." },
+		{ "Ljodh of the Hollow", kGlyphHollow, "When nearby allies can benefit and there is room to perform." },
+		{ "Ljodh of Glory", kGlyphGlory, "When nearby allies can benefit and there is room to perform." },
 	} };
 
 	[[nodiscard]] constexpr const AbilityInfo& Info(Ability a_ability) { return abilities[static_cast<std::size_t>(a_ability)]; }
@@ -205,6 +230,21 @@ namespace FWM::Paths
 		kDragonBreath,
 		kBreathReach,
 		kBreathLingering,
+		kFervor,
+		kEchoes,
+		kHollow,
+		kGlory,
+		kSpellweave,
+		kRelentlessRhythm,
+		kEncore,
+		kInspiredCasting,
+		kLeadfootVerse,
+		kBrokenConcentration,
+		kKeenChorus,
+		kVictoriousVerse,
+		kSpectralAegis,
+		kLingeringVerse,
+		kOldTongue,
 		kCount
 	};
 
@@ -387,6 +427,23 @@ namespace FWM::Paths
 			detail::T(Perk::kSpellShield, 1, "Spell Shield", 0xF0D0),
 			detail::T(Perk::kUnravel, 2, "Unravel", 0xF7E4),
 		} },
+		{ {
+			detail::A(Perk::kFervor, Ability::kFervor, 0, "Ljodh of Fervor", kGlyphFervor),
+			detail::B(Perk::kSpellweave, Ability::kFervor, 0, 3, "Spellweave", kGlyphSpellweave),
+			detail::B(Perk::kRelentlessRhythm, Ability::kFervor, 0, 3, "Relentless Rhythm", kGlyphRelentlessRhythm),
+			detail::A(Perk::kEchoes, Ability::kEchoes, 0, "Ljodh of Echoes", kGlyphEchoes),
+			detail::B(Perk::kEncore, Ability::kEchoes, 0, 3, "Encore", kGlyphEncore),
+			detail::B(Perk::kInspiredCasting, Ability::kEchoes, 0, 3, "Inspired Casting", kGlyphInspiredCasting),
+			detail::A(Perk::kHollow, Ability::kHollow, 1, "Ljodh of the Hollow", kGlyphHollow),
+			detail::B(Perk::kLeadfootVerse, Ability::kHollow, 1, 3, "Leadfoot Verse", kGlyphLeadfootVerse),
+			detail::B(Perk::kBrokenConcentration, Ability::kHollow, 1, 3, "Broken Concentration", kGlyphBrokenConcentration),
+			detail::A(Perk::kGlory, Ability::kGlory, 2, "Ljodh of Glory", kGlyphGlory),
+			detail::B(Perk::kKeenChorus, Ability::kGlory, 2, 3, "Keen Chorus", kGlyphKeenChorus),
+			detail::B(Perk::kVictoriousVerse, Ability::kGlory, 2, 3, "Victorious Verse", kGlyphVictoriousVerse),
+			detail::T(Perk::kSpectralAegis, 0, "Spectral Aegis", kGlyphSpectralAegis),
+			detail::T(Perk::kLingeringVerse, 1, "Lingering Verse", kGlyphLingeringVerse),
+			detail::T(Perk::kOldTongue, 2, "Gift of the Old Tongue", kGlyphOldTongue),
+		} },
 	} };
 
 	[[nodiscard]] constexpr const Path& PathOf(Role a_role) { return paths[static_cast<std::size_t>(a_role)]; }
@@ -404,6 +461,7 @@ namespace FWM::Paths
 		{ "Path of the Hammer", "Break them: roars that stagger, fury, shattered guards and a shaking earth." },
 		{ "Path of the Arrow", "Death from range: volleys, explosive arrows, windsteps and a rain of arrows." },
 		{ "Path of the Storm", "Spell pressure: surging magicka, wards, elemental bursts, and at its height, Magnus." },
+		{ "Path of the Skald", "A spectral lute and four Ljodhs: quicken allies, restore abilities, weaken enemies and inspire critical strikes." },
 	} };
 
 	[[nodiscard]] constexpr const PathInfo& Info(Role a_role) { return pathInfo[static_cast<std::size_t>(a_role)]; }
@@ -461,6 +519,7 @@ namespace FWM::Paths
 
 	struct Record
 	{
+        bool skaldUnlocked{false};
 		std::array<std::array<std::uint8_t, kNodes>, kRoles> ranks{};  // purchased ranks
 		std::array<std::array<Ability, kSlots>, kRoles>      slots{};  // what each path carries into a fight
 		std::uint16_t                                        peak{ 0 };  // highest level seen
@@ -516,7 +575,9 @@ namespace FWM::Paths
 		kNoUnlimited, // unlimited points are switched off
 		kNotMastered, // points go into the bonus only once the whole path is mastered
 		kBonusFull,   // the bonus is at its highest: another point would change nothing
-		kLevel       // the next innate trait rank needs level 25 or 50
+		kLevel,      // the next innate trait rank needs level 25 or 50
+        kSkaldLocked,
+        kNoLute
 	};
 
 	[[nodiscard]] std::string_view Why(Block a_block);
@@ -565,7 +626,7 @@ namespace FWM::Paths
 	// gains, loses or reorders nodes still loads; run Repair after. Version 2 adds the bonus
 	// points after every entry, where version 1 readers never look.
 	// Version 3 resets older investments once, retaining earned levels and refunding all points.
-	inline constexpr std::uint32_t kRecordVersion = 4;
+	inline constexpr std::uint32_t kRecordVersion = 5;
 	using Entry = std::pair<std::uint32_t, Record>;
 	[[nodiscard]] std::vector<std::uint8_t> Encode(std::span<const Entry> a_entries);
 	[[nodiscard]] std::vector<Entry>        Decode(std::span<const std::uint8_t> a_bytes, std::uint32_t a_version);
@@ -596,6 +657,7 @@ namespace FWM::Paths
 		[[nodiscard]] int  Unspent(std::uint32_t a_id) const;
 		[[nodiscard]] bool Unlimited(std::uint32_t a_id) const;
 
+        Block UnlockSkald(std::uint32_t a_id);
 		Block Learn(std::uint32_t a_id, Role a_role, std::size_t a_node);
 		Block Forget(std::uint32_t a_id, Role a_role, std::size_t a_node);
 		Block Reset(std::uint32_t a_id, Role a_role);

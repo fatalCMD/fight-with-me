@@ -33,6 +33,8 @@ Archer	Archer
 Keeps range and picks off casters and other archers first.	Keeps range and picks off casters and other archers first.
 Mage	Mage
 Keeps range and finishes off whoever is weakest.	Keeps range and finishes off whoever is weakest.
+Skald	Skald
+A support bard requiring a lute and a 10-point unlock. Holds back, plays slowing notes between interruptible Ljodhs, and draws less enemy attention when other party targets are available.	A support bard requiring a lute and a 10-point unlock. Holds back, plays slowing notes between interruptible Ljodhs, and draws less enemy attention when other party targets are available.
 Their choice	Their choice
 Whoever the combat AI would pick anyway.	Whoever the combat AI would pick anyway.
 Casters	Casters
@@ -72,6 +74,8 @@ Everyone goes all out for your target.	Everyone goes all out for your target.
 To me!	To me!
 Everyone comes back to your side and fights there.	Everyone comes back to your side and fights there.
 Everyone stays back and meets only what comes for the party.	Everyone stays back and meets only what comes for the party.
+Requires a lute in this companion inventory.	Requires a lute in this companion inventory.
+Unlock the Skald tree with 10 earned skill points first.	Unlock the Skald tree with 10 earned skill points first.
 Requires a two-handed melee weapon in inventory.	Requires a two-handed melee weapon in inventory.
 Carries no melee weapon.	Carries no melee weapon.
 Carries no bow or crossbow.	Carries no bow or crossbow.
@@ -144,6 +148,7 @@ Rejuvenate: {:g}% magicka per second inside the circle for {:.0f} s.	Rejuvenate:
 Enable Debug Mode first.	Enable Debug Mode first.
 Invalid ability rank.	Invalid ability rank.
 Companion is busy.	Companion is busy.
+Assign the Skald role before playing a Ljodh.	Assign the Skald role before playing a Ljodh.
 {} is not one of the abilities they carry.	{} is not one of the abilities they carry.
 The fight is over.	The fight is over.
 {} enemy	{} enemy
@@ -181,8 +186,8 @@ Earthshaker: {} in reach.	Earthshaker: {} in reach.
 Not winded yet.	Not winded yet.
 {} gets a second wind.	{} gets a second wind.
 Second wind: {:.0f}% health back.	Second wind: {:.0f}% health back.
+Needs a weapon or shield to block with, and no spell or staff in the off hand.	Needs a weapon or shield to block with, and no spell or staff in the off hand.
 Cannot raise a guard right now.	Cannot raise a guard right now.
-{} sets themselves to riposte.	{} sets themselves to riposte.
 Riposte: guard the next melee blow, {:.0f} s.	Riposte: guard the next melee blow, {:.0f} s.
 They must stand before {}, not beside or behind it.	They must stand before {}, not beside or behind it.
 Nobody they stand before.	Nobody they stand before.
@@ -222,9 +227,11 @@ Magnus: magicka without end for {:.0f} s.	Magnus: magicka without end for {:.0f}
 Last Stand	Last Stand
 {}'s guardian spirit pulls you back: +{:.0f}% health.	{}'s guardian spirit pulls you back: +{:.0f}% health.
 Guardian Spirit	Guardian Spirit
+Preparing the Ljodh.	Preparing the Ljodh.
 Nothing to do right now.	Nothing to do right now.
 Only in a fight.	Only in a fight.
 Abilities are switched off (Battle plan settings).	Abilities are switched off (Battle plan settings).
+Already performing a Ljodh.	Already performing a Ljodh.
 Berserk	Berserk
 More damage and a power attack at every chance	More damage and a power attack at every chance
 Riposte	Riposte
@@ -256,6 +263,9 @@ Roles are unavailable for creature companions and summons.	Roles are unavailable
 Roles are set out of a fight.	Roles are set out of a fight.
 Only mages and healers have spells chosen for them.	Only mages and healers have spells chosen for them.
 Spells can only be changed out of a fight.	Spells can only be changed out of a fight.
+Path of the Companions is not installed.	Path of the Companions is not installed.
+Skald unlocked for Debug Mode. Disabling debug restores the previous unlock.	Skald unlocked for Debug Mode. Disabling debug restores the previous unlock.
+Skald unlocked. 10 skill points invested.	Skald unlocked. 10 skill points invested.
 Paths are changed out of a fight.	Paths are changed out of a fight.
 Turn Debug Mode off after the fight.	Turn Debug Mode off after the fight.
 Auto battle on: whoever sees an enemy starts the fight.	Auto battle on: whoever sees an enemy starts the fight.
@@ -267,14 +277,14 @@ Block	Block
 Heavy Armor	Heavy Armor
 Light Armor	Light Armor
 Sneak	Sneak
+Out of magicka	Out of magicka
+Falling back until it comes back	Falling back until it comes back
 Braced	Braced
 +{:.0f} armor from their taunt	+{:.0f} armor from their taunt
 Rejuvenated	Rejuvenated
 Restoring {:g}% magicka per second, up to {:.0f}, inside the circle	Restoring {:g}% magicka per second, up to {:.0f}, inside the circle
 Azura's Blessing	Azura's Blessing
 {:.0f}% chance to ignore hostile damage	{:.0f}% chance to ignore hostile damage
-Out of magicka	Out of magicka
-Falling back until it comes back	Falling back until it comes back
 
 # src/Leveling.cpp
 {} reaches level {}.	{} reaches level {}.
@@ -305,7 +315,7 @@ A Healer holds any spell, with attack spells up to {}	A Healer holds any spell, 
  (Apprentice from level 10)	 (Apprentice from level 10)
  (Adept from level 25)	 (Adept from level 25)
 {}, level {}\n{}, {} for {}.	{}, level {}\n{}, {} for {}.
-\nHealth {:.0f} / {:.0f}  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  Magicka {:.0f} / {:.0f}  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  Stamina {:.0f} / {:.0f}	\nHealth {:.0f} / {:.0f}  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  Magicka {:.0f} / {:.0f}  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  Stamina {:.0f} / {:.0f}
+\nHealth {:.0f} / {:.0f}  |  Magicka {:.0f} / {:.0f}  |  Stamina {:.0f} / {:.0f}	\nHealth {:.0f} / {:.0f}  |  Magicka {:.0f} / {:.0f}  |  Stamina {:.0f} / {:.0f}
 \nHeld by {}'s taunt.	\nHeld by {}'s taunt.
 \nClick to send someone after them.	\nClick to send someone after them.
 {}:{:02} left	{}:{:02} left
@@ -331,13 +341,20 @@ No signature abilities detected.	No signature abilities detected.
 +{} more	+{} more
 Locked	Locked
 Locked for now: their mod keeps it back until something is done, a quest of theirs, say.	Locked for now: their mod keeps it back until something is done, a quest of theirs, say.
+Give this companion a lute to unlock Skald.	Give this companion a lute to unlock Skald.
+Free while Debug Mode is enabled. Turning it off restores the previous unlock and perks.	Free while Debug Mode is enabled. Turning it off restores the previous unlock and perks.
+Unlock Skald for 10 skill points. {} available. The lute stays in their inventory.	Unlock Skald for 10 skill points. {} available. The lute stays in their inventory.
+UNLOCK · FREE	UNLOCK · FREE
+UNLOCK · 10	UNLOCK · 10
 A role for {}	A role for {}
+LOCKED · Lute ready	LOCKED · Lute ready
+LOCKED · Lute required	LOCKED · Lute required
 Their role	Their role
 Not on offer	Not on offer
 Level up	Level up
-  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  down	  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  down
-  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  no arrows	  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  no arrows
-  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  out of magicka, falling back	  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  out of magicka, falling back
+  |  down	  |  down
+  |  no arrows	  |  no arrows
+  |  out of magicka, falling back	  |  out of magicka, falling back
 ROLE	ROLE
 Formations	Formations
 FOCUS	FOCUS
@@ -388,8 +405,8 @@ x{}	x{}
 Automatic choice\nClears this pool and lets them choose from options allowed for their role.	Automatic choice\nClears this pool and lets them choose from options allowed for their role.
 {}\nPairs with a one-handed weapon.\nClick to add or remove.	{}\nPairs with a one-handed weapon.\nClick to add or remove.
 {}\n{:.0f} base damage, {} in inventory.\nClick to add or remove.	{}\n{:.0f} base damage, {} in inventory.\nClick to add or remove.
-{}\n{} {}  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  {:.0f} magicka{}{}	{}\n{} {}  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  {:.0f} magicka{}{}
-  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  takes both hands	  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·  takes both hands
+{}\n{} {}  |  {:.0f} magicka{}{}	{}\n{} {}  |  {:.0f} magicka{}{}
+  |  takes both hands	  |  takes both hands
 \nOne of yours: choosing it teaches them, and they keep it.	\nOne of yours: choosing it teaches them, and they keep it.
 Nothing else for this hand.	Nothing else for this hand.
 {} selected	{} selected
@@ -452,6 +469,12 @@ CARRY HERE	CARRY HERE
 AGAIN: ALL {} BACK	AGAIN: ALL {} BACK
 START OVER	START OVER
 {}  /  LEVEL {}	{}  /  LEVEL {}
+THE SKALD IS SEALED	THE SKALD IS SEALED
+Four Ljodhs. One voice to carry the company.	Four Ljodhs. One voice to carry the company.
+Lute in inventory · Ready	Lute in inventory · Ready
+Requires a lute in this companion's inventory	Requires a lute in this companion's inventory
+Temporary unlock · Relocks when Debug Mode ends	Temporary unlock · Relocks when Debug Mode ends
+10 skill points to unlock · {} available	10 skill points to unlock · {} available
 LEVEL {}	LEVEL {}
 Requires level 50	Requires level 50
 Every other perk unlocked	Every other perk unlocked
@@ -500,8 +523,8 @@ The whole fight from above: blue rings for the party, red for enemies, white for
 The camera on the companion you are commanding.	The camera on the companion you are commanding.
 switches	switches
 AUTO BATTLE	AUTO BATTLE
-Auto battle: {}\nOn: a companion who sees an enemy starts the fight. Those on Hold back wait, and nobody starts one while you sneak.\nOff: they wait until an enemy attacks, or you do.{}	Auto battle: {}\nOn: a companion who sees an enemy starts the fight. Those on Hold back wait, and nobody starts one while you sneak.\nOff: they wait until an enemy attacks, or you do.{}
-\nEither way, weapons come out when an enemy is in view.	\nEither way, weapons come out when an enemy is in view.
+Auto battle: {}\nOn: a companion who sees an enemy starts the fight{}. Those on Hold back wait, and nobody starts one while you sneak.\nOff: they wait until an enemy attacks, or you do, and keep their weapons away until then.	Auto battle: {}\nOn: a companion who sees an enemy starts the fight{}. Those on Hold back wait, and nobody starts one while you sneak.\nOff: they wait until an enemy attacks, or you do, and keep their weapons away until then.
+, and weapons come out at the sight of one	, and weapons come out at the sight of one
 Everyone sent	Everyone sent
 {} sent	{} sent
 {} engages	{} engages
@@ -532,10 +555,11 @@ Next	Next
 Back / Next	Back / Next
 Close guide	Close guide
 Left / Right	Left / Right
+Unlock	Unlock
+Path	Path
 Learn	Learn
 Carry	Carry
 Give back	Give back
-Path	Path
 View	View
 Guide	Guide
 Click	Click
@@ -566,6 +590,8 @@ Focus	Focus
 Position	Position
 Auto	Auto
 Lv {}	Lv {}
+Unlock Skald · Free	Unlock Skald · Free
+Unlock Skald · 10 points	Unlock Skald · 10 points
 Taunt without being told.	Taunt without being told.
 Heal without being told.	Heal without being told.
 Only tanks and healers have an ability of their own.	Only tanks and healers have an ability of their own.
@@ -586,11 +612,13 @@ Role strength	Role strength
 How far a role reshapes a companion's own way of fighting. 0% changes only whom they fight; 100% replaces their style with the role's.	How far a role reshapes a companion's own way of fighting. 0% changes only whom they fight; 100% replaces their style with the role's.
 Guess roles for new companions	Guess roles for new companions
 The first time a companion joins: a shield makes a Tank, a two-hander a Bruiser, a bow an Archer, a staff or spells a Mage or Healer. An NFF tank or healer role is kept. Off: everyone starts as a Fighter.	The first time a companion joins: a shield makes a Tank, a two-hander a Bruiser, a bow an Archer, a staff or spells a Mage or Healer. An NFF tank or healer role is kept. Off: everyone starts as a Fighter.
+Role weapons	Role weapons
+Each role keeps to its own weapons: a Bruiser to a two-hander, a Mage or Healer to a staff beside its spells, and with Path of the Companions every role to its path's weapons. Off: any role may use any weapon or shield the companion carries, and nothing is greyed out in their pools. The Skald keeps its lute.	Each role keeps to its own weapons: a Bruiser to a two-hander, a Mage or Healer to a staff beside its spells, and with Path of the Companions every role to its path's weapons. Off: any role may use any weapon or shield the companion carries, and nothing is greyed out in their pools. The Skald keeps its lute.
 Before a fight	Before a fight
-Weapons out when an enemy is in view	Weapons out when an enemy is in view
-Out of a fight, an enemy that a companion or you can see brings their weapons out. They put them away a few seconds after the last one is out of view, unless yours are out.	Out of a fight, an enemy that a companion or you can see brings their weapons out. They put them away a few seconds after the last one is out of view, unless yours are out.
 Auto battle	Auto battle
-A companion who sees an enemy starts the fight instead of waiting to be attacked. Companions on Hold back wait, and nobody starts one while you sneak. Also a switch at the top right of the battle plan.	A companion who sees an enemy starts the fight instead of waiting to be attacked. Companions on Hold back wait, and nobody starts one while you sneak. Also a switch at the top right of the battle plan.
+A companion who sees an enemy starts the fight instead of waiting to be attacked. Companions on Hold back wait, and nobody starts one while you sneak. Also a switch at the top right of the battle plan. Off: they wait for a fight with their weapons away.	A companion who sees an enemy starts the fight instead of waiting to be attacked. Companions on Hold back wait, and nobody starts one while you sneak. Also a switch at the top right of the battle plan. Off: they wait for a fight with their weapons away.
+Weapons out when an enemy is in view	Weapons out when an enemy is in view
+With auto battle on, an enemy that a companion or you can see brings their weapons out, unless you are sneaking. They put them away a few seconds after the last one is out of view, unless yours are out.	With auto battle on, an enemy that a companion or you can see brings their weapons out, unless you are sneaking. They put them away a few seconds after the last one is out of view, unless yours are out.
 Sight range	Sight range
 How far away an enemy can be and still count as in view. 2500 is about a long bowshot.	How far away an enemy can be and still count as in view. 2500 is about a long bowshot.
 When the fight is over	When the fight is over
@@ -598,7 +626,7 @@ Stand down when no enemy is left	Stand down when no enemy is left
 With weapons out and nobody left to fight, companions leave combat and fall back into Walk With Me's formation instead of searching.	With weapons out and nobody left to fight, companions leave combat and fall back into Walk With Me's formation instead of searching.
 After	After
 How long the fight must have nobody in it.	How long the fight must have nobody in it.
-Role strength, role guessing, what happens before a fight and standing down back to their defaults. Companions' orders are not touched.	Role strength, role guessing, what happens before a fight and standing down back to their defaults. Companions' orders are not touched.
+Role strength, role guessing, role weapons, what happens before a fight and standing down back to their defaults. Companions' orders are not touched.	Role strength, role guessing, role weapons, what happens before a fight and standing down back to their defaults. Companions' orders are not touched.
 TARGETING	TARGETING
 Choosing a target	Choosing a target
 Nearer counts up to	Nearer counts up to
@@ -660,7 +688,7 @@ Cut above heads	Cut above heads
 How far above the tallest head the cut goes. Raise it to keep more of the walls; lower it if a low ceiling still shows.	How far above the tallest head the cut goes. Raise it to keep more of the walls; lower it if a low ceiling still shows.
 Interface	Interface
 Theme	Theme
-Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights. All use the same windows and controls. Applies to the battle plan, Paths, notices and these settings.	Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights. All use the same windows and controls. Applies to the battle plan, Paths, notices and these settings.
+Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights. All use the same windows and controls. Applies to Walk With Me, the battle plan, Paths, notices and these settings.	Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights. All use the same windows and controls. Applies to Walk With Me, the battle plan, Paths, notices and these settings.
 Menu scale	Menu scale
 Size of the battle plan on top of the screen-height scaling.	Size of the battle plan on top of the screen-height scaling.
 Notices	Notices
@@ -735,12 +763,8 @@ Test any ability rank and learn perks freely. Turning Debug Mode off restores ea
 Party balance	Party balance
 Scale follower damage	Scale follower damage
 Reduce follower weapon, spell and ability damage as the fighting party grows. Outnumbering enemies adds a further reduction. Player damage is unchanged.	Reduce follower weapon, spell and ability damage as the fighting party grows. Outnumbering enemies adds a further reduction. Player damage is unchanged.
-Per extra follower	Per extra follower
-Damage reduction for each fighting follower after the first.	Damage reduction for each fighting follower after the first.
-Outnumbering enemies	Outnumbering enemies
-Additional reduction for each follower beyond the number of nearby enemies.	Additional reduction for each follower beyond the number of nearby enemies.
-Minimum damage	Minimum damage
-Follower damage never falls below this percentage. One follower always deals full damage.	Follower damage never falls below this percentage. One follower always deals full damage.
+Follower damage	Follower damage
+One multiplier for all follower weapon, spell and POTC ability damage. 100% is normal; 0% prevents damage. Also works with a single follower and with party scaling off.	One multiplier for all follower weapon, spell and POTC ability damage. 100% is normal; 0% prevents damage. Also works with a single follower and with party scaling off.
 Leveling	Leveling
 Companions level up by fighting	Companions level up by fighting
 When a fight is over, each companion who was in it earns XP for every enemy the party brought down, whoever struck last. Each level costs more than the last, and each brings health, magicka or stamina and skill by their role. Off: everyone goes back to the level their own mod gave them.	When a fight is over, each companion who was in it earns XP for every enemy the party brought down, whoever struck last. Each level costs more than the last, and each brings health, magicka or stamina and skill by their role. Off: everyone goes back to the level their own mod gave them.
@@ -758,7 +782,7 @@ Panel	Panel
 Open the panel	Open the panel
 Select it, then press a key, holding Shift, Ctrl or Alt with it for a combination. Esc cancels; Delete clears.	Select it, then press a key, holding Shift, Ctrl or Alt with it for a combination. Esc cancels; Delete clears.
 Hold LB and press the chosen button.	Hold LB and press the chosen button.
-Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights.	Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights.
+Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights. Changes all installed companion mods together.	Vanilla: charcoal and silver. Oxblood: the original red. Nordic: engraved stone, beveled metal and inset highlights. Changes all installed companion mods together.
 Ability effects	Ability effects
 What the abilities look like in the world: spirit beasts, circles, bursts and weapon flames. Off keeps what they do and drops how they look.	What the abilities look like in the world: spirit beasts, circles, bursts and weapon flames. Off keeps what they do and drops how they look.
 Compact summons	Compact summons
@@ -786,7 +810,6 @@ A companion	A companion
 {} has {} to spend in their skill tree.	{} has {} to spend in their skill tree.
 {} companions have perk points to spend in their skill trees.	{} companions have perk points to spend in their skill trees.
 Invalid perk.	Invalid perk.
-Path of the Companions is not installed.	Path of the Companions is not installed.
 {} learns {}.	{} learns {}.
 {}: {} rank {}.	{}: {} rank {}.
 {} gives back a rank of {}.	{} gives back a rank of {}.
@@ -801,6 +824,9 @@ Debug Mode disabled for {}.	Debug Mode disabled for {}.
 {} point	{} point
 {} points	{} points
 
+# src/Ripostes.cpp
+{} sets themselves to riposte.	{} sets themselves to riposte.
+
 # src/Rules.cpp
 attack speed	attack speed
 damage taken	damage taken
@@ -812,6 +838,24 @@ magicka cost	magicka cost
  and 	 and 
 {} takes on {}.	{} takes on {}.
 {} take on {}.	{} take on {}.
+
+# src/Skald.cpp
+You gain stack {} of 3.	You gain stack {} of 3.
+{}'s crescendo: {} is {} for {:.0f} s.	{}'s crescendo: {} is {} for {:.0f} s.
+{} plays {}.	{} plays {}.
+Walking back to you	Walking back to you
+Out of reach of the party; plays again once back.	Out of reach of the party; plays again once back.
+Single Note	Single Note
+A targeted lute pulse slows movement by 30% for 1 second and adds a discord.	A targeted lute pulse slows movement by 30% for 1 second and adds a discord.
+Playing a spectral lute; combat resumes after the final chord.	Playing a spectral lute; combat resumes after the final chord.
+{} of 3 waves toward the first stack.	{} of 3 waves toward the first stack.
+Spectral Aegis	Spectral Aegis
+{:.0f} damage absorption remaining.	{:.0f} damage absorption remaining.
++{:.0f}% attack speed; {:.0f}% shorter spell wind-up.	+{:.0f}% attack speed; {:.0f}% shorter spell wind-up.
+{:.0f}% faster non-Ljodh ability cooldown recovery.	{:.0f}% faster non-Ljodh ability cooldown recovery.
+{:.0f}% less outgoing damage.	{:.0f}% less outgoing damage.
+{:.0f}% critical chance; {:.2f}x critical damage.	{:.0f}% critical chance; {:.2f}x critical damage.
+ {} / 3 stacks; {} empowered.	 {} / 3 stacks; {} empowered.
 
 # src/Specials.cpp
 Weak Will is already active, or they cannot fight.	Weak Will is already active, or they cannot fight.
